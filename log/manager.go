@@ -37,7 +37,8 @@ type Config struct {
 // ChannelConfig is the configuration of one channel.
 type ChannelConfig struct {
 	// Driver selects the implementation: "single", "daily", "monthly", "stack",
-	// "stderr", "errorlog", "null", "custom", or a name registered with Extend.
+	// "stdout", "stderr", "errorlog", "null", "custom", or a name registered with
+	// Extend.
 	Driver string
 
 	// Name is the channel name stamped on every line. Empty falls back to
@@ -71,8 +72,9 @@ type ChannelConfig struct {
 	// Config.Env.
 	Format string
 
-	// Writer is where the stderr and errorlog drivers write. Empty means the
-	// process error output.
+	// Writer is where the stdout, stderr and errorlog drivers write. Empty means
+	// the process standard output for stdout and the error output for the other
+	// two.
 	Writer io.Writer
 
 	// Via is the factory the custom driver calls to build the logger.
@@ -198,6 +200,8 @@ func (m *LogManager) resolveLocked(name string, config *ChannelConfig) (*slog.Lo
 		return m.createStackDriverLocked(*config)
 	case "stderr", "errorlog":
 		return m.createErrorlogDriverLocked(*config)
+	case "stdout":
+		return m.createStdoutDriverLocked(*config)
 	case "null":
 		return m.createNullDriverLocked(*config)
 	case "custom":
@@ -294,6 +298,17 @@ func (m *LogManager) createErrorlogDriverLocked(config ChannelConfig) (*slog.Log
 	destination := config.Writer
 	if destination == nil {
 		destination = os.Stderr
+	}
+	return m.buildLoggerLocked(config, destination)
+}
+
+// createStdoutDriverLocked builds the stdout driver: the process standard
+// output, which is where New writes and where a container's collector reads.
+// ChannelConfig.Writer replaces it, as it does for stderr.
+func (m *LogManager) createStdoutDriverLocked(config ChannelConfig) (*slog.Logger, error) {
+	destination := config.Writer
+	if destination == nil {
+		destination = os.Stdout
 	}
 	return m.buildLoggerLocked(config, destination)
 }
@@ -680,4 +695,21 @@ func (w *rotatingWriter) prune() {
 	for _, old := range matches[:len(matches)-w.keep] {
 		_ = os.Remove(old)
 	}
+}
+
+// FromConfig returns the root logger the configuration describes: the default
+// channel of a LogManager over config, as the *slog.Logger that Middleware
+// installs and For reads back.
+//
+// It is the configured counterpart of New. New is the logger a process has
+// before any configuration has been read; FromConfig is the one it has after,
+// so the channels in Config are the channels the request lines go to rather
+// than a description nothing builds.
+//
+// A failure returns the emergency logger beside the error, as Channel does, so
+// a process with a broken logging configuration still logs -- to the error
+// output, saying why.
+func FromConfig(config Config, dispatcher Dispatcher) (*slog.Logger, error) {
+	channel, err := NewLogManager(config, dispatcher).Channel("")
+	return channel.GetLogger(), err
 }

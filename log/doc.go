@@ -16,6 +16,11 @@
 // tenant is noise, and the only way to guarantee both is to force the context
 // through.
 //
+// FromConfig builds the same root logger out of a Config once one has been
+// read: the default channel of a LogManager, so the channels the configuration
+// names are the ones the request lines reach. New is for the moment before the
+// configuration exists.
+//
 // ParseLevel reads the eight level names and New renders all eight back under
 // those names. Capture is the same logger writing into memory, which is what a
 // test asserts against.
@@ -48,8 +53,8 @@
 // log/context.ContextLogProcessor is. A formatter is the ChannelConfig.Format
 // field, which selects between the two handlers slog ships.
 //
-// The eight drivers a channel can name are single, daily, monthly, stack,
-// stderr, errorlog, null and custom.
+// The nine drivers a channel can name are single, daily, monthly, stack,
+// stdout, stderr, errorlog, null and custom.
 //
 // # Context
 //
