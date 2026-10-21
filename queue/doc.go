@@ -4,6 +4,10 @@
 // The surface is Push, PushOn, Later, Bulk, Pop, Size and Clear, and the job
 // itself is [github.com/arandu-io/hesape/queue/jobs].
 //
+// [Dispatch] and [HandlerFor] are the two ends of the common case with the
+// payload typed: Dispatch builds the job and pushes it under the Grant, and
+// HandlerFor decodes the payload into the same type before the handler runs.
+//
 // The contract lives in the collection and so do the drivers that need nothing
 // installed, for the same reason as database.Repository: Push takes an
 // auth.Grant, and the tenant comes from it. Moving that into an optional
