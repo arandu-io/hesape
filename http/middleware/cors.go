@@ -1,6 +1,9 @@
 package middleware
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // CorsConfig is the CORS policy a project configures.
 //
@@ -39,6 +42,14 @@ type CorsConfig struct {
 	// This is the field that turns a permissive origin list into a way for any
 	// site to read an authenticated response. Valid refuses the combination.
 	AllowCredentials bool
+
+	// Skip picks out the requests the middleware hands on with no CORS header,
+	// whatever their origin. Nil skips none.
+	//
+	// It is part of the policy rather than a callback registered on the
+	// package, so two middlewares built from two policies skip what each was
+	// told and nothing else.
+	Skip func(*http.Request) bool
 }
 
 // Valid reports whether the configuration is safe to serve, and says what is

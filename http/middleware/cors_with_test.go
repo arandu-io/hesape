@@ -73,3 +73,36 @@ func TestHandleCorsWithExposesTheHeadersItNames(t *testing.T) {
 		t.Fatalf("an origin outside the list got CORS headers: %v", w.Header())
 	}
 }
+
+// TestCorsConfigSkipIsThePolicysOwn: the requests a policy skips get no CORS
+// header, and a second middleware built from another policy is not touched by
+// it -- which is what the package-level SkipWhen could not say.
+func TestCorsConfigSkipIsThePolicysOwn(t *testing.T) {
+	skipping, err := middleware.HandleCorsWith(middleware.CorsConfig{
+		AllowedOrigins: []string{"https://app.example"},
+		Skip:           func(r *http.Request) bool { return r.URL.Path == "/health" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := middleware.HandleCorsWith(middleware.CorsConfig{AllowedOrigins: []string{"https://app.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(mw func(http.Handler) http.Handler, path string) http.Header {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("Origin", "https://app.example")
+		w := httptest.NewRecorder()
+		mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(w, r)
+		return w.Header()
+	}
+	if h := serve(skipping, "/health"); h.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("a skipped request got CORS headers: %v", h)
+	}
+	if h := serve(skipping, "/api"); h.Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("a request the policy does not skip lost its CORS headers: %v", h)
+	}
+	if h := serve(plain, "/health"); h.Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("another policy's Skip reached this middleware: %v", h)
+	}
+}

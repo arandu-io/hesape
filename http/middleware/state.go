@@ -38,6 +38,10 @@ var globalState = struct {
 // It takes the list directly rather than a callback that would defer
 // reading configuration until later: there is no container here to boot
 // before such a callback would run.
+//
+// Deprecated: it changes every [TrustHosts] in the process from wherever it
+// is called. Pass the hosts, and whether subdomains match, to TrustHosts
+// itself, which already takes both.
 func At(hosts []string, subdomains bool) {
 	globalState.Lock()
 	globalState.alwaysTrustHosts = hosts
@@ -51,6 +55,9 @@ func At(hosts []string, subdomains bool) {
 // It is empty until [At] is called. There is no configuration repository
 // behind this package, so a caller with hosts of its own passes them to
 // [TrustHosts] directly.
+//
+// Deprecated: it reads what the deprecated [At] set. The hosts a TrustHosts
+// trusts are the ones it was built with.
 func Hosts() []string {
 	globalState.RLock()
 	defer globalState.RUnlock()
@@ -64,6 +71,9 @@ func Hosts() []string {
 
 // TrustsSubdomains reports whether [At] asked for subdomains of the trusted
 // hosts to be trusted too.
+//
+// Deprecated: it reads what the deprecated [At] set. Whether a TrustHosts
+// matches subdomains is the argument it was built with.
 func TrustsSubdomains() bool {
 	globalState.RLock()
 	defer globalState.RUnlock()
@@ -74,6 +84,9 @@ func TrustsSubdomains() bool {
 //
 // Each call appends; nothing removes one. [FlushState] is how a test undoes
 // it.
+//
+// Deprecated: it changes every CORS middleware in the process from wherever it
+// is called. Set [CorsConfig.Skip] on the policy handed to [HandleCorsWith].
 func SkipWhen(callback func(*http.Request) bool) {
 	globalState.Lock()
 	globalState.skipCallbacks = append(globalState.skipCallbacks, callback)
@@ -99,6 +112,9 @@ func shouldSkipCors(r *http.Request) bool {
 // It is one function rather than three because the state they configure
 // lives in one Go package; a test resetting between cases calls this once
 // instead of clearing each independently.
+//
+// Deprecated: it resets what the deprecated [At] and [SkipWhen] set, and a
+// middleware built with its settings has nothing to reset.
 func FlushState() {
 	globalState.Lock()
 	globalState.alwaysTrustHosts = nil

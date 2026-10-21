@@ -116,8 +116,9 @@ func CheckResponseForModifications(etag string, lastModified string) func(http.H
 // trusted host patterns. A request with a non-matching host is rejected
 // with a 400 Bad Request.
 //
-// Hosts named through [At] are trusted as well, and [At] can turn subdomain
-// matching on for them.
+// Hosts named through the deprecated [At] are trusted as well, and it can
+// turn subdomain matching on for them; the hosts and subdomains arguments are
+// the way to say both.
 func TrustHosts(hosts []string, subdomains bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +192,7 @@ func cors(c CorsConfig) func(http.Handler) http.Handler {
 	maxAge := int(c.MaxAge / time.Second)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if shouldSkipCors(r) {
+			if (c.Skip != nil && c.Skip(r)) || shouldSkipCors(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
