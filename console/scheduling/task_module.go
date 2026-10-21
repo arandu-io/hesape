@@ -45,6 +45,10 @@ func (*TaskModule) Name() string { return "scheduler" }
 
 // Routes registers nothing. A scheduled task is not reachable over HTTP, and
 // making it reachable would be a way to trigger billing by URL.
+//
+// Deprecated: the module has no routes, and implements nothing for them once
+// foundation.Module stops requiring Routes; a module with routes implements
+// foundation.Routable. This method goes in that release.
 func (*TaskModule) Routes(*routing.Router) {}
 
 // Boot parses the tasks. It does not start the loop.

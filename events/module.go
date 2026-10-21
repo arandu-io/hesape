@@ -60,6 +60,10 @@ var (
 func (*Module) Name() string { return "events" }
 
 // Routes registers nothing: this module has no HTTP surface.
+//
+// Deprecated: the module has no routes, and implements nothing for them once
+// foundation.Module stops requiring Routes; a module with routes implements
+// foundation.Routable. This method goes in that release.
 func (*Module) Routes(*routing.Router) {}
 
 // Migrations returns the outbox table: the migration that creates it, and the

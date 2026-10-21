@@ -8,6 +8,7 @@ import (
 	"github.com/arandu-io/hesape/console"
 	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/routing"
+	"github.com/arandu-io/hesape/routing/controllers"
 )
 
 // Module is the only unit of composition in the framework.
@@ -37,17 +38,36 @@ type Module interface {
 	// route names built from it are in published links and in tests.
 	Name() string
 
-	// Routes registers the module's HTTP routes.
+	// Routes registers the module's HTTP routes on the handler-only router.
 	//
 	// The routes are code rather than a file the framework loads: the router is
 	// handed in, so nothing is registered on a global and there is nothing to
-	// reset between tests.
+	// reset between tests. A module with no HTTP surface implements it as a
+	// method that registers nothing.
 	//
-	// A module with no HTTP surface -- a relay, a scheduler-only module -- still
-	// implements it and returns having registered nothing. An empty
-	// implementation is one line, and an optional interface for the absence of
-	// routes would be a second shape to check for what a no-op already says.
+	// Deprecated: a module with routes implements [Routable], whose router
+	// registers controller actions as well as handlers, and a module with no
+	// routes implements nothing at all. Module stops requiring Routes in a
+	// later release, leaving Name; until then a module keeps this method, and a
+	// kernel hands it controllers.Router.Routing.
 	Routes(r *routing.Router)
+}
+
+// Routable is optional: the module registers HTTP routes.
+//
+// The router is the one an application registers its own controllers on, so a
+// module's routes are registered the same way -- a handler with the verb
+// methods, a controller action with Action, Resource, Singleton,
+// ResourceAction or Invokable -- and are answered by the same adapter. The
+// router handed in is scoped to the module: its routes are tagged with the
+// module's name and share the application's table.
+//
+// A module with no HTTP surface does not implement it, rather than
+// implementing it as a method that registers nothing: a relay or a scheduler
+// has no routes to declare, and saying so by omission is what an optional
+// interface is for.
+type Routable interface {
+	Routes(r *controllers.Router)
 }
 
 // Bootable is optional: implement it when the module needs to prepare state at

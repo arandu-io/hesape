@@ -57,6 +57,10 @@ var (
 func (*Module) Name() string { return "queue" }
 
 // Routes registers nothing.
+//
+// Deprecated: the module has no routes, and implements nothing for them once
+// foundation.Module stops requiring Routes; a module with routes implements
+// foundation.Routable. This method goes in that release.
 func (*Module) Routes(*routing.Router) {}
 
 // Migrations returns the schema the wired driver needs.
