@@ -30,18 +30,20 @@ const (
 // is the whole difference between them. A precision below zero is read as
 // zero.
 //
-// The rendering is not locale-aware; see the package comment.
+// The separators are the ones of DefaultLocale, so under pt-BR the same call
+// writes "1.234,57". Parse reads them back under the same locale.
 func Format(v float64, precision ...int) string {
 	if s, ok := special(v); ok {
 		return s
 	}
+	f := currencyFormatFor(DefaultLocale())
 	switch len(precision) {
 	case 0:
-		return group(trimTrailingZeros(strconv.FormatFloat(v, 'f', icuDefaultFractionDigits, 64)))
+		return groupWith(trimTrailingZeros(strconv.FormatFloat(v, 'f', icuDefaultFractionDigits, 64)), f.group, f.decimal)
 	case 1:
-		return group(strconv.FormatFloat(v, 'f', max(precision[0], 0), 64))
+		return groupWith(strconv.FormatFloat(v, 'f', max(precision[0], 0), 64), f.group, f.decimal)
 	default:
-		return group(trimTrailingZeros(strconv.FormatFloat(v, 'f', max(precision[1], 0), 64)))
+		return groupWith(trimTrailingZeros(strconv.FormatFloat(v, 'f', max(precision[1], 0), 64)), f.group, f.decimal)
 	}
 }
 
@@ -264,6 +266,12 @@ func trimTrailingZeros(s string) string {
 // as strconv writes it, and drops a sign that only survived rounding: a value
 // of -0.004 at two digits is "0.00", never "-0.00".
 func group(s string) string {
+	return groupWith(s, string(groupSeparator), string(decimalSeparator))
+}
+
+// groupWith is group with the separators a locale writes: sep between each
+// three integer digits and decimal in place of the point strconv writes.
+func groupWith(s, sep, decimal string) string {
 	negative := strings.HasPrefix(s, "-")
 	if negative {
 		s = s[1:]
@@ -276,7 +284,10 @@ func group(s string) string {
 		negative = false
 	}
 
-	grouped := groupDigits(integer, string(groupSeparator)) + fraction
+	if fraction != "" {
+		fraction = decimal + fraction[1:]
+	}
+	grouped := groupDigits(integer, sep) + fraction
 	if negative {
 		return "-" + grouped
 	}

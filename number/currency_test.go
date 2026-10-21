@@ -204,20 +204,61 @@ func TestCurrencySymbolTrails(t *testing.T) {
 	}
 }
 
-// TestNumberFormattingIgnoresLocale fixes the half of the package the locale
-// does not reach. Format and Parse round-trip one another, and a locale that
-// changed only one of them would break that silently.
-func TestNumberFormattingIgnoresLocale(t *testing.T) {
+// TestNumberFormattingFollowsLocale fixes that Format and Parse both read the
+// locale. They round-trip one another, and a locale that changed only one of
+// them would break that silently: "1.234,50" read back with en-US separators is
+// 1.234.
+func TestNumberFormattingFollowsLocale(t *testing.T) {
 	WithLocale("pt-BR", func() struct{} {
-		if got, want := Format(1234.5, 2), "1,234.50"; got != want {
+		if got, want := Format(1234.5, 2), "1.234,50"; got != want {
 			t.Errorf("Format(1234.5, 2) in pt-BR = %q, want %q", got, want)
 		}
+		if got, want := Format(-1234567.891), "-1.234.567,891"; got != want {
+			t.Errorf("Format(-1234567.891) in pt-BR = %q, want %q", got, want)
+		}
+		if got, want := Percentage(12.5, 1), "12,5%"; got != want {
+			t.Errorf("Percentage(12.5, 1) in pt-BR = %q, want %q", got, want)
+		}
+		if got, want := Abbreviate(1500, 1), "1,5K"; got != want {
+			t.Errorf("Abbreviate(1500, 1) in pt-BR = %q, want %q", got, want)
+		}
+		v, err := Parse("1.234,56")
+		if err != nil || v != 1234.56 {
+			t.Errorf("Parse(%q) in pt-BR = %v, %v, want 1234.56, nil", "1.234,56", v, err)
+		}
+		v, err = Parse(Format(-9876543.21, 2))
+		if err != nil || v != -9876543.21 {
+			t.Errorf("Parse(Format(-9876543.21, 2)) in pt-BR = %v, %v, want the value back", v, err)
+		}
+		n, err := ParseInt("1.234,99 unidades")
+		if err != nil || n != 1234 {
+			t.Errorf("ParseInt in pt-BR = %v, %v, want 1234, nil", n, err)
+		}
+		return struct{}{}
+	})
+}
+
+// TestOrdinalStaysEnglishUnderALocale: an ordinal is an English suffix, and
+// "1.000th" is no locale's way of writing one.
+func TestOrdinalStaysEnglishUnderALocale(t *testing.T) {
+	WithLocale("pt-BR", func() struct{} {
 		if got, want := Ordinal(1000), "1,000th"; got != want {
 			t.Errorf("Ordinal(1000) in pt-BR = %q, want %q", got, want)
 		}
+		return struct{}{}
+	})
+}
+
+// TestALocaleWithoutConventionsFormatsTheEnglishWay: pt-PT carries no row, so
+// it is written as en-US rather than borrowing pt-BR's.
+func TestALocaleWithoutConventionsFormatsTheEnglishWay(t *testing.T) {
+	WithLocale("pt-PT", func() struct{} {
+		if got, want := Format(1234.5, 2), "1,234.50"; got != want {
+			t.Errorf("Format(1234.5, 2) in pt-PT = %q, want %q", got, want)
+		}
 		v, err := Parse("1,234.56")
 		if err != nil || v != 1234.56 {
-			t.Errorf("Parse(%q) in pt-BR = %v, %v, want 1234.56, nil", "1,234.56", v, err)
+			t.Errorf("Parse(%q) in pt-PT = %v, %v, want 1234.56, nil", "1,234.56", v, err)
 		}
 		return struct{}{}
 	})

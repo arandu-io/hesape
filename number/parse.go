@@ -21,9 +21,20 @@ var ErrNotANumber = errors.New("number: string does not begin with a number")
 // makes a formatted string round-trip. Reading stops at the first character
 // that cannot belong to the number, so "1,234 units" is 1234 and not an error.
 //
-// The reading is not locale-aware; see the package comment.
+// The separators are the ones of DefaultLocale, the same ones Format writes:
+// under pt-BR, Parse("1.234,56") is 1234.56, and a dot is a group separator, so
+// Parse("1.5") is 15 there.
 func Parse(s string) (float64, error) {
-	cleaned := strings.Map(dropGroupSeparators, strings.TrimSpace(s))
+	f := currencyFormatFor(DefaultLocale())
+	cleaned := strings.Map(func(r rune) rune {
+		switch {
+		case string(r) == f.group:
+			return -1
+		case string(r) == f.decimal:
+			return decimalSeparator
+		}
+		return dropGroupSeparators(r)
+	}, strings.TrimSpace(s))
 
 	v, err := strconv.ParseFloat(numericPrefix(cleaned), 64)
 	if err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
@@ -45,12 +56,11 @@ func ParseInt(s string) (int, error) {
 	return int(math.Trunc(v)), nil
 }
 
-// dropGroupSeparators removes the characters a formatter puts between groups of
-// digits: the comma this package writes, and the three spaces other
-// conventions write.
+// dropGroupSeparators removes the spaces other conventions write between groups
+// of digits. The locale's own separator is dropped by Parse before it gets here.
 func dropGroupSeparators(r rune) rune {
 	switch r {
-	case groupSeparator, ' ', '\u00a0', '\u202f':
+	case ' ', '\u00a0', '\u202f':
 		return -1
 	}
 	return r

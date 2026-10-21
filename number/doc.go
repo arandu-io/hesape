@@ -14,21 +14,21 @@
 // ForHumans -- every argument is spelled out instead, and a negative maximum
 // precision stands for the one that was not given.
 //
-// # One set of conventions, and the money written outside it
+// # The locale's separators
 //
-// Locale-aware formatting needs CLDR data, and carrying it would mean a third
-// party dependency this module does not take. This package therefore writes a
-// single set of conventions, the ones of en-US: a comma every three digits, a
-// dot before the fraction, English ordinal suffixes and English number words.
-// Format, Parse, Ordinal, Percentage, FileSize, Spell and SpellOrdinal write
-// those whatever locale is set.
+// Locale-aware formatting in full needs CLDR data, and carrying it would mean a
+// third party dependency this module does not take. What this package takes
+// from the locale is therefore the part a reader cannot do without: the group
+// separator, the decimal separator, and for money which side of the amount the
+// symbol goes on. 1,234.5 and 1.234,5 are both numbers, three orders of
+// magnitude apart, and a reader checking a figure cannot tell which is meant.
 //
-// Money is the exception, because an amount written under the wrong convention
-// is not merely foreign to read: R$1,234.50 and R$1.234,50 are both amounts,
-// three orders of magnitude apart, and a reader checking a total cannot tell
-// which one is meant. Currency and CurrencyFromCents therefore follow
-// DefaultLocale for three things -- the group separator, the decimal separator,
-// and which side of the amount the symbol goes on.
+// Format follows DefaultLocale for the two separators, and so does everything
+// that renders through it -- Percentage, Abbreviate, ForHumans and FileSize --
+// and Parse reads them back under the same locale, so a formatted string
+// round-trips. Currency and CurrencyFromCents follow it for the symbol's side
+// too. Ordinal, Spell and SpellOrdinal are English words and write the en-US
+// conventions whatever locale is set, as do the unit suffixes.
 //
 // The locales carrying conventions of their own are en and pt-BR. That list is
 // short because each entry states what was checked rather than what was

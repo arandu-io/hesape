@@ -18,11 +18,12 @@ var (
 // The locale is remembered and reported back by DefaultLocale, and it is what
 // WithLocale swaps around a callback.
 //
-// It decides how Currency and CurrencyFromCents write an amount: what separates
-// the groups of digits, what stands before the fraction, and which side of the
-// amount the symbol goes on. It decides nothing else. Format, Parse, Ordinal
-// and the spelled-out forms write the conventions of en-US whatever is set
-// here, and the package comment says why.
+// It decides what separates the groups of digits and what stands before the
+// fraction, for Format and everything that renders through it -- Percentage,
+// Abbreviate, ForHumans, FileSize -- for Parse, which reads them back, and for
+// Currency and CurrencyFromCents, which also take from it the side of the
+// amount the symbol goes on. Ordinal and the spelled-out forms are English
+// words, and write the conventions of en-US whatever is set here.
 //
 // A locale this package carries no conventions for is written with the en-US
 // ones, so setting an unknown locale changes nothing rather than failing.
