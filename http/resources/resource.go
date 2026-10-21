@@ -23,6 +23,9 @@ var wrapState = struct {
 }{wrap: DefaultWrap}
 
 // Wrap sets the string that wraps the outermost resource map.
+//
+// Deprecated: it changes every response in the process from wherever it is
+// called. Name the wrapper on the response with [JsonResponseBuilder.WithWrap].
 func Wrap(value string) {
 	wrapState.Lock()
 	wrapState.wrap = value
@@ -34,6 +37,8 @@ func Wrap(value string) {
 //
 // It changes every resource in the process. [JsonResponseBuilder.WithoutWrapping]
 // is the same choice for one response.
+//
+// Deprecated: use [JsonResponseBuilder.WithoutWrapping] on the response.
 func WithoutWrapping() {
 	Wrap("")
 }
@@ -44,6 +49,9 @@ func WithoutWrapping() {
 // Package-level state needs an exported function to reach it from outside
 // the package, since an unexported field on a package variable is otherwise
 // unreachable.
+//
+// Deprecated: nothing reads the flag it sets, so it changes no response.
+// Name the wrapper on the response with [JsonResponseBuilder.WithWrap].
 func ForceWrapping(force bool) {
 	wrapState.Lock()
 	wrapState.forceWrapping = force
@@ -51,6 +59,9 @@ func ForceWrapping(force bool) {
 }
 
 // Wrapper is the key in force, empty when wrapping is off.
+//
+// Deprecated: it reads what the deprecated [Wrap] set. A response's wrapper is
+// the one its builder was given, and [DefaultWrap] otherwise.
 func Wrapper() string {
 	wrapState.RLock()
 	defer wrapState.RUnlock()
@@ -58,6 +69,9 @@ func Wrapper() string {
 }
 
 // FlushState puts the wrapper back to "data" and turns forced wrapping off.
+//
+// Deprecated: it resets what the deprecated [Wrap] and [ForceWrapping] set, and
+// a wrapper named on the response has nothing to reset.
 func FlushState() {
 	wrapState.Lock()
 	wrapState.wrap = DefaultWrap

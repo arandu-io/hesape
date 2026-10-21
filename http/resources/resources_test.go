@@ -255,6 +255,27 @@ func TestJsonResponseBuilderWithoutWrapping(t *testing.T) {
 	assertEqual(t, hasData, false, "no data wrapper")
 }
 
+// TestAResponseNamesItsOwnWrapper: the wrapper named on the response is the
+// one it is sent under, whatever the package state says -- which is what lets
+// the package-level Wrap go.
+func TestAResponseNamesItsOwnWrapper(t *testing.T) {
+	user := &testUserResource{Name: "Alice", Email: "alice@example.com", Age: 30}
+	body, err := resources.NewJsonResponse(user).WithWrap("user").Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if _, ok := parsed["user"].(map[string]any); !ok {
+		t.Fatalf("expected the data under \"user\", got %s", body)
+	}
+	if _, ok := parsed["data"]; ok {
+		t.Fatalf("the package wrapper reached a response that named its own: %s", body)
+	}
+}
+
 // --- ResourceCollection tests ---
 
 func TestResourceCollection(t *testing.T) {
