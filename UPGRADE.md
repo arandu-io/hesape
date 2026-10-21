@@ -27,6 +27,43 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.75.0 — implicit TLS for SMTP, a parameter in a CSRF exemption, and hints that name the new layout
+
+Nothing in the API breaks. Four things change what they do.
+
+**`transport.SMTP` speaks implicit TLS.** The new `Encryption` field takes
+`transport.EncryptionTLS` (`"tls"`), which completes the handshake before the
+greeting is read, or `transport.EncryptionStartTLS` (`"starttls"`) and empty,
+which keep the STARTTLS upgrade when the server offers it. Any other value is
+refused before anything is dialled. The new `TLSConfig` verifies the server in
+both modes; nil is the system roots for `Host`, as before. `transport.Register`
+now reads `MailerConfig.Scheme`, which nothing read: `smtps` is implicit TLS on
+465, `smtp` or empty is STARTTLS on 587, and a `Port` set by hand wins. A mailer
+whose `Scheme` held anything else used to send over STARTTLS regardless and now
+fails when its transport is built, naming the scheme; clear the field or write
+`smtp`.
+
+**`CSRFExcept` takes a parameter segment.** `"/checkout/{token}/sessions"`
+exempts `/checkout/abc/sessions` and nothing beside it: a `{name}` segment
+matches one non-empty segment, the fixed segments match whole, and a path that
+leaves `RawPath` set is still never exempt. An exemption that held `{` or `}`
+used to be compared as literal text; it now panics at wiring unless every such
+segment is a whole `{name}` and the path does not begin with one.
+
+**`queue:retry`, `queue:forget` and `queue:retry-batch` read flags after the
+ids.** `queue:retry j-1 --tenant acme` runs instead of answering that the tenant
+is required. `--` still ends the flags.
+
+**Hints name the new layout.** `make:migration`, a view with no renderer,
+`queue.ErrNoConnection`, `queue.ErrNoCache` and a model with no finder no longer
+send the reader to `main.go`, `k.Register` or `bootstrap/app.go` for what the
+framework now builds from configuration: they name `WithProviders`,
+`QUEUE_CONNECTION`, `CACHE_STORE=redis` / `SESSION_DRIVER=redis` and
+`app/Providers`. `errors.Is` answers as before; a test that compared the whole
+text of one of these errors compares the new text.
+
+---
+
 ## v0.74.0 — one way in for the logger, the translator, the session table and the module wiring
 
 Nothing in the API breaks. Three things change what they do, and every
