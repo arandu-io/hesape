@@ -9,6 +9,9 @@ import "net/http"
 // receiver and hand it back, and [Response.Authorize] reads that field again
 // afterwards, so a value receiver would have dropped the status between the two
 // calls.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 type Response struct {
 	allowed bool
 	message string
@@ -25,6 +28,9 @@ type Response struct {
 //
 // An empty message and a nil code are both allowed, and mean that nothing was
 // said beyond the answer itself.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func NewResponse(allowed bool, message string, code any) *Response {
 	return &Response{allowed: allowed, message: message, code: code}
 }
@@ -34,23 +40,35 @@ func NewResponse(allowed bool, message string, code any) *Response {
 // It is a function and not a method on [HandlesAuthorization], because an
 // unexported method promoted from an embedded struct is not callable by the
 // package that embeds it.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func Allow(message string, code any) *Response {
 	return NewResponse(true, message, code)
 }
 
 // Deny returns an answer that refuses the action. It is a function for the
 // reason given on Allow.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func Deny(message string, code any) *Response {
 	return NewResponse(false, message, code)
 }
 
 // DenyWithStatus is a refusal that answers with the given HTTP status.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func DenyWithStatus(status int, message string, code any) *Response {
 	return Deny(message, code).WithStatus(&status)
 }
 
 // DenyAsNotFound is a denial that answers 404 instead of 403, for a resource
 // whose existence is itself private.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func DenyAsNotFound(message string, code any) *Response {
 	return DenyWithStatus(http.StatusNotFound, message, code)
 }

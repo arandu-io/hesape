@@ -13,6 +13,10 @@ import (
 // It is for a machine calling an endpoint, and for the internal tool nobody
 // wants to build a sign-in screen for; a browser-facing application uses
 // [Authenticate].
+//
+// Deprecated: a credential a browser attaches by itself is not one an API
+// takes; use hesape/http/middleware.RequireToken, which authenticates a bearer
+// token through the application's resolver.
 type AuthenticateWithBasicAuth struct {
 	// auth is the guard factory instance.
 	auth Factory
@@ -29,6 +33,9 @@ type AuthenticateWithBasicAuth struct {
 
 // NewAuthenticateWithBasicAuth returns the middleware over an authentication
 // factory. subjectFor may be nil; see [NewAuthenticate].
+//
+// Deprecated: use hesape/http/middleware.RequireToken. See
+// AuthenticateWithBasicAuth.
 func NewAuthenticateWithBasicAuth(a Factory, subjectFor SubjectResolver) *AuthenticateWithBasicAuth {
 	return &AuthenticateWithBasicAuth{auth: a, subjectFor: subjectFor}
 }

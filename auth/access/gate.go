@@ -24,6 +24,10 @@ import (
 // The user is a value and never nil, so an ability that has to tell a visitor
 // from an account asks user.IsGuest -- which is the framework's declared
 // anonymous reader, not an absent one.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 type Ability func(ctx context.Context, user auth.Subject, arguments ...any) any
 
 // BeforeCallback is what Before registers: a callback that runs ahead of every
@@ -31,6 +35,10 @@ type Ability func(ctx context.Context, user auth.Subject, arguments ...any) any
 //
 // A non-nil answer short-circuits the whole check, which is how an
 // administrator override is written. A nil answer lets the check carry on.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 type BeforeCallback func(ctx context.Context, user auth.Subject, ability string, arguments []any) any
 
 // AfterCallback is what After registers: a callback that runs once the check has
@@ -39,6 +47,10 @@ type BeforeCallback func(ctx context.Context, user auth.Subject, ability string,
 // It receives the result the check produced and can only replace it when it was
 // nil. An after callback cannot overturn a decision, which is the difference
 // between a hook for logging and a second authorization path.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 type AfterCallback func(ctx context.Context, user auth.Subject, ability string, result any, arguments []any) any
 
 // Gate is the ability-name call site -- gate.Allows(ctx, subject, "update",
@@ -52,6 +64,10 @@ type AfterCallback func(ctx context.Context, user auth.Subject, ability string, 
 // A Gate is built at boot and read afterwards. Define, Policy, Before, After and
 // DefaultDenialResponse write to it and are not safe to call while another
 // goroutine is checking: it is configuration, not request state.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 type Gate struct {
 	HandlesAuthorization
 
@@ -79,6 +95,10 @@ type Gate struct {
 //
 // It takes nothing, because the subject is an argument to every check rather
 // than something the Gate resolves for itself.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 func NewGate() *Gate {
 	return &Gate{
 		abilities: map[string]Ability{},
@@ -101,6 +121,10 @@ func (g *Gate) Has(abilities ...string) bool {
 //
 // Their condition parameter is any, so this is the shape a callback must have
 // to be called rather than read as a value.
+//
+// Deprecated: an ability is a Policy: implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes, and a
+// view that only decides whether to draw a button asks auth.Subject.Can.
 type Condition func(ctx context.Context, user auth.Subject) any
 
 // AllowIf is an on-demand check that fails when the condition is false.

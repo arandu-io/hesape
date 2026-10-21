@@ -21,7 +21,8 @@ import (
 // Deprecated: it reads the stamp the deprecated session.Store keeps. On
 // [session.RecordStore], the one session path, the stamp is
 // [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
-// read with Record.PasswordConfirmedWithin.
+// read with Record.PasswordConfirmedWithin. The guard over it is
+// hesape/http/middleware.RequireConfirmedPassword.
 const PasswordConfirmURI = "/confirm-password"
 
 // RequirePassword guards the part of an application that a stolen open session
@@ -38,7 +39,8 @@ const PasswordConfirmURI = "/confirm-password"
 // Deprecated: it reads the stamp the deprecated session.Store keeps. On
 // [session.RecordStore], the one session path, the stamp is
 // [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
-// read with Record.PasswordConfirmedWithin.
+// read with Record.PasswordConfirmedWithin. The guard over it is
+// hesape/http/middleware.RequireConfirmedPassword.
 type RequirePassword struct {
 	guestRedirect
 
@@ -66,7 +68,8 @@ type RequirePassword struct {
 // Deprecated: it reads the stamp the deprecated session.Store keeps. On
 // [session.RecordStore], the one session path, the stamp is
 // [session.Record.PasswordConfirmedAt], written by RecordStore.Confirm and
-// read with Record.PasswordConfirmedWithin.
+// read with Record.PasswordConfirmedWithin. The guard over it is
+// hesape/http/middleware.RequireConfirmedPassword.
 func NewRequirePassword(passwordTimeout time.Duration) *RequirePassword {
 	return &RequirePassword{passwordTimeout: passwordTimeout}
 }

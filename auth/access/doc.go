@@ -60,4 +60,10 @@
 // package that embeds it, so the two shorthands that build a [Response] are the
 // package functions [Allow] and [Deny] rather than methods. The two that are
 // exported are on [HandlesAuthorization].
+//
+// Deprecated: an ability is a Policy. Implement auth.Policy for the resource
+// and call auth.Authorize, which issues the Grant every repository takes; a
+// view that only decides whether to draw a button asks auth.Subject.Can. Two
+// vocabularies for one decision is how the weaker one gets used. This package
+// is removed in a later release.
 package access

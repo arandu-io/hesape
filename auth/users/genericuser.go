@@ -12,6 +12,9 @@ import "github.com/arandu-io/hesape/auth"
 // It lives in this package rather than beside the guards because the provider
 // below is the only thing that makes one, and a type with a single producer
 // belongs with it.
+//
+// Deprecated: an application signs people in through auth/account.Users, whose
+// VerifyCredentials runs over the application's own users query and model.
 type GenericUser struct {
 	// Attributes is every column of the row.
 	//
@@ -24,6 +27,9 @@ type GenericUser struct {
 var _ auth.Authenticatable = (*GenericUser)(nil)
 
 // NewGenericUser returns a user over the row.
+//
+// Deprecated: an application signs people in through auth/account.Users, whose
+// VerifyCredentials runs over the application's own users query and model.
 func NewGenericUser(attributes map[string]any) *GenericUser {
 	return &GenericUser{Attributes: attributes}
 }

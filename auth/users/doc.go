@@ -31,4 +31,8 @@
 //     the same reason: an interface value has no query of its own.
 //   - A row becomes a user through [Hydratable], which is where the columns are
 //     written onto the value the constructor made.
+//
+// The database provider and the generic user are deprecated: an application
+// signs people in through auth/account.Users. ModelUserProvider, Hydratable
+// and Fillable stay, because auth/account verifies passwords through them.
 package users

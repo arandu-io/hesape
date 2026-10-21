@@ -12,6 +12,9 @@ import (
 // errors.Is(err, auth.ErrForbidden) to choose 403, and an authorization failure
 // that did not answer it would be rendered as a 500 -- the one denial in the
 // framework that leaks a stack trace to whoever was denied.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 type AuthorizationError struct {
 	message  string
 	code     any
@@ -25,11 +28,17 @@ type AuthorizationError struct {
 }
 
 // DefaultDenialMessage is what an error built with no message says.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 const DefaultDenialMessage = "This action is unauthorized."
 
 // NewAuthorizationError returns the failure.
 //
 // An empty message becomes [DefaultDenialMessage], and a nil code becomes 0.
+//
+// Deprecated: a refusal is auth.ErrForbidden from a Policy, answered 403 by the
+// adapter that runs the action. See Gate.
 func NewAuthorizationError(message string, code any, previous error) *AuthorizationError {
 	if message == "" {
 		message = DefaultDenialMessage

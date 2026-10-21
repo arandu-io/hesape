@@ -10,6 +10,9 @@ import (
 // sign-in and register screens: somebody who is already signed in and follows a
 // bookmark to /login is sent on rather than shown a form that would sign them
 // in a second time.
+//
+// Deprecated: use hesape/http/middleware.RedirectIfAuthenticated over
+// hhttp.SessionStore.
 type RedirectIfAuthenticated struct {
 	// auth is the authentication factory instance.
 	auth Factory
@@ -26,6 +29,9 @@ type RedirectIfAuthenticated struct {
 
 // NewRedirectIfAuthenticated returns the middleware over an authentication
 // factory.
+//
+// Deprecated: use hesape/http/middleware.RedirectIfAuthenticated. See
+// RedirectIfAuthenticated.
 func NewRedirectIfAuthenticated(a Factory) *RedirectIfAuthenticated {
 	return &RedirectIfAuthenticated{auth: a}
 }

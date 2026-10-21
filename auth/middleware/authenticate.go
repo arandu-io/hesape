@@ -15,6 +15,10 @@ import (
 // framework that calls auth.WithSubject: a second caller would be a second
 // answer to "who is acting", and one of them would be a subject somebody
 // assembled from the request.
+//
+// Deprecated: use hesape/http/middleware.RequireAuth over hhttp.SessionStore,
+// which loads the subject from the one session path and carries it on the
+// request.
 type Authenticate struct {
 	guestRedirect
 
@@ -45,6 +49,8 @@ type Authenticate struct {
 // its context and every authorization downstream refuses. That is the safe
 // direction to fail in, and it is the only default available: a Subject with no
 // tenant would be a Grant that reads every customer.
+//
+// Deprecated: use hesape/http/middleware.RequireAuth. See Authenticate.
 func NewAuthenticate(a Factory, subjectFor SubjectResolver) *Authenticate {
 	return &Authenticate{auth: a, subjectFor: subjectFor}
 }

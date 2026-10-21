@@ -18,6 +18,8 @@ import "github.com/arandu-io/hesape/auth"
 // is made, receives a copy, and nothing reads what a handler does with it. An
 // event that could veto would be a second authorization path, and there is only
 // ever one.
+//
+// Deprecated: it is fired by the deprecated access.Gate. See access.Gate.
 type GateEvaluated struct {
 	// Subject is who asked. It is a value and not a pointer: a handler holding
 	// it cannot alter the subject the decision was made for.

@@ -16,6 +16,9 @@ import (
 // interface to get it is a dependency the wiring cannot substitute in a test.
 //
 // *database.Connection satisfies it as written.
+//
+// Deprecated: an application signs people in through auth/account.Users, whose
+// VerifyCredentials runs over the application's own users query and model.
 type Connection interface {
 	// Table opens a builder against a table. It takes a context because a
 	// hesape builder binds its connection at the moment it is made.
@@ -35,6 +38,9 @@ type Connection interface {
 // there is a subject to authorize; the action is RetrieveUser or UpdateUser;
 // and the tenant comes from configuration, never from the request. Reads are
 // scoped exactly as writes are.
+//
+// Deprecated: an application signs people in through auth/account.Users, whose
+// VerifyCredentials runs over the application's own users query and model.
 type DatabaseUserProvider struct {
 	// connection is where the table is opened.
 	connection Connection
@@ -56,6 +62,9 @@ var _ auth.UserProvider = (*DatabaseUserProvider)(nil)
 //
 // The fourth argument is the tenant every statement is filtered by; see the
 // type's doc for where it must come from.
+//
+// Deprecated: an application signs people in through auth/account.Users, whose
+// VerifyCredentials runs over the application's own users query and model.
 func NewDatabaseUserProvider(connection Connection, hasher auth.Hasher, table, tenant string) *DatabaseUserProvider {
 	return &DatabaseUserProvider{connection: connection, hasher: hasher, table: table, tenant: tenant}
 }

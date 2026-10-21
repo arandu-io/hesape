@@ -52,4 +52,12 @@
 // auth.Subject needs a tenant and roles, and the seven methods of Authenticatable
 // carry neither, so the mapping is a [SubjectResolver] the application supplies.
 // It must read the tenant from the session, never from the request.
+//
+// Deprecated: the guards an application mounts are in hesape/http/middleware,
+// over hhttp.SessionStore, the one session path: RequireAuth for
+// Authenticate, RedirectIfAuthenticated for RedirectIfAuthenticated,
+// RequireConfirmedPassword for RequirePassword, RequireToken for an API
+// credential and RequireRole for a role. Whether a subject may act on a record
+// is the Policy's answer, through auth.Authorize, and never a middleware's.
+// This package is removed in a later release.
 package middleware

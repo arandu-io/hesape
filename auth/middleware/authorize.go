@@ -18,6 +18,9 @@ import (
 //
 // The subject is a parameter, and it comes off the context where [Authenticate]
 // put it, so the middleware cannot invent one.
+//
+// Deprecated: it is the collaborator of the deprecated Authorize. See
+// Authorize.
 type Gate interface {
 	// Authorize returns the auth.Grant that proves a policy ran, and an error
 	// when the answer is no.
@@ -33,6 +36,10 @@ type Gate interface {
 // The handler calls auth.Authorize for the work it actually does; this
 // middleware is the early refusal, so a request that was never going to be
 // allowed does not reach the code that loads the row.
+//
+// Deprecated: whether a subject may act on a record is the Policy's answer,
+// through auth.Authorize in the service the handler calls; a guard by role is
+// hesape/http/middleware.RequireRole.
 type Authorize struct {
 	// gate is the gate instance.
 	gate Gate
@@ -43,6 +50,8 @@ type Authorize struct {
 }
 
 // NewAuthorize returns the middleware over a gate.
+//
+// Deprecated: see Authorize.
 func NewAuthorize(g Gate) *Authorize { return &Authorize{gate: g} }
 
 // Using returns a copy of the middleware bound to that ability and those

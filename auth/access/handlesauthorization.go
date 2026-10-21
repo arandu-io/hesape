@@ -18,6 +18,8 @@ import "net/http"
 // The allow and deny shorthands are the package functions [Allow] and [Deny]
 // instead: an unexported method promoted from an embedded struct is not
 // callable by the package that embeds it.
+//
+// Deprecated: see Gate.
 type HandlesAuthorization struct{}
 
 // DenyWithStatus is a denial that answers with the given HTTP status.

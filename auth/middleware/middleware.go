@@ -14,6 +14,9 @@ import (
 // on the manager an application happens to wire. Two methods are all a
 // middleware needs; registering drivers is the manager's business, not one a
 // middleware ever has.
+//
+// Deprecated: it is the guard factory the deprecated middleware here read. The
+// guards over hhttp.SessionStore are in hesape/http/middleware.
 type Factory interface {
 	// Guard is the guard of that name. The empty name means the default one.
 	Guard(name string) auth.Guard
@@ -40,6 +43,9 @@ type Factory interface {
 // without one, and anything downstream that needs a decision refuses, because
 // auth.Authorize refuses the zero Subject. Use auth.Guest for a reader who is
 // deliberately anonymous.
+//
+// Deprecated: hesape/http/middleware.RequireAuth carries the subject the
+// session holds, and resolves nothing. See Factory.
 type SubjectResolver func(r *http.Request, user auth.Authenticatable) (auth.Subject, bool)
 
 // guestRedirect is a redirect that first records where the person was going.

@@ -14,6 +14,9 @@ import (
 // is the path the middleware sends them to unless told otherwise.
 // [EnsureEmailIsVerified.RedirectTo] is how a project that mounts the notice
 // elsewhere says so.
+//
+// Deprecated: the address of the deprecated EnsureEmailIsVerified. See
+// EnsureEmailIsVerified.
 const VerificationNoticeURI = "/email/verify"
 
 // EnsureEmailIsVerified refuses a request from an account whose address was
@@ -22,6 +25,9 @@ const VerificationNoticeURI = "/email/verify"
 // An account that is not required to verify -- a user type that does not
 // implement auth.MustVerifyEmail -- passes, which is what lets one application
 // have both kinds.
+//
+// Deprecated: a verified address is auth.Subject.Verified on the subject
+// hesape/http/middleware.RequireAuth carries, and auth/account marks it.
 type EnsureEmailIsVerified struct {
 	guestRedirect
 
@@ -35,6 +41,8 @@ type EnsureEmailIsVerified struct {
 
 // NewEnsureEmailIsVerified returns the middleware over an authentication
 // factory.
+//
+// Deprecated: see EnsureEmailIsVerified.
 func NewEnsureEmailIsVerified(a Factory) *EnsureEmailIsVerified {
 	return &EnsureEmailIsVerified{auth: a}
 }
