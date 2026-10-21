@@ -31,7 +31,9 @@ type AuthenticationError struct {
 // NewAuthenticationError returns the error.
 //
 // An empty message becomes "Unauthenticated.", a nil slice means no guard was
-// named, and an empty redirect falls back to [RedirectUsing].
+// named, and an empty redirect falls back to the deprecated [RedirectUsing].
+// The redirect given here is the error's own, and nothing set elsewhere
+// replaces it.
 func NewAuthenticationError(message string, guards []string, redirectTo string) *AuthenticationError {
 	if message == "" {
 		message = defaultAuthenticationMessage
@@ -84,6 +86,11 @@ var (
 // carries none.
 //
 // Call it once, where the application boots. It is not a per-request setting.
+//
+// Deprecated: it sets the redirect of every authentication error in the
+// process from wherever it is called. Pass the path to [NewAuthenticationError]
+// where the error is raised, or let the middleware that answers it redirect:
+// RequireAuth in hesape/http/middleware sends the visitor to its sign-in page.
 func RedirectUsing(callback func(request Request) string) {
 	redirectMu.Lock()
 	defer redirectMu.Unlock()
