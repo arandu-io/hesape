@@ -140,7 +140,15 @@ func (d *Disk) GetConfig() Config { return d.config }
 // from what an upload announced is deliberate: the client-supplied type is a
 // string an attacker chose, and storing it is how an upload becomes stored XSS
 // three months later when something serves it back.
+//
+// A read-only Grant -- one issued to a subject somebody else is only viewing
+// as -- is refused with auth.ErrReadOnly, and so is every other method that
+// writes: Delete, MakeDirectory, SetVisibility, TemporaryUploadURL and what is
+// built on them.
 func (d *Disk) Put(ctx context.Context, g auth.Grant, key string, body io.Reader, contentType string) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	full, err := Key(g, key)
 	if err != nil {
 		return err
@@ -266,6 +274,9 @@ func (d *Disk) Checksum(ctx context.Context, g auth.Grant, key string) (string, 
 
 // Delete removes a file. Removing what is not there is not an error.
 func (d *Disk) Delete(ctx context.Context, g auth.Grant, key string) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	full, err := Key(g, key)
 	if err != nil {
 		return err

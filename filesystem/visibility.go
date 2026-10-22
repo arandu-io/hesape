@@ -74,6 +74,9 @@ func (d *Disk) GetVisibility(ctx context.Context, g auth.Grant, key string) (str
 // SetVisibility sets it. See [VisibilityAware] for why this is not a way to
 // authorize anything.
 func (d *Disk) SetVisibility(ctx context.Context, g auth.Grant, key, visibility string) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if visibility != VisibilityPublic && visibility != VisibilityPrivate {
 		return fmt.Errorf("filesystem: %q is not a visibility: %q or %q", visibility, VisibilityPublic, VisibilityPrivate)
 	}

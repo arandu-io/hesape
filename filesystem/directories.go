@@ -85,6 +85,9 @@ func (d *Disk) DirectoryMissing(ctx context.Context, g auth.Grant, directory str
 // to stand for a folder -- puts a key in every listing that [Disk.Get] then
 // answers [ErrNotFound] for, which is a file that exists and cannot be read.
 func (d *Disk) MakeDirectory(ctx context.Context, g auth.Grant, directory string) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	full, err := prefixPath(g, asDirectory(directory))
 	if err != nil {
 		return err

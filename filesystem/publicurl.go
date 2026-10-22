@@ -169,7 +169,14 @@ func (d *Disk) TemporaryURL(ctx context.Context, g auth.Grant, key string, ttl t
 // caller may write that key, and the signature carries that decision -- the
 // store will not check it again, so the ttl is the whole of the exposure and
 // should be minutes.
+//
+// A read-only Grant is refused with auth.ErrReadOnly before any callback is
+// asked, because the URL is a write the store will accept later without
+// asking anybody.
 func (d *Disk) TemporaryUploadURL(ctx context.Context, g auth.Grant, key string, ttl time.Duration) (string, http.Header, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", nil, err
+	}
 	if ttl <= 0 {
 		return "", nil, fmt.Errorf("filesystem: a temporary upload URL needs a lifetime, and %s is not one", ttl)
 	}
