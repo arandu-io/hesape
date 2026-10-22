@@ -27,6 +27,91 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.77.0 — authorization read on every request, a received webhook processed once, and impersonation read-only in notifications and the outbox
+
+Nothing in the API breaks. Five things change what they do; run `aru migrate`
+before the new binary serves requests or relays events, because two
+migrations add columns the new code writes.
+
+**A session's roles and actions are read on every request, through a
+resolver.** `hhttp.SessionStore` kept the subject written at sign-in, so a role
+taken away or an account removed kept working until the session ended. Install
+an `hhttp.SubjectResolver` with `SessionStore.ResolveSubjects`, once, where the
+application is assembled, built from the same code that makes the subject at
+sign-in:
+
+```go
+d.Sessions.ResolveSubjects(func(ctx context.Context, who auth.Subject) (auth.Subject, error) {
+	user, err := users.FindForAuthentication(ctx, who.Tenant, who.ID)
+	if errors.Is(err, account.ErrUserNotFound) {
+		return auth.Subject{}, hhttp.ErrSubjectGone
+	}
+	if err != nil {
+		return auth.Subject{}, err
+	}
+	if users.Admit(ctx, user) != nil {
+		return auth.Subject{}, hhttp.ErrSubjectGone
+	}
+	return user.(*models.User).Subject(), nil
+})
+```
+
+`Load` then answers the account's current roles, actions, tenant and
+`Verified`. An account the resolver says is gone (`hhttp.ErrSubjectGone`), or
+answers for under another id or tenant, ends the session: it is destroyed and
+the guards send the person to the sign-in screen. A resolver that fails fails
+the request with `hhttp.ErrSubjectUnresolved`, and the guards answer 503 instead
+of using the roles the session was opened with. Without a resolver, `Start` and
+`Rotate` refuse a subject that carries roles or actions with
+`hhttp.ErrNoSubjectResolver`, and `Load` refuses a session that holds them --
+including every session written by an earlier release with roles in it, which
+the guards answer with 500. An application whose subjects carry no roles and no
+actions needs nothing. With a resolver the session record keeps the id and the
+tenant without roles or actions; sessions written earlier keep working, their
+stored roles ignored.
+
+**A received webhook is processed once per delivery id.** A call kept by a
+receiver whose validator is `webhook.Arandu` or `webhook.StandardWebhooks` keeps
+the delivery id the signature covered in the new nullable
+`webhook_client_calls.delivery_id` column, unique per tenant and receiver
+(migration `20261022_0009_add_delivery_id_to_webhook_client_calls`). A repeat of
+the same delivery is answered as the first copy was -- the Responder is handed
+the stored call -- and is not stored or processed again; the index decides
+between copies that arrive together. A `ProcessSync` receiver answers a repeat
+of a processed delivery 200 with no body, processes again a repeat of one whose
+processing failed, and answers a repeat of one still running with
+`Statuses.Unavailable`. A processor that told repeats apart itself no longer
+sees them. A body-only `HMAC` or a `HeaderSecret` signs no id: set the new
+`Receiver.DedupeKey` to read the provider's event id from the body, or every
+copy is processed as before. `webhook.New` refuses a receiver whose validator
+accepts a signature for more than half of `DeleteAfterDays` -- an `Arandu` or
+`StandardWebhooks` with a `Tolerance` of days -- unless `CleanSpec` is `"-"`.
+
+**Notifications refuse a read-only Grant.** `Notifier.Send` and `SendNow`, and
+the mail, database and broadcast channels' `Send`, answer `auth.ErrReadOnly` for
+a Grant issued to a subject an operator is only viewing (`auth.Impersonate`).
+The database channel was refused before, by the database; the e-mail and the
+push went out. An acting impersonation (`auth.ImpersonateActing`) still sends.
+
+**The outbox records the operator acting in the account, and refuses a
+read-only Grant.** `events.Outbox.Store` writes the operator of an
+`auth.ImpersonateActing` Grant in the new nullable `outbox.impersonator`
+column (migration `2026_10_22_000004_add_outbox_impersonator`), read back as
+`events.Stored.Impersonator` beside `AuthorizedBy`, as `jobs.Job.Impersonator`
+does for a job. Run the migration first: `Store` names the column. A Grant
+issued to a viewing operator is refused with `auth.ErrReadOnly`; the outbox
+writes with statements of its own, so the database's refusal did not reach it.
+
+**A password reset runs an application hook.** The new
+`account.Hooks.AfterResetPassword` runs in the transaction of `ResetPassword`
+and `SetPassword`, after the new hash is written and before `PasswordReset` is
+stored, with the reset's Grant: revoke the account's personal access tokens
+there, as `AfterClose` does for a close. Its error rolls the reset back; a
+refused reset and `ChangePassword` do not call it. Nothing changes until an
+application sets it.
+
+---
+
 ## v0.76.0 — production when APP_ENV is missing, a read-only impersonation that writes nowhere, and tighter defaults where a request or an upload decides
 
 Nothing in the API breaks. Nine things change what they do; run `aru migrate`
