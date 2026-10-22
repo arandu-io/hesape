@@ -284,12 +284,10 @@ func TestAReceiverMountedAtItsPublishedAddressAnswersSynchronously(t *testing.T)
 			t.Fatalf("the routes are %v, and %s is not among them", patterns, want)
 		}
 	}
-	// The Mount is exempt from the CSRF check: the exact shape of its
-	// exemption is the webhook package's own test, and here it is enough that
-	// the second path is the Mount or the fixed part of it.
-	if paths := w.module.ReceivePaths(); len(paths) != 2 || paths[0] != "/webhooks/" ||
-		!strings.HasPrefix(paths[1], "/integracoes/lpr/") || !strings.HasPrefix("/integracoes/lpr/{org}/{key}", paths[1]) {
-		t.Fatalf("ReceivePaths answered %v", paths)
+	// The Mount is exempt from the CSRF check at its own address and nowhere
+	// beside it: listed exactly as written, each {name} one segment.
+	if paths := w.module.ReceivePaths(); !slices.Equal(paths, []string{"/webhooks/", "/integracoes/lpr/{org}/{key}"}) {
+		t.Fatalf("ReceivePaths answered %v, want the receive prefix and the Mount exactly as written", paths)
 	}
 
 	path, body, now := "/integracoes/lpr/acme/key-1", `{"plate":"BRA2E19"}`, time.Now()
