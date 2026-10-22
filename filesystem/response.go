@@ -29,9 +29,10 @@ func (d *Disk) ServeUsing(callback ServeCallback) {
 //
 // name is what to call the file, and empty means the last segment of the key;
 // headers are added to the
-// response before the file's own are set, so the three headers [Serve] insists
-// on -- the stored content type, nosniff, and the escaped disposition -- cannot
-// be overridden by a caller passing them in. That is deliberate: they are what
+// response before the file's own are set, so the four headers [Serve] insists
+// on -- the stored content type, nosniff, the escaped disposition and the
+// sandboxing Content-Security-Policy -- cannot be overridden by a caller
+// passing them in. That is deliberate: they are what
 // stops an upload becoming stored XSS, and a header map is exactly where
 // somebody would turn them off by accident.
 func (d *Disk) Response(w http.ResponseWriter, r *http.Request, g auth.Grant, key, name string, headers http.Header) error {

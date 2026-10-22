@@ -213,3 +213,56 @@ func TestAHeadRequestCarriesNoBody(t *testing.T) {
 		t.Fatalf("Content-Length = %q, want the real size", got)
 	}
 }
+
+// TestServeSandboxesWhatItRenders: a stored file is a string somebody
+// uploaded, and the response carried nothing that stopped a browser running
+// what was in it on the application's origin. The policy is sent on every
+// response, and a caller's header cannot replace it.
+func TestServeSandboxesWhatItRenders(t *testing.T) {
+	d := filesystem.NewDisk("local", newMem())
+	g := grant(tenant)
+	put(t, d, g, "notes.txt", "the body")
+
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Security-Policy", "default-src *")
+	req := httptest.NewRequest(http.MethodGet, "/files/notes.txt", nil)
+	if err := filesystem.Serve(rec, req, g, d, "notes.txt", filesystem.ServeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.Result().Header.Values("Content-Security-Policy"); len(got) != 1 || got[0] != "default-src 'none'; sandbox" {
+		t.Fatalf("Content-Security-Policy = %q, want exactly \"default-src 'none'; sandbox\"", got)
+	}
+}
+
+// TestServeSendsActiveContentAsAnAttachment: an SVG with a script element in it
+// passes the upload check, and Serve rendered it inline by default -- stored
+// XSS on the application's origin. SVG, HTML and XML go out as attachments
+// unless the caller opts in.
+func TestServeSendsActiveContentAsAnAttachment(t *testing.T) {
+	d := filesystem.NewDisk("local", newMem())
+	g := grant(tenant)
+	for _, key := range []string{"logo.svg", "page.html", "page.htm", "feed.xml", "page.xhtml"} {
+		put(t, d, g, key, `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/files/"+key, nil)
+		if err := filesystem.Serve(rec, req, g, d, key, filesystem.ServeOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := rec.Result().Header.Get("Content-Disposition"); !strings.HasPrefix(got, "attachment") {
+			t.Errorf("%s was served with Content-Disposition %q, want an attachment", key, got)
+		}
+
+		rec = httptest.NewRecorder()
+		if err := filesystem.Serve(rec, req, g, d, key, filesystem.ServeOptions{InlineActiveContent: true}); err != nil {
+			t.Fatal(err)
+		}
+		res := rec.Result()
+		if got := res.Header.Get("Content-Disposition"); !strings.HasPrefix(got, "inline") {
+			t.Errorf("%s with InlineActiveContent was served with Content-Disposition %q, want inline", key, got)
+		}
+		if got := res.Header.Get("Content-Security-Policy"); got != "default-src 'none'; sandbox" {
+			t.Errorf("%s rendered inline without the sandbox: %q", key, got)
+		}
+	}
+}
