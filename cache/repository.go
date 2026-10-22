@@ -41,6 +41,11 @@ const defaultCacheTime = time.Hour
 // with one has been past Authorize or has asked for a SystemGrant by name. What
 // the Repository takes from it is the tenant, which is the part a cache key
 // cannot be built without.
+//
+// A read-only Grant -- one issued to a subject somebody else is only viewing
+// as -- reads and never writes: every method that stores, removes, flushes or
+// locks an entry refuses it with auth.ErrReadOnly, and Remember and Flexible
+// answer it with what they compute without storing it.
 type Repository struct {
 	store     Store
 	namespace string
@@ -150,7 +155,7 @@ func (r *Repository) Put(ctx context.Context, g auth.Grant, key string, value an
 // It exists so PutMany can fire WritingManyKeys once for the batch instead of
 // WritingKey once per key.
 func (r *Repository) put(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) error {
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return err
 	}
@@ -245,7 +250,7 @@ func (r *Repository) SetMultiple(ctx context.Context, g auth.Grant, values map[s
 // caller is holding the ttl, and the false is the answer to the question it
 // asked.
 func (r *Repository) Add(ctx context.Context, g auth.Grant, key string, value any, ttl time.Duration) (bool, error) {
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return false, err
 	}
@@ -286,7 +291,7 @@ func (r *Repository) Forever(ctx context.Context, g auth.Grant, key string, valu
 // it raised one, and treating it as forever would mint exactly the immortal
 // counter this signature takes a ttl to prevent.
 func (r *Repository) Increment(ctx context.Context, g auth.Grant, key string, delta int64, ttl time.Duration) (int64, error) {
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return 0, err
 	}
@@ -304,7 +309,7 @@ func (r *Repository) Decrement(ctx context.Context, g auth.Grant, key string, de
 
 // Forget removes a key. Removing what is not there is not an error.
 func (r *Repository) Forget(ctx context.Context, g auth.Grant, key string) error {
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return err
 	}
@@ -338,6 +343,9 @@ func (r *Repository) DeleteMultiple(ctx context.Context, g auth.Grant, keys ...s
 // every other tenant on the way past, and in a SaaS that is an outage caused by
 // a support request.
 func (r *Repository) Flush(ctx context.Context, g auth.Grant) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	prefix, err := r.prefix(g)
 	if err != nil {
 		return err
@@ -394,7 +402,7 @@ func (r *Repository) FlushLocks(ctx context.Context) error {
 // A ttl of zero means forever. An absent key is false and is not created:
 // touching a miss would turn it into an entry holding nothing.
 func (r *Repository) Touch(ctx context.Context, g auth.Grant, key string, ttl time.Duration) (bool, error) {
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return false, err
 	}
@@ -439,7 +447,7 @@ func (r *Repository) WithoutOverlapping(ctx context.Context, g auth.Grant, key s
 	if !ok {
 		return fmt.Errorf("%w: holding a lock", ErrUnsupported)
 	}
-	full, err := r.key(ctx, g, key)
+	full, err := r.writeKey(ctx, g, key)
 	if err != nil {
 		return err
 	}
@@ -875,6 +883,12 @@ func Flexible[T any](ctx context.Context, r *Repository, g auth.Grant, key strin
 		return value, nil
 	}
 
+	// A read-only Grant serves what there is and refreshes nothing: the refresh
+	// is a write, and so is the lock it takes.
+	if auth.Writable(g) != nil {
+		return value, nil
+	}
+
 	// Stale. Serve what there is and put the recomputation behind the caller.
 	go func() {
 		background := context.WithoutCancel(ctx)
@@ -944,6 +958,17 @@ func flexibleLockKey(key string) string { return "flexible:" + key }
 // tagged repository reads, and sometimes mints, the tag generations before it
 // knows the answer.
 func (r *Repository) ItemKey(ctx context.Context, g auth.Grant, key string) (string, error) {
+	return r.key(ctx, g, key)
+}
+
+// writeKey is key for a write. It refuses a read-only Grant -- one issued to
+// a subject somebody else is only viewing as -- with auth.ErrReadOnly before
+// anything is built, so every method that stores, removes or locks an entry
+// refuses it the same way.
+func (r *Repository) writeKey(ctx context.Context, g auth.Grant, key string) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", err
+	}
 	return r.key(ctx, g, key)
 }
 

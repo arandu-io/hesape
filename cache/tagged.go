@@ -75,6 +75,10 @@ func (t *TagSet) TagKey(g auth.Grant, name string) (string, error) {
 //
 // A tag nobody has used yet is not an error: the first read creates the
 // generation, so tagging works on a cold cache.
+//
+// A read-only Grant creates nothing: on a tag with no generation it answers a
+// fresh one without storing it, so its read misses as it would have and the
+// store is left as it was.
 func (t *TagSet) TagID(ctx context.Context, g auth.Grant, name string) (string, error) {
 	key, err := t.TagKey(g, name)
 	if err != nil {
@@ -84,6 +88,9 @@ func (t *TagSet) TagID(ctx context.Context, g auth.Grant, name string) (string, 
 	case err == nil && len(raw) > 0:
 		return string(raw), nil
 	case err == nil, errors.Is(err, ErrNotFound):
+		if auth.Writable(g) != nil {
+			return newTagID()
+		}
 		return t.ResetTag(ctx, g, name)
 	default:
 		return "", err
@@ -99,6 +106,9 @@ func (t *TagSet) TagID(ctx context.Context, g auth.Grant, name string) (string, 
 // in the same instant must not agree on the new id, or one of them keeps
 // serving what the other flushed.
 func (t *TagSet) ResetTag(ctx context.Context, g auth.Grant, name string) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", err
+	}
 	key, err := t.TagKey(g, name)
 	if err != nil {
 		return "", err
@@ -131,6 +141,9 @@ func (t *TagSet) Reset(ctx context.Context, g auth.Grant) error {
 // behind: Reset writes a new generation, Flush writes none, and the next read
 // mints one. Both orphan the same entries.
 func (t *TagSet) FlushTag(ctx context.Context, g auth.Grant, name string) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	key, err := t.TagKey(g, name)
 	if err != nil {
 		return err
