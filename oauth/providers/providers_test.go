@@ -632,3 +632,36 @@ func TestTheWholeFlow(t *testing.T) {
 		t.Fatalf("err = %v, want the replay refused", err)
 	}
 }
+
+// TestTheStateCookieIsSecureBehindAProxyThatTerminatesTLS: Secure was read
+// off r.TLS, and behind a proxy that terminates TLS every request this
+// process sees arrived over plain HTTP, so the state cookie went out without
+// Secure on every sign-in. It is Secure unless configuration says otherwise.
+func TestTheStateCookieIsSecureBehindAProxyThatTerminatesTLS(t *testing.T) {
+	out := httptest.NewRecorder()
+	plain := httptest.NewRequest(http.MethodGet, "http://app.example.test/auth/start", nil)
+	if err := providers.NewCookieStateStore(out, plain).SetState("the-state"); err != nil {
+		t.Fatal(err)
+	}
+	if c := out.Result().Cookies(); len(c) != 1 || !c[0].Secure {
+		t.Fatalf("the state cookie set over a plain-HTTP hop is %+v, want Secure", c)
+	}
+
+	back := httptest.NewRecorder()
+	callback := httptest.NewRequest(http.MethodGet, "http://app.example.test/auth/callback", nil)
+	callback.AddCookie(&http.Cookie{Name: providers.StateCookieName, Value: "the-state"})
+	if _, err := providers.NewCookieStateStore(back, callback).GetState(); err != nil {
+		t.Fatal(err)
+	}
+	if c := back.Result().Cookies(); len(c) != 1 || !c[0].Secure {
+		t.Fatalf("the clearing cookie is %+v, want Secure", c)
+	}
+
+	dev := httptest.NewRecorder()
+	if err := providers.NewCookieStateStore(dev, plain).Secure(false).SetState("the-state"); err != nil {
+		t.Fatal(err)
+	}
+	if c := dev.Result().Cookies(); len(c) != 1 || c[0].Secure {
+		t.Fatalf("Secure(false) set %+v, want the attribute off for plain-HTTP development", c)
+	}
+}

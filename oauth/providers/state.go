@@ -91,11 +91,28 @@ type CookieStateStore struct {
 	Name string
 	// Path is the cookie path. Empty means "/".
 	Path string
+	// insecure leaves the Secure attribute off. It is the negative so the zero
+	// value is the safe one: a store nobody configured sends Secure.
+	insecure bool
 }
 
 // NewCookieStateStore builds the store for one request.
 func NewCookieStateStore(w http.ResponseWriter, r *http.Request) *CookieStateStore {
 	return &CookieStateStore{w: w, r: r}
+}
+
+// Secure sets whether the cookie carries the Secure attribute, and returns s
+// so it chains onto [NewCookieStateStore]. It does by default; pass false only
+// in development over plain HTTP, from the same configuration that decides the
+// session cookie, where a browser would not send a Secure cookie back.
+//
+// It is configuration and not read off the request, because behind a proxy
+// that terminates TLS the request this process sees arrived over plain HTTP,
+// and a cookie that took its Secure from that went out without it on every
+// sign-in.
+func (s *CookieStateStore) Secure(on bool) *CookieStateStore {
+	s.insecure = !on
+	return s
 }
 
 func (s *CookieStateStore) name() string {
@@ -127,7 +144,7 @@ func (s *CookieStateStore) SetState(state string) error {
 		// from the provider's domain, and Strict would withhold the cookie on
 		// exactly that request.
 		SameSite: http.SameSiteLaxMode,
-		Secure:   s.r != nil && s.r.TLS != nil,
+		Secure:   !s.insecure,
 	})
 	return nil
 }
@@ -154,7 +171,7 @@ func (s *CookieStateStore) GetState() (string, error) {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   s.r.TLS != nil,
+			Secure:   !s.insecure,
 		})
 	}
 	return c.Value, nil
