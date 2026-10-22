@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,8 +24,69 @@ func guarded(guard func(http.Handler) http.Handler) http.Handler {
 	return pipeline.Chain[http.Handler](reached, guard)
 }
 
+// newSessions returns a store whose subjects are resolved from an account
+// table of its own, which signedIn writes to: the guards read back the roles a
+// test signed in with because the table says so, as they would from the
+// application's users table, and a test that changes the table sees the next
+// request answered from the change.
 func newSessions() *hhttp.SessionStore {
-	return hhttp.NewSessionStore(appKey, time.Hour, false, hhttp.NewMemoryBackend())
+	s := hhttp.NewSessionStore(appKey, time.Hour, false, hhttp.NewMemoryBackend())
+	table := &accounts{rows: map[string]auth.Subject{}}
+	s.ResolveSubjects(table.resolve)
+	tables.Store(s, table)
+	return s
+}
+
+// tables is the account table of every store newSessions built.
+var tables sync.Map
+
+// accounts is an account table a session store resolves subjects from.
+type accounts struct {
+	mu   sync.Mutex
+	rows map[string]auth.Subject
+	err  error
+}
+
+// accountsOf is the table the store resolves from.
+func accountsOf(t *testing.T, s *hhttp.SessionStore) *accounts {
+	t.Helper()
+	table, ok := tables.Load(s)
+	if !ok {
+		t.Fatal("the store was not built by newSessions")
+	}
+	return table.(*accounts)
+}
+
+func (a *accounts) put(sub auth.Subject) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sub.Impersonator, sub.Acting = nil, false
+	a.rows[sub.Tenant+"/"+sub.ID] = sub
+}
+
+func (a *accounts) remove(tenant, id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.rows, tenant+"/"+id)
+}
+
+func (a *accounts) fail(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.err = err
+}
+
+func (a *accounts) resolve(_ context.Context, who auth.Subject) (auth.Subject, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.err != nil {
+		return auth.Subject{}, a.err
+	}
+	row, ok := a.rows[who.Tenant+"/"+who.ID]
+	if !ok {
+		return auth.Subject{}, hhttp.ErrSubjectGone
+	}
+	return row, nil
 }
 
 // signedIn returns a request carrying a real session cookie for the subject,
@@ -33,6 +95,12 @@ func newSessions() *hhttp.SessionStore {
 func signedIn(t *testing.T, s *hhttp.SessionStore, sub auth.Subject, method, path string) *http.Request {
 	t.Helper()
 
+	if table, ok := tables.Load(s); ok {
+		table.(*accounts).put(sub)
+		if sub.Impersonator != nil {
+			table.(*accounts).put(*sub.Impersonator)
+		}
+	}
 	rec := httptest.NewRecorder()
 	if _, err := s.Start(context.Background(), rec, sub); err != nil {
 		t.Fatalf("opening a session for the test: %v", err)

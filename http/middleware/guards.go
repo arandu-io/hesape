@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/arandu-io/hesape/auth"
 	hhttp "github.com/arandu-io/hesape/http"
+	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/session"
 )
 
@@ -76,7 +78,9 @@ func RequireAuth(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			subject, err := sessions.Load(r.Context(), r)
 			if err != nil {
-				sendToSignIn(sessions, w, r)
+				if !unchecked(w, r, err) {
+					sendToSignIn(sessions, w, r)
+				}
 				return
 			}
 			next.ServeHTTP(w, withSubject(r, subject))
@@ -99,8 +103,12 @@ func RequireAuth(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 func LoadSubject(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if subject, err := sessions.Load(r.Context(), r); err == nil {
+			subject, err := sessions.Load(r.Context(), r)
+			switch {
+			case err == nil:
 				r = withSubject(r, subject)
+			case unchecked(w, r, err):
+				return
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -116,8 +124,12 @@ func LoadSubject(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 func RedirectIfAuthenticated(sessions *hhttp.SessionStore, to string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if _, err := sessions.Load(r.Context(), r); err == nil {
+			_, err := sessions.Load(r.Context(), r)
+			switch {
+			case err == nil:
 				sendTo(w, r, to)
+				return
+			case unchecked(w, r, err):
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -134,8 +146,9 @@ func RedirectIfAuthenticated(sessions *hhttp.SessionStore, to string) func(http.
 // pretending otherwise sends somebody looking for a typo.
 //
 // It is still not an authorization decision about anything. It reads the roles
-// off the session and stops there; the handler behind it goes through the
-// Policy like every other handler.
+// the session store answers -- the account's current ones, through the
+// store's SubjectResolver -- and stops there; the handler behind it goes
+// through the Policy like every other handler.
 func RequireRole(sessions *hhttp.SessionStore, roles ...string) func(http.Handler) http.Handler {
 	// No role at all is RequireAuth spelled a second way, and two names for one
 	// guard is how one of them ends up mounted where the other was meant. It is
@@ -149,7 +162,9 @@ func RequireRole(sessions *hhttp.SessionStore, roles ...string) func(http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			subject, err := sessions.Load(r.Context(), r)
 			if err != nil {
-				sendToSignIn(sessions, w, r)
+				if !unchecked(w, r, err) {
+					sendToSignIn(sessions, w, r)
+				}
 				return
 			}
 			for _, role := range roles {
@@ -197,7 +212,9 @@ func RequireConfirmedPassword(sessions *hhttp.SessionStore) func(http.Handler) h
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			subject, err := sessions.Load(r.Context(), r)
 			if err != nil {
-				sendToSignIn(sessions, w, r)
+				if !unchecked(w, r, err) {
+					sendToSignIn(sessions, w, r)
+				}
 				return
 			}
 			// A package-level function and not a method on the subject: Subject
@@ -218,6 +235,33 @@ func RequireConfirmedPassword(sessions *hhttp.SessionStore) func(http.Handler) h
 			sendTo(w, r, PasswordConfirmPath)
 		})
 	}
+}
+
+// unchecked answers a request whose session exists and could not be checked,
+// and reports whether it did.
+//
+// A session store with a resolver reads the account on every request, and
+// when that read fails the request fails: sending the person to the sign-in
+// screen would read as having been signed out, and letting the request through
+// on the subject the session was opened with is the stale authorization the
+// resolver exists to prevent. A subject the store refuses for want of a
+// resolver is a wiring mistake and answers 500; a resolver that failed --
+// the database it reads unreachable -- answers 503, which a person can retry.
+//
+// A session that is not there, or no longer is, is not this: those go to the
+// sign-in screen as they always did.
+func unchecked(w http.ResponseWriter, r *http.Request, err error) bool {
+	status := http.StatusServiceUnavailable
+	switch {
+	case errors.Is(err, hhttp.ErrNoSubjectResolver):
+		status = http.StatusInternalServerError
+	case !errors.Is(err, hhttp.ErrSubjectUnresolved):
+		return false
+	}
+	log.For(r.Context()).Error("the session's account could not be checked, and the request was refused", "error", err)
+	w.Header().Set("Cache-Control", "no-store, private")
+	hhttp.Refuse(w, r, status, "your session could not be checked right now")
+	return true
 }
 
 // sendToSignIn turns somebody away and keeps where they were going.

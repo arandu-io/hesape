@@ -50,11 +50,13 @@ type Subject struct {
 	// and a database round trip inside an authorization check is a round trip
 	// nobody can see from the call site.
 	//
-	// The cost is that it is as old as the session: somebody who verifies while
-	// signed in stays unverified until they sign in again. That is the right
-	// trade for the direction it fails in -- an account is created unverified,
-	// so a stale session can only be MORE restrictive than the truth, never
-	// less.
+	// A session store that resolves its subjects fills it, with the roles and
+	// the actions, from the account on every request, once per request rather
+	// than once per check. Without a resolver it is as old as the session:
+	// somebody who verifies while signed in stays unverified until they sign in
+	// again, which fails in the safe direction -- an account is created
+	// unverified, so a stale session can only be MORE restrictive than the
+	// truth, never less.
 	Verified bool
 
 	// Remembered says whether this session was started with the remember-me box
