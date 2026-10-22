@@ -197,6 +197,35 @@ func (AddCreatedAtToJobsTable) Down(ctx context.Context, conn migrations.Connect
 	})
 }
 
+// AddImpersonatorToJobsTable adds the column that names whoever was acting in
+// the account through an impersonation when the job was pushed.
+//
+// Without it the row named the account and nothing else, so work an operator
+// queued while acting as a customer was recorded as the customer's, and the
+// worker rebuilt a Grant that no longer knew who caused it.
+type AddImpersonatorToJobsTable struct{ migrations.BaseMigration }
+
+// GetName returns the migration's name.
+func (AddImpersonatorToJobsTable) GetName() string {
+	return "2026_10_22_000010_add_impersonator_to_jobs_table"
+}
+
+// Up adds the column. Nullable, so the previous release's binary keeps
+// inserting without it during a rollout, and a row it writes reads back as
+// nobody's impersonation.
+func (AddImpersonatorToJobsTable) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		table.Text("impersonator").Nullable()
+	})
+}
+
+// Down drops the column.
+func (AddImpersonatorToJobsTable) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, "jobs", func(table *schema.Blueprint) {
+		table.DropColumn("impersonator")
+	})
+}
+
 // run sends statements in order and stops at the first one that fails.
 //
 // One call per statement, because the connection sends what it is given and
@@ -221,6 +250,7 @@ func (q *DatabaseQueue) Migrations() []migrations.Migration {
 		AddJobAttributesToJobsTable{},
 		AddCreatedAtToJobsTable{},
 		migrations.WidenTimePrecision{Name: "2026_10_19_000010_widen_jobs_time_precision", Tables: []string{"jobs"}},
+		AddImpersonatorToJobsTable{},
 	}
 }
 
@@ -249,11 +279,11 @@ func (q *DatabaseQueue) Push(ctx context.Context, g auth.Grant, j jobs.Job) erro
 	_, err = q.db.ExecContext(ctx, `
 		INSERT INTO jobs (
 			id, queue, name, display_name, tenant_id, payload, authorized_by, action,
-			run_at, attempts, exceptions, attributes, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			run_at, attempts, exceptions, attributes, impersonator, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.UUID, j.Queue, j.Name, j.DisplayName, j.TenantID, string(j.Payload),
 		j.AuthorizedBy, j.Action, dueAt(j.RunAt, time.Now()), j.Attempts, j.Exceptions, string(settings),
-		time.Now().UTC())
+		j.Impersonator, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("queue: pushing %s: %w", j.Name, err)
 	}
@@ -581,7 +611,7 @@ func (q *DatabaseQueue) query(ctx context.Context, tail string, args ...any) ([]
 	// tokens away from the actual problem.
 	rows, err := q.db.QueryContext(ctx, `
 		SELECT id, queue, name, display_name, tenant_id, payload, authorized_by, action,
-		       run_at, attempts, exceptions, last_error, attributes
+		       run_at, attempts, exceptions, last_error, attributes, impersonator
 		FROM jobs
 		`+tail, args...)
 	if err != nil {
@@ -593,15 +623,16 @@ func (q *DatabaseQueue) query(ctx context.Context, tail string, args ...any) ([]
 	for rows.Next() {
 		var j jobs.Job
 		var payload string
-		var displayName, lastError, settings sql.NullString
+		var displayName, lastError, settings, impersonator sql.NullString
 		if err := rows.Scan(&j.UUID, &j.Queue, &j.Name, &displayName, &j.TenantID, &payload,
 			&j.AuthorizedBy, &j.Action, &j.RunAt, &j.Attempts, &j.Exceptions,
-			&lastError, &settings); err != nil {
+			&lastError, &settings, &impersonator); err != nil {
 			return nil, fmt.Errorf("queue: reading the queue: %w", err)
 		}
 		j.Payload = []byte(payload)
 		j.DisplayName = displayName.String
 		j.LastError = lastError.String
+		j.Impersonator = impersonator.String
 		if settings.String != "" {
 			// A row written before the settings column existed, or by a binary
 			// that predates it, decodes to the zero value -- which is what "the

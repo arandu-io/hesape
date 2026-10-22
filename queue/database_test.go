@@ -19,14 +19,14 @@ import (
 var jobColumns = []string{
 	"id", "queue", "name", "display_name", "tenant_id", "payload",
 	"authorized_by", "action", "run_at", "attempts", "exceptions",
-	"last_error", "attributes",
+	"last_error", "attributes", "impersonator",
 }
 
 // jobRow builds one row of that projection.
 func jobRow(id, name string, runAt time.Time, attempts int64, lastError any) []driver.Value {
 	return []driver.Value{
 		id, jobs.DefaultQueue, name, nil, tenant, "{}",
-		"system", "invoice.send", runAt, attempts, int64(0), lastError, nil,
+		"system", "invoice.send", runAt, attempts, int64(0), lastError, nil, nil,
 	}
 }
 
@@ -52,7 +52,7 @@ func TestPushWritesTheJobRow(t *testing.T) {
 	}
 
 	args := state.argsFor("INSERT INTO jobs")
-	if len(args) != 13 {
+	if len(args) != 14 {
 		t.Fatalf("the insert bound %d arguments", len(args))
 	}
 	if got := args[0].Value; got != j.UUID {
@@ -548,11 +548,11 @@ func TestTheModuleDeclaresNoSchemaForADriverThatOwnsNone(t *testing.T) {
 	if got := queue.NewModule(queue.NullQueue{}).Migrations(); len(got) != 0 {
 		t.Errorf("the NullQueue brought %d migrations", len(got))
 	}
-	// Four: the jobs table, the settings columns that were added to it once
+	// Five: the jobs table, the settings columns that were added to it once
 	// the per-job attributes had somewhere to travel, the created_at that
-	// carries the order jobs are taken in, and the widening of its instants to
-	// microseconds.
-	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 4 {
+	// carries the order jobs are taken in, the widening of its instants to
+	// microseconds, and the impersonator a job pushed while acting carries.
+	if got := queue.NewModule(queue.NewDatabaseQueue(nil)).Migrations(); len(got) != 5 {
 		t.Errorf("the DatabaseQueue brought %d migrations, want the jobs table", len(got))
 	}
 }
@@ -628,5 +628,33 @@ func TestAJobReleasedWithNoDelayIsDueAtOnce(t *testing.T) {
 	runAt, isTime := args[0].Value.(time.Time)
 	if !isTime || runAt.Nanosecond() != 0 || runAt.After(time.Now()) {
 		t.Errorf("a job released with no delay comes back at %v", args[0].Value)
+	}
+}
+
+// TestTheRowKeepsWhoActedInTheAccount: the row named the account and nothing
+// else, so a job an operator queued while acting as a customer came back off
+// the table as the customer's, and the worker's Grant had lost the operator.
+func TestTheRowKeepsWhoActedInTheAccount(t *testing.T) {
+	q, state := databaseQueue(t)
+	j := jobs.Job{Name: "invoice.send", Action: "invoice.send"}
+	if err := q.Push(context.Background(), grant(), j); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if got := state.argsFor("INSERT INTO jobs")[12].Value; got != "" {
+		t.Errorf("a job nobody impersonated was written with impersonator %v", got)
+	}
+
+	row := jobRow("j-1", "invoice.send", time.Now().Add(-time.Minute), 0, nil)
+	row[len(row)-1] = "op-1"
+	state.answerWith("SELECT id, queue", jobColumns, row)
+	popped, err := q.Pop(context.Background(), "", 4, time.Minute)
+	if err != nil {
+		t.Fatalf("Pop: %v", err)
+	}
+	if len(popped) != 1 || popped[0].Impersonator != "op-1" {
+		t.Fatalf("the popped job does not carry the operator: %+v", popped)
+	}
+	if g := jobs.GrantFor(popped[0]); g.Impersonator() == nil || g.Impersonator().ID != "op-1" {
+		t.Fatal("the worker's Grant does not name the operator the row recorded")
 	}
 }

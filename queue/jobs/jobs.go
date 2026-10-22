@@ -81,6 +81,12 @@ type Job struct {
 	// audit trail and what the worker reissues the work under.
 	AuthorizedBy string
 	Action       string
+	// Impersonator is the identifier of whoever was acting in the account
+	// through auth.ImpersonateActing when the job was pushed, and empty
+	// otherwise. AuthorizedBy names the account the work was done in, and this
+	// names the person who really did it, so the record of the job keeps both
+	// and [GrantFor] hands the operator on to everything the job writes.
+	Impersonator string
 	// RunAt is when it becomes eligible. Zero means now.
 	RunAt time.Time
 	// Attempts counts the deliveries INCLUDING the current one: a job being
@@ -304,6 +310,10 @@ var ErrPayloadTooLarge = errors.New("queue: the job's payload is larger than a q
 // This is the only constructor, so every job in the system carries a tenant, an
 // id and the Grant that authorized it -- there is no shape of Job that skipped
 // any of the three.
+//
+// A read-only Grant -- one issued to a subject somebody else is only viewing
+// as -- is refused with auth.ErrReadOnly: the worker runs the job under a Grant
+// that writes, so queuing work would be a way to write with one that does not.
 func New(g auth.Grant, queue, name string, payload any) (Job, error) {
 	if name == "" {
 		return Job{}, ErrNoName
@@ -311,6 +321,9 @@ func New(g auth.Grant, queue, name string, payload any) (Job, error) {
 	tenant := auth.Tenant(g)
 	if tenant == "" {
 		return Job{}, ErrNoTenant
+	}
+	if err := auth.Writable(g); err != nil {
+		return Job{}, err
 	}
 	if queue == "" {
 		queue = DefaultQueue
@@ -333,6 +346,7 @@ func New(g auth.Grant, queue, name string, payload any) (Job, error) {
 		Payload:      body,
 		AuthorizedBy: g.Subject().ID,
 		Action:       string(g.Action()),
+		Impersonator: impersonator(g),
 	}, nil
 }
 
@@ -341,8 +355,12 @@ func New(g auth.Grant, queue, name string, payload any) (Job, error) {
 // The action and the tenant come from the record, so the worker reissues
 // exactly what the push authorized -- not more. A worker that invented its own
 // Grant would be a way to reach the database with permissions nobody granted.
+//
+// A job pushed while somebody acted in the account carries them in
+// Impersonator, and the Grant rebuilt here names them as its Impersonator, so
+// what the job writes is recorded as theirs and not only as the system's.
 func GrantFor(j *Job) auth.Grant {
-	return auth.SystemGrant(auth.Action(j.Action), j.TenantID)
+	return auth.SystemGrantActing(auth.Action(j.Action), j.TenantID, j.Impersonator)
 }
 
 // Authorized reports whether a job may be pushed under this Grant, and whether
@@ -356,14 +374,18 @@ func GrantFor(j *Job) auth.Grant {
 //	j := jobs.Job{UUID: id, Name: "invoice.send", Action: "invoice.delete", TenantID: other}
 //	q.Push(ctx, viewGrant, j)
 //
-// The worker rebuilds the Grant from the record -- [GrantFor] gives
-// auth.SystemGrant(j.Action, j.TenantID) -- so the handler would run with an
+// The worker rebuilds the Grant from the record -- [GrantFor] gives a system
+// Grant for j.Action in j.TenantID -- so the handler would run with an
 // action nobody authorized, in a tenant nobody authorized, and every Policy
 // downstream would say yes because the Grant looks legitimate. The queue would
 // be the one way past the authorization the whole collection exists to enforce.
 //
 // Checked here rather than in each driver, because a driver that forgets is a
 // driver that reopens it.
+//
+// A read-only Grant is refused with auth.ErrReadOnly for the same reason: the
+// worker runs the job under a Grant that writes, so pushing with one that only
+// reads would be a way to write with it.
 //
 // [MaxPayload] is checked here as well, and last. It is not about the Grant,
 // and it is in this function for the reason the name is: this is the one call
@@ -382,6 +404,9 @@ func Authorized(g auth.Grant, j Job) error {
 	if tenant == "" {
 		return ErrNoTenant
 	}
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if j.Name == "" {
 		return ErrNoName
 	}
@@ -393,6 +418,10 @@ func Authorized(g auth.Grant, j Job) error {
 		return fmt.Errorf("%w: the job says %q and the Grant authorizes %q. Build it with jobs.New, which takes both from the Grant",
 			ErrForged, j.Action, g.Action())
 	}
+	if j.Impersonator != "" && j.Impersonator != impersonator(g) {
+		return fmt.Errorf("%w: the job names %q as acting in the account and the Grant does not",
+			ErrForged, j.Impersonator)
+	}
 	if len(j.Payload) > MaxPayload {
 		return fmt.Errorf("%w: %s carries %d bytes, and the limit is %d",
 			ErrPayloadTooLarge, j.Name, len(j.Payload), MaxPayload)
@@ -401,12 +430,16 @@ func Authorized(g auth.Grant, j Job) error {
 }
 
 // Prepare fills in the defaults a driver would otherwise each have to remember:
-// the queue, the run time and the tenant.
+// the queue, the run time, the tenant and the impersonator.
 //
 // It runs after [Authorized] and returns the job a driver stores. Three drivers
 // deciding independently what an empty Queue means is three chances to disagree.
+// The impersonator is taken from the Grant for the reason the tenant is: a job
+// pushed during an impersonation is recorded as the operator's whatever the
+// struct handed to Push said.
 func Prepare(g auth.Grant, j Job) Job {
 	j.TenantID = auth.Tenant(g)
+	j.Impersonator = impersonator(g)
 	if j.Queue == "" {
 		j.Queue = DefaultQueue
 	}
@@ -421,4 +454,13 @@ func Prepare(g auth.Grant, j Job) Job {
 		j.RunAt = j.RunAt.UTC()
 	}
 	return j
+}
+
+// impersonator is the identifier of whoever acts with g in somebody else's
+// account, and empty when nobody does.
+func impersonator(g auth.Grant) string {
+	if s := g.Impersonator(); s != nil {
+		return s.ID
+	}
+	return ""
 }
