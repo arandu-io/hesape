@@ -172,8 +172,8 @@ func TestAValueInAScriptComesOutAsALiteral(t *testing.T) {
 		want string
 	}{
 		{`1;alert(document.cookie)`, `"1;alert(document.cookie)"`},
-		{`${alert(1)}`, `"${alert(1)}"`},
-		{`</script><img src=x onerror=alert(1)>`, `"\u003c/script\u003e\u003cimg src=x onerror=alert(1)\u003e"`},
+		{`${alert(1)}`, `"\u0024{alert(1)}"`},
+		{`</script><img src=x onerror=alert(1)>`, `"\u003c\u002fscript\u003e\u003cimg src=x onerror=alert(1)\u003e"`},
 		{`he said "hi"`, `"he said \"hi\""`},
 		{`abc\`, `"abc\\"`},
 		{`a&b`, `"a\u0026b"`},
@@ -257,6 +257,28 @@ func TestACSSValueThatIsOneGoesOutUnchanged(t *testing.T) {
 		}
 		if got != in {
 			t.Errorf("TextCSS(%q) = %q, want it unchanged", in, got)
+		}
+	}
+}
+
+// TestAValueInsideAViewsOwnQuoteStaysThere: TextJS escaped what ends the
+// script element and what ends a double-quoted string, and nothing else, so a
+// view that wrote '{{ .X }}', `{{ .X }}` or /* {{ .X }} */ inside a script let
+// "';alert(1);//" end its string, "${alert(2)}" run inside its template, and
+// "*/" close its comment -- with the doc comment promising a syntax error.
+func TestAValueInsideAViewsOwnQuoteStaysThere(t *testing.T) {
+	for _, in := range []string{`';alert(1);//${alert(2)}`, "`;alert(1);//", `*/alert(1)/*`} {
+		out := view.TextJS(in)
+		for _, c := range []string{"'", "`", "$", "/"} {
+			if strings.Contains(out, c) {
+				t.Errorf("TextJS(%q) = %s, which carries a raw %s", in, out, c)
+			}
+		}
+		for _, ctx := range []struct{ open, close string }{{"'", "'"}, {"`", "`"}, {"/* ", " */"}} {
+			wrapped := ctx.open + out + ctx.close
+			if strings.Count(wrapped, ctx.close) != strings.Count(ctx.open+ctx.close, ctx.close) {
+				t.Errorf("TextJS(%q) inside %s...%s ends it early: %s", in, ctx.open, ctx.close, wrapped)
+			}
 		}
 	}
 }

@@ -200,8 +200,12 @@ func isSlash(c byte) bool { return c == '/' || c == '\\' }
 // The quotes are written here rather than in the view. That is what lets the
 // value be a literal at all, and it is also the position's one condition: this
 // replaces a whole JavaScript expression, not a piece of a string the view
-// opened for itself. A view that writes its own quotes around it produces a
-// literal inside a literal, which is a syntax error and not a silent hole.
+// opened for itself. A view that breaks it anyway is not broken out of: the
+// single quote, the backtick, the dollar sign and the slash are written in the
+// \uXXXX form, which ends no string, no template and no comment, so a value
+// inside a view's own '...', `...` or /* ... */ stays inside it. It is the
+// wrong text there -- the double quotes this writes become part of it -- and
+// it is never code.
 //
 // The characters that get a hex form are the ones that end the script element
 // rather than the ones that end the string: a script's content is not parsed
@@ -209,6 +213,10 @@ func isSlash(c byte) bool { return c == '/' || c == '\\' }
 // four visible characters while "</script>" inside the value closed the element
 // around it. U+2028 and U+2029 are here because JavaScript ends a line on them
 // as it does on a newline.
+//
+// Escaping a character a string did not need costs nothing: every \uXXXX
+// reads back as the character it stands for, so the value is the same string
+// whichever quote holds it.
 func TextJS(v any) string {
 	switch x := v.(type) {
 	case nil:
@@ -251,7 +259,7 @@ func jsString(s string) string {
 			b.WriteString(`\r`)
 		case '\t':
 			b.WriteString(`\t`)
-		case '<', '>', '&', '\u2028', '\u2029':
+		case '<', '>', '&', '\'', '`', '$', '/', '\u2028', '\u2029':
 			jsHex(&b, r)
 		default:
 			if r < 0x20 || r == 0x7f {
