@@ -110,15 +110,27 @@ var ErrNoTransaction = errors.New("events: Store must run inside a transaction")
 // the event if the process dies in between, and storing inside the transaction
 // is what removes that window.
 //
-// The Grant goes into the row: who authorized it, which action, which tenant.
-// That is a full audit trail without a second table, and it is why Store takes a
-// Grant it does not otherwise need.
+// The Grant goes into the row: who authorized it, which action, which tenant,
+// and the operator acting in the account when it was issued to an
+// impersonation. That is a full audit trail without a second table, and it is
+// why Store takes a Grant it does not otherwise need.
+//
+// A Grant that only reads -- an operator viewing somebody's account -- is
+// refused with auth.ErrReadOnly: the outbox writes with statements of its
+// own, so the database's refusal of that Grant does not reach it.
 func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 	if len(list) == 0 {
 		return nil
 	}
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if !o.db.InTransaction(ctx) {
 		return ErrNoTransaction
+	}
+	var impersonator any
+	if operator := g.Impersonator(); operator != nil {
+		impersonator = operator.ID
 	}
 
 	tenant := auth.Tenant(g)
@@ -160,10 +172,10 @@ func (o *Outbox) Store(ctx context.Context, g auth.Grant, list []Event) error {
 		_, err = o.db.ExecContext(ctx, `
 			INSERT INTO outbox (
 				id, tenant_id, event, aggregate, aggregate_id, payload,
-				authorized_by, action, occurred_at, attempts
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+				authorized_by, action, occurred_at, attempts, impersonator
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
 			id, tenant, e.Name, e.Aggregate, e.AggregateID, string(payload),
-			g.Subject().ID, string(g.Action()), occurred,
+			g.Subject().ID, string(g.Action()), occurred, impersonator,
 		)
 		if err != nil {
 			return fmt.Errorf("events: storing %s: %w", e.Name, err)
@@ -215,7 +227,7 @@ func (o *Outbox) Parked(ctx context.Context, limit int) ([]Stored, error) {
 func (o *Outbox) query(ctx context.Context, tail string, args ...any) ([]Stored, error) {
 	rows, err := o.db.QueryContext(ctx, `
 		SELECT id, tenant_id, event, aggregate, aggregate_id, payload,
-		       authorized_by, action, occurred_at, attempts, last_error
+		       authorized_by, action, occurred_at, attempts, last_error, impersonator
 		FROM outbox
 		`+tail, args...)
 	if err != nil {
@@ -226,12 +238,12 @@ func (o *Outbox) query(ctx context.Context, tail string, args ...any) ([]Stored,
 	var out []Stored
 	for rows.Next() {
 		var s Stored
-		var lastError sql.NullString
+		var lastError, impersonator sql.NullString
 		if err := rows.Scan(&s.ID, &s.TenantID, &s.Name, &s.Aggregate, &s.AggregateID,
-			&s.Payload, &s.AuthorizedBy, &s.Action, &s.OccurredAt, &s.Attempts, &lastError); err != nil {
+			&s.Payload, &s.AuthorizedBy, &s.Action, &s.OccurredAt, &s.Attempts, &lastError, &impersonator); err != nil {
 			return nil, fmt.Errorf("events: reading the outbox: %w", err)
 		}
-		s.LastError = lastError.String
+		s.LastError, s.Impersonator = lastError.String, impersonator.String
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -349,6 +361,11 @@ type Stored struct {
 	Payload      string
 	AuthorizedBy string
 	Action       string
+	// Impersonator is the identifier of whoever was acting in the account
+	// through an impersonation when the event was stored, and empty
+	// otherwise. AuthorizedBy names the account the event happened in, and
+	// this names the person who really caused it.
+	Impersonator string
 	OccurredAt   time.Time
 	Attempts     int
 	// LastError is why the most recent attempt failed. It is stored rather than

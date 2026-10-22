@@ -14,6 +14,7 @@ import (
 var (
 	_ migrations.ReversibleMigration = createOutboxTable{}
 	_ migrations.ReversibleMigration = addOutboxDeadLetter{}
+	_ migrations.ReversibleMigration = addOutboxImpersonator{}
 )
 
 // createOutboxTable is the outbox and the two indexes the relay reads it by.
@@ -102,4 +103,30 @@ func (addOutboxDeadLetter) Down(ctx context.Context, conn migrations.Connection)
 var widenOutboxTimePrecision = migrations.WidenTimePrecision{
 	Name:   "2026_10_19_000003_widen_outbox_time_precision",
 	Tables: []string{"outbox"},
+}
+
+// addOutboxImpersonator adds the column that names whoever was acting in the
+// account through an impersonation when an event was stored.
+//
+// Without it the row named the account and nothing else, so what an operator
+// did while acting as a customer was recorded as the customer's. Nullable, so
+// the previous binary keeps inserting without it during a rollout, and a row
+// it writes reads back as nobody's impersonation.
+type addOutboxImpersonator struct{ migrations.BaseMigration }
+
+// GetName is the migration's identity, and it carries the order.
+func (addOutboxImpersonator) GetName() string { return "2026_10_22_000004_add_outbox_impersonator" }
+
+// Up adds the column.
+func (addOutboxImpersonator) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, "outbox", func(table *schema.Blueprint) {
+		table.Text("impersonator").Nullable()
+	})
+}
+
+// Down drops the column.
+func (addOutboxImpersonator) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, "outbox", func(table *schema.Blueprint) {
+		table.DropColumn("impersonator")
+	})
 }

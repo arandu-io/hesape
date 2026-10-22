@@ -66,14 +66,15 @@ func (*Module) Name() string { return "events" }
 // foundation.Routable. This method goes in that release.
 func (*Module) Routes(*routing.Router) {}
 
-// Migrations returns the outbox table: the migration that creates it, and the
-// one that adds the column a parked event is marked with.
+// Migrations returns the outbox table: the migration that creates it, the one
+// that adds the column a parked event is marked with, and the one that adds
+// the operator acting in the account.
 //
 // They are declared with or without a relay, because storing is what cannot be
 // recovered later: an application that stores events before it publishes them
 // needs the table from the first one.
 func (*Module) Migrations() []migrations.Migration {
-	return []migrations.Migration{createOutboxTable{}, addOutboxDeadLetter{}, widenOutboxTimePrecision}
+	return []migrations.Migration{createOutboxTable{}, addOutboxDeadLetter{}, widenOutboxTimePrecision, addOutboxImpersonator{}}
 }
 
 // Start begins the relay loop, and only the process that serves calls it.
