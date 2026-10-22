@@ -305,7 +305,8 @@ func (s *Users) MarkVerified(ctx context.Context, tenant, userID, capturedEmail 
 //
 // Any change to either since the link was minted -- including the reset it
 // already made -- answers ErrResetLinkSpent, and so does an account
-// Hooks.Admit refuses.
+// Hooks.Admit refuses. Hooks.AfterResetPassword runs in the reset's
+// transaction, and only when the password was replaced.
 func (s *Users) ResetPassword(ctx context.Context, tenant, userID, capturedEmail, capturedFingerprint, newPassword string) (Account, error) {
 	user, err := s.FindForAuthentication(ctx, tenant, userID)
 	if err != nil {
@@ -320,17 +321,18 @@ func (s *Users) ResetPassword(ctx context.Context, tenant, userID, capturedEmail
 			return nil, ErrResetLinkSpent
 		}
 	}
-	return s.replacePassword(ctx, s.passwordGrant(tenant), user, newPassword, PasswordReset)
+	return s.replacePassword(ctx, s.passwordGrant(tenant), user, newPassword, PasswordReset, s.hooks.AfterResetPassword)
 }
 
 // SetPassword replaces the password of the account at an address, for an
-// operator's command, and stores PasswordReset.
+// operator's command, and stores PasswordReset. Hooks.AfterResetPassword runs
+// in its transaction, as it does in ResetPassword.
 func (s *Users) SetPassword(ctx context.Context, tenant, email, password string) (Account, error) {
 	user, err := s.Lookup(ctx, tenant, email)
 	if err != nil {
 		return nil, err
 	}
-	return s.replacePassword(ctx, s.passwordGrant(user.AccountTenant()), user, password, PasswordReset)
+	return s.replacePassword(ctx, s.passwordGrant(user.AccountTenant()), user, password, PasswordReset, s.hooks.AfterResetPassword)
 }
 
 // ConfirmPassword checks the password of a signed-in subject again, before a
@@ -385,7 +387,7 @@ func (s *Users) ChangePassword(ctx context.Context, subject auth.Subject, curren
 	if err != nil {
 		return nil, err
 	}
-	return s.replacePassword(ctx, grant, user, next, PasswordChanged)
+	return s.replacePassword(ctx, grant, user, next, PasswordChanged, nil)
 }
 
 // Rename changes the name the signed-in subject's account is shown by, under
@@ -600,8 +602,9 @@ func (s *Users) passwordGrant(tenant string) auth.Grant {
 
 // replacePassword writes a new hash conditionally on the hash the account held
 // when it was read, so of two concurrent replacements exactly one wins and the
-// other answers ErrResetLinkSpent.
-func (s *Users) replacePassword(ctx context.Context, grant auth.Grant, user Account, plain, event string) (Account, error) {
+// other answers ErrResetLinkSpent. after, when set, runs in the same
+// transaction once the hash is written, before the event is stored.
+func (s *Users) replacePassword(ctx context.Context, grant auth.Grant, user Account, plain, event string, after func(context.Context, auth.Grant, Account) error) (Account, error) {
 	hash, err := hashing.Make(plain)
 	if err != nil {
 		return nil, fmt.Errorf("user: hashing password: %w", err)
@@ -620,6 +623,11 @@ func (s *Users) replacePassword(ctx context.Context, grant auth.Grant, user Acco
 		}
 		if err := user.ForceFill(map[string]any{columnPassword: hash}); err != nil {
 			return err
+		}
+		if after != nil {
+			if err := after(ctx, grant, user); err != nil {
+				return err
+			}
 		}
 		return s.record(ctx, grant, event, user)
 	})

@@ -201,6 +201,19 @@ type Hooks struct {
 	// remembered devices. An error rolls back the close and the event with it.
 	AfterClose func(ctx context.Context, grant auth.Grant, user Account) error
 
+	// AfterResetPassword runs in the transaction that replaced the password
+	// of a reset -- ResetPassword, from a link, and SetPassword, from an
+	// operator's command -- after the new hash is written and before
+	// PasswordReset is stored, with the Grant the reset was made under and the
+	// account holding the new hash: where the application revokes what still
+	// acts as the account without the password -- personal access tokens,
+	// remembered devices. A reset is how somebody takes an account back, and a
+	// token minted by whoever had it outlives the old password otherwise. An
+	// error rolls back the reset and the event with it. A reset that is
+	// refused never calls it, and ChangePassword, which proves the current
+	// password, does not either.
+	AfterResetPassword func(ctx context.Context, grant auth.Grant, user Account) error
+
 	// Payload replaces UserEvent as the payload of the events Users stores.
 	Payload func(user Account) any
 }

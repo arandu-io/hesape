@@ -25,6 +25,8 @@ func hookCases() []testCase {
 		{"AFailingAfterRegisterRollsBackTheAccountAndItsEvent", afterRegisterRollsBack},
 		{"ProvisionDoesNotCallAfterRegister", provisionSkipsAfterRegister},
 		{"AfterCloseRunsInTheTransactionOfTheClose", afterCloseInTransaction},
+		{"AfterResetPasswordRunsInTheTransactionOfTheReset", afterResetPasswordInTransaction},
+		{"AfterResetPasswordDoesNotRunForARefusedReset", afterResetPasswordSkipsARefusal},
 		{"AdmitRefusesAClosedAccountAndWhatTheHookRefuses", admitRefusesClosed},
 	}
 }
@@ -366,6 +368,108 @@ func afterCloseInTransaction(t *testing.T, e *env) {
 	}
 	if got := e.eventCount(registered.AccountID(), account.AccountClosed); got != 1 {
 		t.Fatalf("closing stored %d %s events, want one", got, account.AccountClosed)
+	}
+}
+
+// afterResetPasswordInTransaction: a password reset left every personal
+// access token of the account valid, so whoever had taken the account kept
+// acting as it after its owner took it back. AfterResetPassword runs in the
+// reset's transaction, with the reset's Grant and the account holding the new
+// hash, once per reset, and its failure rolls the reset back.
+func afterResetPasswordInTransaction(t *testing.T, e *env) {
+	failing := errors.New("the tokens could not be revoked")
+	var reset []string
+	fail := true
+	users := e.users(account.Hooks{AfterResetPassword: func(ctx context.Context, grant auth.Grant, user account.Account) error {
+		if auth.Tenant(grant) != user.AccountTenant() {
+			t.Errorf("AfterResetPassword got a Grant for %q, want the account's tenant %q", auth.Tenant(grant), user.AccountTenant())
+		}
+		if err := grant.Check(account.ActionUserUpdate); err != nil {
+			t.Errorf("AfterResetPassword got a Grant the reset could not have written with: %v", err)
+		}
+		if hashing.Check("a-brand-new-password", user.PasswordHash()) != nil && hashing.Check("an-operator-password", user.PasswordHash()) != nil {
+			t.Error("AfterResetPassword got the account with its old hash")
+		}
+		reset = append(reset, user.AccountID())
+		if fail {
+			return failing
+		}
+		return nil
+	}}, nil)
+	registered := e.register(users, tenantA, "Ana", "ana@example.test")
+	captured := account.Fingerprint(registered.PasswordHash())
+
+	if _, err := users.ResetPassword(e.ctx, tenantA, registered.AccountID(), registered.AccountEmail(), captured, "a-brand-new-password"); !errors.Is(err, failing) {
+		t.Fatalf("a reset whose AfterResetPassword failed answered %v, want the hook's error", err)
+	}
+	if hash := e.text(`SELECT password FROM users WHERE id = ?`, registered.AccountID()); hash != registered.PasswordHash() {
+		t.Fatal("a failing AfterResetPassword left the new password stored")
+	}
+	if got := e.eventCount(registered.AccountID(), account.PasswordReset); got != 0 {
+		t.Fatalf("a failing AfterResetPassword left %d %s events", got, account.PasswordReset)
+	}
+
+	fail = false
+	if _, err := users.ResetPassword(e.ctx, tenantA, registered.AccountID(), registered.AccountEmail(), captured, "a-brand-new-password"); err != nil {
+		t.Fatalf("resetting after the hook recovered: %v", err)
+	}
+	if len(reset) != 2 || reset[1] != registered.AccountID() {
+		t.Fatalf("AfterResetPassword ran for %v, want the account once per reset", reset)
+	}
+	if got := e.eventCount(registered.AccountID(), account.PasswordReset); got != 1 {
+		t.Fatalf("resetting stored %d %s events, want one", got, account.PasswordReset)
+	}
+
+	if _, err := users.SetPassword(e.ctx, tenantA, registered.AccountEmail(), "an-operator-password"); err != nil {
+		t.Fatalf("an operator setting the password: %v", err)
+	}
+	if len(reset) != 3 {
+		t.Fatalf("AfterResetPassword ran %d times after an operator set the password, want 3", len(reset))
+	}
+}
+
+// afterResetPasswordSkipsARefusal: a reset that is refused -- a spent link, a
+// wrong address, a refused account -- replaced nothing, and revoking the
+// account's tokens for it would let anybody holding an old link sign every
+// integration of the account out.
+func afterResetPasswordSkipsARefusal(t *testing.T, e *env) {
+	ran := 0
+	users := e.users(account.Hooks{
+		AfterResetPassword: func(context.Context, auth.Grant, account.Account) error { ran++; return nil },
+		Admit: func(_ context.Context, user account.Account) error {
+			if user.AccountName() == "Suspended" {
+				return errSuspended
+			}
+			return nil
+		},
+	}, nil)
+	registered := e.register(users, tenantA, "Ana", "ana@example.test")
+	suspended := e.register(users, tenantA, "Suspended", "sus@example.test")
+	captured := account.Fingerprint(registered.PasswordHash())
+
+	for name, try := range map[string]func() error{
+		"another address": func() error {
+			_, err := users.ResetPassword(e.ctx, tenantA, registered.AccountID(), "other@example.test", captured, "a-brand-new-password")
+			return err
+		},
+		"another fingerprint": func() error {
+			_, err := users.ResetPassword(e.ctx, tenantA, registered.AccountID(), registered.AccountEmail(), "not-the-fingerprint", "a-brand-new-password")
+			return err
+		},
+		"a refused account": func() error {
+			_, err := users.ResetPassword(e.ctx, tenantA, suspended.AccountID(), suspended.AccountEmail(), account.Fingerprint(suspended.PasswordHash()), "a-brand-new-password")
+			return err
+		},
+	} {
+		if err := try(); !errors.Is(err, account.ErrResetLinkSpent) {
+			t.Errorf("a reset with %s answered %v, want ErrResetLinkSpent", name, err)
+		}
+	}
+	if _, err := users.ChangePassword(e.ctx, subject(registered), password, "a-changed-password", "127.0.0.1"); err != nil {
+		t.Fatalf("changing the password: %v", err)
+	}
+	if ran != 0 {
+		t.Fatalf("AfterResetPassword ran %d times for refused resets and a change, want none", ran)
 	}
 }
 
