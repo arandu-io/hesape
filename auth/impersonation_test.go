@@ -182,3 +182,30 @@ func TestAPlainImpersonationStillOnlyReads(t *testing.T) {
 		t.Fatal("the acting mark changed an ordinary subject")
 	}
 }
+
+// A job pushed while an operator acts in an account runs in a worker under a
+// SystemGrant. Without the operator carried into it, everything the job writes
+// is recorded as the system's and the person who caused it disappears.
+func TestSystemGrantActingNamesTheOperatorAndWrites(t *testing.T) {
+	g := auth.SystemGrantActing("invoice.send", "platform", "op-1")
+	if err := g.Check("invoice.send"); err != nil {
+		t.Fatalf("the rebuilt grant fails its own action: %v", err)
+	}
+	if g.Impersonator() == nil || g.Impersonator().ID != "op-1" {
+		t.Fatalf("the rebuilt grant does not name the operator: %+v", g.Impersonator())
+	}
+	if g.ReadOnly() || auth.Writable(g) != nil {
+		t.Fatal("the rebuilt grant of an acting impersonation refuses to write")
+	}
+	if !g.Subject().HasRole("system") || auth.Tenant(g) != "platform" {
+		t.Fatalf("the rebuilt grant is not the system subject of the tenant: %+v", g.Subject())
+	}
+
+	plain := auth.SystemGrantActing("invoice.send", "platform", "")
+	if plain.Impersonator() != nil || plain.Check("invoice.send") != nil {
+		t.Fatal("an empty impersonator did not answer what SystemGrant answers")
+	}
+	if err := auth.SystemGrantActing("invoice.send", "", "op-1").Check("invoice.send"); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("a missing tenant was accepted because an impersonator was named: %v", err)
+	}
+}

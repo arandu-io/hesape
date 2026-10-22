@@ -106,11 +106,34 @@ func (g Grant) Impersonator() *Subject { return g.subject.Impersonator }
 // update, an upsert, a delete, a truncate, through the query builder or a
 // model -- so viewing as somebody cannot change their data whatever the
 // application forgot to hide. A store that keeps the account's own records
-// elsewhere asks it the same way. SystemGrant has no subject and is always
-// writable: a job is nobody's impersonation.
+// elsewhere asks it the same way: the filesystem Disk, the cache, a broadcast,
+// a webhook dispatch and a queued job all refuse a read-only Grant. SystemGrant
+// has no subject and is always writable: a job is nobody's impersonation.
 func Writable(g Grant) error {
 	if g.subject.Impersonator == nil || g.subject.Acting {
 		return nil
 	}
 	return fmt.Errorf("%w: %s viewing as %s", ErrReadOnly, g.subject.Impersonator.ID, g.subject.ID)
+}
+
+// SystemGrantActing is SystemGrant for work somebody set in motion while
+// acting in an account through ImpersonateActing: the same system subject,
+// action and tenant, writable, with impersonator kept as its Impersonator so
+// the record of what the work writes can name the person who caused it.
+//
+// It is how a queue worker rebuilds the Grant of a job pushed during an
+// impersonation. A system subject is nobody's session, so the impersonator is
+// carried by identifier alone, with no roles or actions: it is a name for the
+// record, never something a Policy decides on.
+//
+// An empty impersonator answers exactly what SystemGrant answers, and so does
+// a tenant SystemGrant refuses.
+func SystemGrantActing(a Action, tenant, impersonator string) Grant {
+	g := SystemGrant(a, tenant)
+	if !g.valid || impersonator == "" {
+		return g
+	}
+	g.subject.Impersonator = &Subject{ID: impersonator}
+	g.subject.Acting = true
+	return g
 }
