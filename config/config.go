@@ -40,7 +40,9 @@ type App struct {
 	// Name appears in the page title, in the log and in outgoing mail.
 	Name string
 
-	// Env gates everything that must never run outside development.
+	// Env gates everything that must never run outside development. Load
+	// reads it from APP_ENV, and an APP_ENV that is unset or empty is
+	// production: development is only ever asked for.
 	Env Env
 
 	// Debug turns on the debug error page -- the one that prints a stack trace,
@@ -100,7 +102,14 @@ func Load() (App, error) {
 		return App{}, err
 	}
 
-	env := Env(String("APP_ENV", string(EnvDev)))
+	// A missing APP_ENV is production. Development turns on the debug console,
+	// the error page with its stack, cookies without Secure and the commands
+	// that wipe a database, so it is something a machine is told it is, never
+	// something a deploy that forgot a variable becomes. The cost falls on the
+	// side that notices: a developer with no APP_ENV sees a production error
+	// page and sets it, where a server with no APP_ENV used to serve the debug
+	// console to anyone who asked.
+	env := Env(String("APP_ENV", string(EnvProd)))
 
 	raw := String("APP_URL", "http://localhost:8080")
 	parsed, err := url.Parse(raw)

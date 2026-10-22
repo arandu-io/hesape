@@ -209,8 +209,8 @@ func TestLoadAppliesDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if app.Env != config.EnvDev {
-		t.Errorf("default Env = %q, want dev", app.Env)
+	if app.Env != config.EnvProd || app.Debug {
+		t.Errorf("default Env = %q with Debug %v, want prod without debug", app.Env, app.Debug)
 	}
 	if app.HTTPAddr != ":8080" {
 		t.Errorf("default HTTPAddr = %q, want :8080", app.HTTPAddr)
@@ -260,5 +260,32 @@ func TestLoadRejectsAnUnknownTimezone(t *testing.T) {
 
 	if _, err := config.Load(); err == nil {
 		t.Fatal("an unknown APP_TIMEZONE was accepted: every rendered date would silently be UTC")
+	}
+}
+
+// TestAMissingAppEnvIsProduction: a missing APP_ENV was dev, so a container
+// started without it -- the skeleton's Dockerfile sets none -- served the debug
+// console without a secret, the error page with its stack and cookies without
+// Secure, on a public address. Development is only ever asked for.
+func TestAMissingAppEnvIsProduction(t *testing.T) {
+	emptyProject(t)
+	t.Setenv("APP_KEY", strings.Repeat("k", encryption.KeySize))
+	t.Setenv("APP_ENV", "")
+
+	app, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if app.Env != config.EnvProd || app.Debug {
+		t.Fatalf("a missing APP_ENV loaded as %q with Debug %v, want prod without debug", app.Env, app.Debug)
+	}
+
+	t.Setenv("APP_ENV", "dev")
+	app, err = config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if app.Env != config.EnvDev || !app.Debug {
+		t.Fatalf("APP_ENV=dev loaded as %q with Debug %v, want dev with debug", app.Env, app.Debug)
 	}
 }
