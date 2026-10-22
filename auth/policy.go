@@ -217,8 +217,10 @@ type Policy[T any] interface {
 //
 // What the compiler does NOT decide is which Grant. Authorize is the mandatory
 // path and the only one where a Policy answered; SystemGrant is the named
-// escape hatch, and GrantFor in the queue package wraps it for jobs. All three
-// are exported, so a handler can construct a Grant nobody authorized. What
+// escape hatch, SystemGrantActing is the same hatch naming the operator who
+// set the work in motion, and GrantFor in the queue package wraps the two for
+// jobs. All four are exported, so a handler can construct a Grant nobody
+// authorized. What
 // stops that is
 // `aru doctor` -- a lint, not the type system -- with system-grant-outside-scope,
 // system-grant-without-tenant and tenant-from-request.
