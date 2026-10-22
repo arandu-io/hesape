@@ -439,3 +439,44 @@ func TestAnImageOriginThatIsNotABareHttpsOriginPanics(t *testing.T) {
 		})
 	}
 }
+
+// TestAnUnreadableEntryOnTheLeftDoesNotMakeTheProxyTheVisitor: any entry that
+// did not parse discarded the whole chain, so "garbage, 1.2.3.4" made the
+// visitor the proxy -- the address the logs, the throttle and every allowlist
+// of internal addresses then saw, chosen by whoever wrote the garbage.
+func TestAnUnreadableEntryOnTheLeftDoesNotMakeTheProxyTheVisitor(t *testing.T) {
+	for header, want := range map[string]string{
+		"garbage, 198.51.100.4":              "198.51.100.4",
+		"garbage, 203.0.113.9, 198.51.100.4": "198.51.100.4",
+		"198.51.100.4, garbage, 10.0.0.9":    "10.0.0.9",
+		"203.0.113.9:443, garbage, 10.0.0.9": "10.0.0.9",
+		"garbage,198.51.100.4,10.0.0.9":      "198.51.100.4",
+		"not-an-address, 10.0.0.7, 10.0.0.9": "10.0.0.7",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = "10.0.0.3:8080"
+		r.Header.Set("X-Forwarded-For", header)
+		_, got := run(middleware.TrustProxies(private), r)
+		if got.remote != want {
+			t.Errorf("X-Forwarded-For %q made the visitor %q, want %q", header, got.remote, want)
+		}
+	}
+}
+
+// TestTheClaimsStopAtAnUnreadableEntry: what is left of the visitor is kept as
+// what the header claimed, and a claim past an entry that cannot be read is
+// not one.
+func TestTheClaimsStopAtAnUnreadableEntry(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.3:8080"
+	r.Header.Set("X-Forwarded-For", "192.0.2.1, garbage, 203.0.113.9, 198.51.100.4")
+
+	var chain []string
+	middleware.TrustProxies(private)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		chain = hhttp.NewRequest(r).IPs()
+	})).ServeHTTP(httptest.NewRecorder(), r)
+
+	if len(chain) != 2 || chain[0] != "198.51.100.4" || chain[1] != "203.0.113.9" {
+		t.Fatalf("IPs = %v, want [198.51.100.4 203.0.113.9]", chain)
+	}
+}

@@ -34,7 +34,10 @@ import (
 // walked from the right, skipping entries that are themselves trusted, and the
 // first one that is not is the visitor: everything to the left of it was written
 // by whoever that is, and is worth nothing. A chain that is trusted all the way
-// down leaves the leftmost entry, which is the only candidate left.
+// down leaves the leftmost entry, which is the only candidate left. An entry
+// that does not parse ends the walk where it stands: the visitor is then the
+// last address a trusted proxy appended, never the peer because of something
+// written further left.
 //
 // # What it does not take
 //
@@ -91,47 +94,63 @@ func TrustProxies(trusted []netip.Prefix) hhttp.Middleware {
 // before them.
 //
 // The header may arrive more than once, and the values concatenate in order, so
-// they are read as one list. An entry that does not parse ends the walk: past it
-// the chain cannot be reasoned about, and the nearest thing that is certainly
-// real is the hop to its right. Nothing is returned in that case, and the peer
-// stands.
+// they are read as one list. It is walked from the right, starting at the peer,
+// which is trusted: each entry was appended by the hop to its right, so an entry
+// is believed only while that hop is one of ours. The walk stops at the first
+// entry that is not one of ours -- the visitor -- or at the first that does not
+// parse. Past an unreadable entry nothing can be reasoned about, and the visitor
+// is the last address a trusted proxy appended before it. An unreadable entry
+// on the left, which is where a client writes, therefore changes nothing; only
+// one written by the peer itself leaves nothing to take, and then nothing is
+// returned and the peer stands.
 //
-// The peer completes the chain, our own proxies come out of it -- they are
-// infrastructure and not visitors -- and what is left is reversed, nearest
-// hop first. It used to return the visitor alone, which is all this
-// middleware needed and half of what hhttp.Request.IPs needed.
+// It used to give up on the whole chain at any entry that did not parse, so
+// "garbage, 198.51.100.4" made every visitor the proxy -- one address for the
+// whole internet in the rate limit and the logs, chosen by whoever wrote the
+// garbage.
+//
+// Behind the visitor, the entries further left are kept as claims, without our
+// own proxies -- they are infrastructure and not visitors, and a client that
+// writes one of our addresses into the header does not become one by saying
+// so -- up to the first that does not parse.
 func forwardedFor(values []string, peer netip.Addr, trusted []netip.Prefix) []netip.Addr {
-	var chain []netip.Addr
+	var parts []string
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
-			addr, ok := addrOf(strings.TrimSpace(part))
-			if !ok {
-				return nil
-			}
-			chain = append(chain, addr)
+			parts = append(parts, strings.TrimSpace(part))
 		}
 	}
-	if len(chain) == 0 {
+	if len(parts) == 0 {
 		return nil
 	}
-	chain = append(chain, peer)
 
-	// Walk from the nearest hop outwards, dropping every entry that is one of
-	// ours wherever it sits -- a hop inside the trusted prefixes is
-	// infrastructure and not a visitor, and a client that writes one of our
-	// addresses into the header does not become one by saying so.
-	var out []netip.Addr
-	for i := len(chain) - 1; i >= 0; i-- {
-		if !within(trusted, chain[i]) {
-			out = append(out, chain[i])
+	last, appended := peer, false
+	for i := len(parts) - 1; i >= 0; i-- {
+		addr, ok := addrOf(parts[i])
+		if !ok {
+			break
 		}
+		if !within(trusted, addr) {
+			out := []netip.Addr{addr}
+			for j := i - 1; j >= 0; j-- {
+				claimed, ok := addrOf(parts[j])
+				if !ok {
+					break
+				}
+				if !within(trusted, claimed) {
+					out = append(out, claimed)
+				}
+			}
+			return out
+		}
+		last, appended = addr, true
 	}
-	if len(out) == 0 {
-		// Trusted the whole way down. The leftmost entry is the only candidate
-		// left, and it is the one the first proxy wrote.
-		return []netip.Addr{chain[0]}
+	if !appended {
+		return nil
 	}
-	return out
+	// Ours as far as it can be read: the leftmost readable entry is the only
+	// candidate left, and a trusted proxy wrote it.
+	return []netip.Addr{last}
 }
 
 // forwardedProto reads the scheme the browser used, or empty.
