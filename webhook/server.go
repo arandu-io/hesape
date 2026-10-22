@@ -205,6 +205,9 @@ func (s *sender) record(ctx context.Context, g auth.Grant, items []outgoing) ([]
 	if err := g.Check(DeliveryDispatch); err != nil {
 		return nil, err
 	}
+	if err := auth.Writable(g); err != nil {
+		return nil, err
+	}
 	tenant := auth.Tenant(g)
 	if !auth.ValidTenant(tenant) {
 		return nil, fmt.Errorf("%w: the Grant carries no valid tenant", auth.ErrForbidden)
@@ -331,6 +334,9 @@ type Message struct {
 // subscribes to.
 func (s *sender) send(ctx context.Context, g auth.Grant, endpointID string, msg Message) (*Delivery, error) {
 	if err := g.Check(DeliveryDispatch); err != nil {
+		return nil, err
+	}
+	if err := auth.Writable(g); err != nil {
 		return nil, err
 	}
 	row, err := Endpoints(s.db).WhereKey(endpointID).First(ctx, g)
@@ -541,7 +547,8 @@ func (o *Outgoing) DispatchUnless(ctx context.Context, cond bool, g auth.Grant) 
 	return o.DispatchIf(ctx, !cond, g)
 }
 
-// Dispatch records the call and queues its delivery.
+// Dispatch records the call and queues its delivery. A read-only Grant is
+// refused with auth.ErrReadOnly before anything is recorded.
 func (o *Outgoing) Dispatch(ctx context.Context, g auth.Grant) error {
 	if o.err != nil {
 		return o.err

@@ -261,8 +261,13 @@ func (m *Manager) RegisterJobHandlers(worker *queue.Worker) error {
 }
 
 // Dispatch atomically records and queues one immutable delivery per endpoint.
+// A read-only Grant -- one issued to a subject somebody else is only viewing
+// as -- is refused with auth.ErrReadOnly before anything is recorded.
 func (m *Manager) Dispatch(ctx context.Context, g auth.Grant, event Event, endpoints []ManagerEndpoint) error {
 	if _, err := tenantForAction(g, m.action); err != nil {
+		return err
+	}
+	if err := auth.Writable(g); err != nil {
 		return err
 	}
 	if strings.TrimSpace(event.ID) == "" || strings.TrimSpace(event.Name) == "" {

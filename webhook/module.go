@@ -96,7 +96,8 @@ func (m *Module) Publisher() events.Publisher { return publisher{s: m.sender} }
 // on every attempt. g carries DeliveryDispatch for the tenant: the
 // application decided to send, and that decision is the Grant. A second
 // message with the same EventID to the same endpoint answers the first
-// delivery and sends nothing.
+// delivery and sends nothing. A read-only Grant is refused with
+// auth.ErrReadOnly before anything is read or recorded.
 func (m *Module) Send(ctx context.Context, g auth.Grant, endpointID string, msg Message) (*Delivery, error) {
 	return m.sender.send(ctx, g, endpointID, msg)
 }
