@@ -54,7 +54,13 @@ func (l *LogBroadcaster) ValidAuthenticationResponse(ctx context.Context, g auth
 // a log that showed "orders.17" while the broker saw "acme:orders.17" would be
 // the wrong evidence. They come from the embedded [Broadcaster.FormatChannels],
 // which is the one place a channel name is built.
+//
+// A read-only Grant is refused with auth.ErrReadOnly, as every driver refuses
+// it, so a log in development says what production would do.
 func (l *LogBroadcaster) Broadcast(ctx context.Context, g auth.Grant, channels []broadcasting.Channel, event string, payload map[string]any) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	names, err := l.FormatChannels(g, channels)
 	if err != nil {
 		return err

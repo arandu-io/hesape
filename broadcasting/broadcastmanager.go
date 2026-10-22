@@ -213,7 +213,15 @@ func (m *BroadcastManager) Event(event any) *PendingBroadcast {
 //
 // ctx and g are what [BroadcastEvent.Handle] documents: the I/O, and the Grant
 // the tenant comes off.
+//
+// A read-only Grant -- one issued to a subject somebody else is only viewing
+// as -- is refused with auth.ErrReadOnly before anything is published, locked
+// or pushed, and the refusal is returned even for an event that asked to be
+// rescued: a broadcast is an act in the account, and a view does not act.
 func (m *BroadcastManager) Queue(ctx context.Context, g auth.Grant, event any) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if now, ok := event.(ShouldBroadcastNow); ok && now.ShouldBroadcastNow() {
 		return m.rescue(event, NewBroadcastEvent(cloneEvent(event)).Handle(ctx, g, m))
 	}

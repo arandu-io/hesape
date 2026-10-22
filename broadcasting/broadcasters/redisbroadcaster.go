@@ -155,7 +155,12 @@ func (r *RedisBroadcaster) ValidAuthenticationResponse(ctx context.Context, g au
 // The document is event, data and socket, with the socket id lifted out of the
 // data. A subscriber that carries that socket id skips the message, and that is
 // how ToOthers reaches the browser.
+//
+// A read-only Grant is refused with auth.ErrReadOnly.
 func (r *RedisBroadcaster) Broadcast(ctx context.Context, g auth.Grant, channels []broadcasting.Channel, event string, payload map[string]any) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if len(channels) == 0 {
 		return nil
 	}

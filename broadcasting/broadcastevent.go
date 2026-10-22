@@ -169,6 +169,8 @@ func NewBroadcastEvent(event any) *BroadcastEvent {
 // authorized.
 //
 // An event on no channels returns without touching a driver.
+//
+// A read-only Grant is refused with auth.ErrReadOnly.
 func (b *BroadcastEvent) Handle(ctx context.Context, g auth.Grant, manager Factory) error {
 	queued, err := b.snapshot()
 	if err != nil {
@@ -216,6 +218,9 @@ func (b *BroadcastEvent) snapshot() (queuedBroadcast, error) {
 
 // Handle publishes the resolved broadcast on every requested connection.
 func (b queuedBroadcast) handle(ctx context.Context, g auth.Grant, manager Factory) error {
+	if err := auth.Writable(g); err != nil {
+		return err
+	}
 	if len(b.Channels) == 0 {
 		return nil
 	}
