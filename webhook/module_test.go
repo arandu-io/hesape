@@ -266,7 +266,7 @@ func TestReceivePathsListEveryAddressToExemptFromCSRF(t *testing.T) {
 	mounted := billing()
 	mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, "/integrations/lpr/{org}/{key}"
 	module := newModule(t, webhook.Config{Receivers: []webhook.Receiver{billing(), mounted}}, nil)
-	if got := module.ReceivePaths(); !slices.Equal(got, []string{"/webhooks/", "/integrations/lpr/"}) {
+	if got := module.ReceivePaths(); !slices.Equal(got, []string{"/webhooks/", "/integrations/lpr/{org}/{key}"}) {
 		t.Fatalf("ReceivePaths() = %v", got)
 	}
 }
@@ -378,5 +378,62 @@ func TestAMountWhoseExemptionReachesOtherRoutesIsRefused(t *testing.T) {
 		mounted := billing()
 		mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, mount
 		newModule(t, webhook.Config{Receivers: []webhook.Receiver{mounted}}, nil)
+	}
+}
+
+// TestAManagementPrefixUnderTheReceiversIsRefused: ReceivePrefix is exempt
+// from the CSRF check, and Validate accepted a Prefix under it, so
+// "/webhooks/manage/endpoints/{id}/rotate" took a cross-site POST. Either
+// nesting, and the two being equal, is refused.
+func TestAManagementPrefixUnderTheReceiversIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct{ prefix, receive string }{
+		{"/webhooks/manage", ""},
+		{"/hooks/admin", "/hooks"},
+		{"/hooks", "/hooks"},
+		{"/webhook", "/webhook/endpoints"},
+		{"", "/webhook"},
+	} {
+		_, err := webhook.New(webhook.Config{Key: []byte(testKey), Prefix: c.prefix, ReceivePrefix: c.receive},
+			database.Wrap(nil, database.DialectSQLite), nil)
+		if err == nil || !strings.Contains(err.Error(), "overlap") {
+			t.Errorf("New with Prefix %q and ReceivePrefix %q answered %v, want the overlap refused", c.prefix, c.receive, err)
+		}
+	}
+	for _, c := range []struct{ prefix, receive string }{
+		{"", ""},
+		{"/hooks-admin", "/hooks"},
+		{"/admin/webhooks", "/webhooks"},
+	} {
+		newModule(t, webhook.Config{Prefix: c.prefix, ReceivePrefix: c.receive}, nil)
+	}
+}
+
+// TestAMountIsExemptAtItsOwnAddressOnly: ReceivePaths exempted a Mount up to
+// its first parameter, so "/integrations/lpr/{org}/{key}" exempted every route
+// under "/integrations/lpr/", the application's own forms included. The
+// exemption is the Mount as written now, and a Mount that cannot be one is
+// refused at wiring.
+func TestAMountIsExemptAtItsOwnAddressOnly(t *testing.T) {
+	t.Parallel()
+
+	mounted := billing()
+	mounted.Name, mounted.Methods, mounted.Mount = "lpr", nil, "/integrations/lpr/{org}/{key}"
+	paths := newModule(t, webhook.Config{Receivers: []webhook.Receiver{mounted}}, nil).ReceivePaths()
+	for _, p := range paths {
+		if p == "/integrations/lpr/" || p == "/integrations/" {
+			t.Fatalf("ReceivePaths() = %v, which exempts the whole subtree of the Mount", paths)
+		}
+	}
+
+	for _, mount := range []string{"/hooks/{rest...}", "/hooks/{$}", "/hooks/v{n}"} {
+		refused := billing()
+		refused.Name, refused.Methods, refused.Mount = "lpr", nil, mount
+		_, err := webhook.New(webhook.Config{Key: []byte(testKey), Receivers: []webhook.Receiver{refused}},
+			database.Wrap(nil, database.DialectSQLite), nil)
+		if err == nil {
+			t.Errorf("New accepted Mount %q, which CSRFExcept cannot exempt exactly", mount)
+		}
 	}
 }

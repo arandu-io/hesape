@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/http/middleware"
 )
 
 // The defaults for the optional settings. They are constants rather than
@@ -86,7 +87,8 @@ type Config struct {
 
 	// ReceivePrefix is the path every receiver is mounted under. Empty means
 	// DefaultReceivePrefix. The application exempts it from the CSRF check,
-	// because a call from another system carries no session:
+	// because a call from another system carries no session, so it cannot be
+	// Prefix or overlap it either way: Validate refuses that.
 	//
 	//	middleware.CSRFProtect(csrf, sessions.IDFromRequest, middleware.CSRFExcept(webhookModule.ReceivePrefix()+"/"))
 	ReceivePrefix string
@@ -190,10 +192,10 @@ type Receiver struct {
 	// Mount is an absolute path the receiver answers at instead, outside
 	// ReceivePrefix, for an address that is already published:
 	// "/integracoes/lpr/{org}/{key}". It cannot be under /_arandu. The
-	// application exempts it from the CSRF check too; ReceivePaths lists
-	// what to exempt, which is everything up to its first parameter, so its
-	// first segment cannot be a parameter and it cannot reach the management
-	// routes under Prefix.
+	// application exempts it from the CSRF check too; ReceivePaths lists it
+	// exactly as written, each {name} segment matching one segment, so every
+	// parameter is a whole {name}, its first segment cannot be one, and it
+	// cannot match a management route under Prefix.
 	Mount string
 
 	// Tenant is whose calls these are, for a static receiver. It comes from
@@ -300,6 +302,16 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	manage, receive := c.Prefix, c.ReceivePrefix
+	if manage == "" {
+		manage = DefaultPrefix
+	}
+	if receive == "" {
+		receive = DefaultReceivePrefix
+	}
+	if overlaps(manage, receive) {
+		return fmt.Errorf("webhook: Config.Prefix %q and Config.ReceivePrefix %q overlap, and ReceivePrefix is exempt from the CSRF check: the management routes are forms a signed-in person submits, so mount them apart", manage, receive)
+	}
 	if c.PageSize < 0 || c.PageSize > MaxPageSize {
 		return fmt.Errorf("webhook: Config.PageSize is %d, and has to be between 0 and %d, where 0 means %d", c.PageSize, MaxPageSize, DefaultPageSize)
 	}
@@ -347,36 +359,56 @@ func (c Config) Validate() error {
 	return validateReceiverRoutes(c)
 }
 
-// mountExemption is what ReceivePaths exempts from the CSRF check for a
-// Mount: the Mount itself when it has no parameter, and otherwise its fixed
-// part, up to the slash before its first parameter.
-func mountExemption(mount string) string {
-	if i := strings.Index(mount, "{"); i >= 0 {
-		return mount[:strings.LastIndex(mount[:i], "/")+1]
-	}
-	return mount
-}
-
 // validateMount refuses a Mount whose CSRF exemption would reach routes that
-// are not the receiver's: one whose first segment is a parameter, which would
-// exempt every route of the application, and one that reaches the management
-// routes under Prefix, which are forms a signed-in person submits.
-func validateMount(r Receiver, prefix string) error {
+// are not the receiver's. ReceivePaths exempts the Mount exactly as written, a
+// {name} segment matching any one segment, so the exemption is refused where
+// CSRFExcept would refuse it -- a first segment that is a parameter, which
+// would exempt every route at that depth, or a segment that is not a whole
+// {name} -- and where it could match a management route under Prefix, which
+// are forms a signed-in person submits.
+func validateMount(r Receiver, prefix string) (err error) {
 	if r.Mount == "" {
 		return nil
 	}
 	if prefix == "" {
 		prefix = DefaultPrefix
 	}
-	fixed := mountExemption(r.Mount)
-	if fixed == "/" {
-		return fmt.Errorf("receiver %q: Mount %q starts with a parameter, and exempting it from the CSRF check would exempt every route: give it a fixed first segment", r.Name, r.Mount)
+	if strings.HasPrefix(r.Mount, "/{") {
+		return fmt.Errorf("receiver %q: Mount %q starts with a parameter, and exempting it from the CSRF check would exempt every route at that depth: give it a fixed first segment", r.Name, r.Mount)
 	}
-	if r.Mount == prefix || strings.HasPrefix(r.Mount, prefix+"/") ||
-		(strings.HasSuffix(fixed, "/") && strings.HasPrefix(prefix+"/", fixed)) {
+	if reachesPrefix(r.Mount, prefix) {
 		return fmt.Errorf("receiver %q: Mount %q reaches the management routes under %s, and exempting it from the CSRF check would exempt them: mount it elsewhere", r.Name, r.Mount, prefix)
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("receiver %q: Mount %q cannot be exempted from the CSRF check: %v", r.Name, r.Mount, recovered)
+		}
+	}()
+	middleware.CSRFExcept(r.Mount)
 	return nil
+}
+
+// reachesPrefix reports whether the exemption of mount could match prefix or
+// a path under it: whether mount has at least as many segments as prefix and
+// each of the first ones is the prefix's own segment or a parameter.
+func reachesPrefix(mount, prefix string) bool {
+	m := strings.Split(strings.TrimPrefix(mount, "/"), "/")
+	p := strings.Split(strings.TrimPrefix(prefix, "/"), "/")
+	if len(m) < len(p) {
+		return false
+	}
+	for i, segment := range p {
+		if m[i] != segment && !strings.HasPrefix(m[i], "{") {
+			return false
+		}
+	}
+	return true
+}
+
+// overlaps reports whether a and b are the same path or one is under the
+// other.
+func overlaps(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 // reservedPrefix is the namespace the framework keeps for itself.

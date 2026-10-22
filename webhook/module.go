@@ -110,23 +110,21 @@ func (m *Module) Outgoing() *Outgoing { return &Outgoing{s: m.sender} }
 // application's CSRF exemption.
 func (m *Module) ReceivePrefix() string { return m.cfg.ReceivePrefix }
 
-// ReceivePaths are the path prefixes the receivers answer under, for the
-// application's CSRF exemption: ReceivePrefix, and the fixed part of every
-// Mount, up to its first parameter.
+// ReceivePaths are the paths the receivers answer at, for the application's
+// CSRF exemption: ReceivePrefix, and every Mount exactly as it is written,
+// each {name} segment matching one segment. A Mount is exempt at its own
+// address and nowhere beside it.
 //
 //	middleware.CSRFExcept(webhookModule.ReceivePaths()...)
 func (m *Module) ReceivePaths() []string {
 	out := []string{m.cfg.ReceivePrefix + "/"}
 	seen := map[string]bool{out[0]: true}
 	for _, rc := range m.cfg.Receivers {
-		if rc.Mount == "" {
+		if rc.Mount == "" || seen[rc.Mount] {
 			continue
 		}
-		fixed := mountExemption(rc.Mount)
-		if !seen[fixed] {
-			seen[fixed] = true
-			out = append(out, fixed)
-		}
+		seen[rc.Mount] = true
+		out = append(out, rc.Mount)
 	}
 	return out
 }
