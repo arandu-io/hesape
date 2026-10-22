@@ -27,6 +27,91 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.76.0 — production when APP_ENV is missing, a read-only impersonation that writes nowhere, and tighter defaults where a request or an upload decides
+
+Nothing in the API breaks. Nine things change what they do; run `aru migrate`
+before the new binary takes jobs off a database queue.
+
+**A missing APP_ENV is production.** `config.Load` read an unset or empty
+`APP_ENV` as `dev`, which turns on the debug console, the error page with its
+stack, cookies without Secure and the commands that wipe a database. It reads
+it as `prod` now. A development machine sets `APP_ENV=dev` in its `.env`; a
+deployment that relied on the old default to run as dev was running a server
+with the debug surface open, and now runs as production.
+
+**A read-only Grant writes nowhere.** A Grant issued to a subject an operator
+is only viewing (`auth.Impersonate`) was refused by the database and by nothing
+else. It is now refused with `auth.ErrReadOnly` by every `filesystem.Disk`
+write (`Put`, `Delete`, `MakeDirectory`, `SetVisibility`,
+`TemporaryUploadURL` and what is built on them), every `cache.Repository`
+write, flush, counter and lock, `TagSet.ResetTag` and `FlushTag`,
+`broadcasting.BroadcastManager.Queue` (an event that asked to be rescued
+included), a broadcast's handler and the redis and log drivers,
+`webhook.Outgoing.Dispatch`, `webhook.Module.Send`, `webhook.Manager.Dispatch`,
+`queue/jobs.New` and `queue/jobs.Authorized`, which every driver's `Push`
+calls. Reading keeps working: `cache.Remember` and `cache.Flexible` answer with
+what they compute without storing it, and the first read through a tag with no
+generation does not write one. A page that queued work, broadcast or cached a
+write while an operator viewed the account now gets the refusal; ask
+`Grant.ReadOnly()` to leave the action out of the page.
+
+**A job keeps the operator acting in the account.** A job pushed under an
+`auth.ImpersonateActing` Grant records the operator in the new
+`jobs.Job.Impersonator`, and `jobs.GrantFor` rebuilds the worker's Grant with
+`auth.SystemGrantActing`, so `Grant.Impersonator()` names the operator inside
+the handler. `jobs.Authorized` refuses a job that names an impersonator its
+Grant does not carry, with `jobs.ErrForged`. The database queue stores it in a
+new nullable `impersonator` column, added by the `queue.AddImpersonatorToJobsTable`
+migration: run it before the new binary pops, because Pop reads the column.
+
+**`filesystem.Serve` sandboxes and downloads active content.** Every response
+carries `Content-Security-Policy: default-src 'none'; sandbox`, which a header
+passed to `Disk.Response` cannot replace, and SVG, HTML and XML are sent as an
+attachment even when `ServeOptions.Download` is false. A page that showed a
+stored SVG by linking to it directly sets the new
+`ServeOptions.InlineActiveContent`; one that shows it through an `<img>` element
+is unaffected by the disposition.
+
+**The OAuth state cookie is Secure by default.** `providers.CookieStateStore`
+took `Secure` from `r.TLS`, which is nil behind a proxy that terminates TLS. It
+is Secure unless told otherwise: a development server on plain HTTP calls
+`Secure(false)` on the store, from the same setting as the session cookie.
+
+**TrustProxies stops at an unreadable entry instead of discarding the chain.**
+An `X-Forwarded-For` entry that did not parse made the visitor the proxy peer.
+The chain is walked from the peer to the left and stops at the first entry that
+is not a trusted proxy, which is the visitor, or at the first that does not
+parse, where the visitor is the last address a trusted proxy appended. An
+unreadable entry written by the peer itself still leaves the peer standing.
+`hhttp.Request.IPs` lists the claims behind the visitor up to the first entry
+that does not parse.
+
+**The webhook module keeps its CSRF exemptions to its receivers.**
+`webhook.New` refuses a `Config.Prefix` and `Config.ReceivePrefix` that are
+equal or nested either way, because the receive prefix is exempt from the CSRF
+check and the management routes are forms. `Module.ReceivePaths` (and so
+`CSRFExemptPaths`) lists a `Receiver.Mount` exactly as written, its `{name}`
+segments matching one segment each, instead of everything up to the first
+parameter; a Mount with a parameter that is not a whole `{name}` -- `{rest...}`,
+`{$}` -- is refused, because it cannot be exempted exactly. A route of the
+application that sat beside a Mount and relied on its exemption is checked for
+CSRF now.
+
+**`onetime` counts wrong codes per purpose and subject.** Issuing a new code no
+longer restores the guesses spent: `Consume` refuses every attempt with the new
+`onetime.ErrTooManyFailures` once a purpose and subject have presented
+`Config.MaxFailures` wrong codes within `Config.FailureWindow`, 20 in 24 hours
+by default, and issuing another code does not reset it. Somebody who knows the
+subject can spend its budget and lock the person out of that purpose until the
+window closes; a screen shows `ErrTooManyFailures` as "try again later".
+
+**`view.TextJS` escapes `'`, `` ` ``, `$` and `/`.** They come out as
+`'`, ```, `$` and `/`, which a script reads back as the same
+characters, so nothing changes in the browser. A test that compared the exact
+text TextJS wrote for a value holding one of them compares the new text.
+
+---
+
 ## v0.75.0 — implicit TLS for SMTP, a parameter in a CSRF exemption, and hints that name the new layout
 
 Nothing in the API breaks. Four things change what they do.
