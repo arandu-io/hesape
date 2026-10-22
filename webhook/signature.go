@@ -107,6 +107,12 @@ func (f SignatureValidatorFunc) Valid(r *http.Request, body []byte, secrets Secr
 // hex HMAC-SHA256 of the body under the shared secret. Prefix is what comes
 // before the hex, such as "sha256=" for a sender that writes one; empty means
 // none.
+//
+// The signature covers the body and nothing else, so the same call sent again
+// -- today or in a year -- checks as well as the first time, and there is no
+// telling a repeat from two calls that happen to be equal. A receiver whose
+// provider puts an event id in the body names it with Receiver.DedupeKey, and
+// a repeat is then processed once; without it, every copy is processed.
 type HMAC struct {
 	Header string
 	Prefix string
@@ -146,7 +152,9 @@ const DefaultTolerance = 5 * time.Minute
 // Arandu checks the scheme Sign writes: the Signature, Timestamp and
 // Delivery-ID headers under HeaderPrefix, sha256= over the timestamp, the
 // delivery id and the body. A timestamp further than Tolerance from now is
-// refused, so a captured call cannot be sent again later.
+// refused, so a captured call cannot be sent again later; within it, the
+// receiver keeps the delivery id, and a repeat is answered without being
+// processed again.
 type Arandu struct {
 	// HeaderPrefix is the senders' header prefix. Empty means X-Arandu.
 	HeaderPrefix string
@@ -183,6 +191,40 @@ func (v Arandu) Valid(r *http.Request, body []byte, secrets SecretSet) bool {
 	signature := strings.Join(r.Header.Values(prefix+"-Signature"), ",")
 	return Verify(secrets, timestamp, r.Header.Get(prefix+"-Delivery-ID"), body, signature)
 }
+
+// deliveryID is the Delivery-ID header the signature covered.
+func (v Arandu) deliveryID(r *http.Request) string {
+	prefix := v.HeaderPrefix
+	if prefix == "" {
+		prefix = aranduPrefix
+	}
+	return r.Header.Get(prefix + "-Delivery-ID")
+}
+
+// replayWindow is how far a signed timestamp may be from now.
+func (v Arandu) replayWindow() time.Duration { return toleranceOf(v.Tolerance) }
+
+// toleranceOf is a validator's Tolerance, its zero meaning DefaultTolerance.
+func toleranceOf(tolerance time.Duration) time.Duration {
+	if tolerance == 0 {
+		return DefaultTolerance
+	}
+	return tolerance
+}
+
+// identifier is a validator whose signature covers a delivery id, so a call
+// it accepted can be told apart from a repeat of it: the receiver keeps the
+// id and processes it once. replayWindow is how long a signature it accepts
+// stays acceptable, which is how long the id has to be kept.
+type identifier interface {
+	deliveryID(r *http.Request) string
+	replayWindow() time.Duration
+}
+
+var (
+	_ identifier = Arandu{}
+	_ identifier = StandardWebhooks{}
+)
 
 // SignBody returns the signature of a body DialectHMAC sends: the hex
 // HMAC-SHA256 under the secret.
@@ -322,7 +364,8 @@ func (v HeaderSecret) secretHeaders() []string { return []string{v.Header} }
 // under the key a whsec_ secret encodes, once per secret the sender signs
 // with; one matching any accepted secret is enough. A timestamp further than
 // Tolerance from now is refused, so a captured call cannot be sent again
-// later.
+// later; within it, the receiver keeps the webhook-id, and a repeat is
+// answered without being processed again.
 type StandardWebhooks struct {
 	// Tolerance is the accepted clock difference. Zero means
 	// DefaultTolerance.
@@ -330,6 +373,12 @@ type StandardWebhooks struct {
 	// Now is the clock, replaceable by a test. Nil is time.Now.
 	Now func() time.Time
 }
+
+// deliveryID is the webhook-id header the signature covered.
+func (v StandardWebhooks) deliveryID(r *http.Request) string { return r.Header.Get(StandardHeaderID) }
+
+// replayWindow is how far a signed timestamp may be from now.
+func (v StandardWebhooks) replayWindow() time.Duration { return toleranceOf(v.Tolerance) }
 
 // Valid checks the timestamp's age, then every signature against every
 // accepted secret.

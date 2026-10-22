@@ -297,16 +297,18 @@ func TestAReceiverMountedAtItsPublishedAddressAnswersSynchronously(t *testing.T)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"passage_id":"pas-dlv-1"`) || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("a new reading answered %d %q", rec.Code, rec.Body.String())
 	}
+	// The repeat is the receiver's to answer: it keeps the delivery id the
+	// signature covered, so the processor never sees the second copy.
 	rec = w.send(t, signedReading(path, "dlv-1", body, sharedSecret, now))
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"duplicate":true}` {
-		t.Fatalf("a repeated reading answered %d %q", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+		t.Fatalf("a repeated reading answered %d %q, want 200 and no body", rec.Code, rec.Body.String())
 	}
 	if rec := w.send(t, signedReading(path, "dlv-2", body, "previous-secret-previous-secret-", now)); rec.Code != http.StatusCreated {
 		t.Fatalf("a reading signed with the previous secret answered %d", rec.Code)
 	}
 
 	// The tenant is the record's, never the path's.
-	if len(w.calls(t, "acme")) != 0 || len(w.calls(t, "t-acme")) != 3 {
+	if len(w.calls(t, "acme")) != 0 || len(w.calls(t, "t-acme")) != 2 {
 		t.Fatalf("the readings were stored in the path's organization: acme %d, t-acme %d", len(w.calls(t, "acme")), len(w.calls(t, "t-acme")))
 	}
 	for name, req := range map[string]*http.Request{

@@ -89,6 +89,12 @@ type Call struct {
 	// Reference is what the receiver's Resolve said the call is for -- the
 	// record the processor finds again -- and empty for a static receiver.
 	Reference string `db:"reference"`
+	// DeliveryID is what tells a repeat of this call from another call: the
+	// delivery id its signature covered, or the key the receiver's DedupeKey
+	// read from the body. One receiver of one tenant keeps one call per
+	// delivery id, which a unique index holds, and a repeat is answered
+	// without being processed again. Nil when the call carried none.
+	DeliveryID *string `db:"delivery_id"`
 	// Method and URL are how it arrived. URL is kept as the receiver's URL
 	// mode says: whole, or only its route, so a bearer token in the path
 	// is not kept.

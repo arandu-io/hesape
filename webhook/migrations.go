@@ -19,6 +19,7 @@ var (
 	_ migrations.ReversibleMigration = createAttempts{}
 	_ migrations.ReversibleMigration = addCallReference{}
 	_ migrations.ReversibleMigration = addCallRequest{}
+	_ migrations.ReversibleMigration = addCallDeliveryID{}
 )
 
 // createEndpoints is the sending side's endpoints.
@@ -257,3 +258,35 @@ var widenTimePrecision = migrations.WidenTimePrecision{
 	Name:   "20261019_0008_widen_webhook_time_precision",
 	Tables: []string{endpointsTable, callsTable, deliveriesTable, attemptsTable},
 }
+
+// addCallDeliveryID gives a received call the delivery id that tells a repeat
+// from another call, unique for one receiver of one tenant. The column is
+// nullable and an index holds NULL once per row on every engine, so the calls
+// already stored, and a row a binary of the previous release writes during a
+// rollout, neither collide nor need a value.
+type addCallDeliveryID struct{ migrations.BaseMigration }
+
+// GetName is the migration's identity, and it carries the order.
+func (addCallDeliveryID) GetName() string {
+	return "20261022_0009_add_delivery_id_to_webhook_client_calls"
+}
+
+// Up adds the column and the index that decides which of two copies of one
+// delivery is stored.
+func (addCallDeliveryID) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, callsTable, func(table *schema.Blueprint) {
+		table.String("delivery_id", maxDeliveryIDLen).Nullable()
+		table.Unique([]string{"tenant_id", "name", "delivery_id"}, callsDeliveryIndex)
+	})
+}
+
+// Down drops the index before the column it names.
+func (addCallDeliveryID) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, callsTable, func(table *schema.Blueprint) {
+		table.DropUnique(callsDeliveryIndex)
+		table.DropColumn("delivery_id")
+	})
+}
+
+// callsDeliveryIndex is the unique index of a call's delivery id.
+const callsDeliveryIndex = "webhook_client_calls_delivery_uidx"

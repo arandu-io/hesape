@@ -223,6 +223,20 @@ type Receiver struct {
 	// DefaultSignatureHeader}: the hex HMAC-SHA256 of the body.
 	Validator SignatureValidator
 
+	// DedupeKey reads, from a call whose signature checked, what tells a
+	// repeat of it from another call -- the provider's event id in the body.
+	// A call is kept once per key for the receiver and its tenant, and a
+	// repeat is answered 200 without being processed again; an empty key
+	// leaves that call to be processed whatever came before it.
+	//
+	// Arandu and StandardWebhooks need none: their signature covers a
+	// delivery id, and the receiver keeps that. HMAC and HeaderSecret sign no
+	// id, so without DedupeKey every copy a provider sends is processed. A key
+	// longer than the column is kept as its SHA-256.
+	//
+	// When set it is used in place of a validator's delivery id.
+	DedupeKey func(r *http.Request, body []byte) string
+
 	// Profile decides whether a valid call is stored and processed. Nil
 	// processes every call.
 	Profile Profile
@@ -343,10 +357,20 @@ func (c Config) Validate() error {
 			return fmt.Errorf("webhook: Config.Server.Secrets[%q] has %d bytes and needs at least %d", name, len(secret), MinSecretBytes)
 		}
 	}
+	kept := time.Duration(c.DeleteAfterDays) * 24 * time.Hour
+	if c.DeleteAfterDays == 0 {
+		kept = DefaultDeleteAfterDays * 24 * time.Hour
+	}
 	seen := map[string]bool{}
 	for i, r := range c.Receivers {
 		if err := r.validate(); err != nil {
 			return fmt.Errorf("webhook: Config.Receivers[%d]: %w", i, err)
+		}
+		// A repeat is told apart by the stored call that holds its delivery
+		// id, so the call has to outlive every signature that still checks,
+		// with as much again for a clock that drifts.
+		if v, ok := r.Validator.(identifier); ok && c.CleanSpec != "-" && 2*v.replayWindow() > kept {
+			return fmt.Errorf("webhook: Config.Receivers[%d]: receiver %q accepts a signature for %s and a call is kept for %s: a repeat sent after the call is cleaned would be processed again, so keep the calls at least twice the tolerance", i, r.Name, v.replayWindow(), kept)
 		}
 		if seen[r.Name] {
 			return fmt.Errorf("webhook: Config.Receivers has %q twice", r.Name)

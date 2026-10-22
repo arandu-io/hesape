@@ -111,6 +111,17 @@
 // result is the answer. Every refusal answers the status Statuses says, with
 // its standard sentence or, under RefusalEmpty, with the status alone.
 //
+// A sender repeats a delivery under the same id when it did not see the
+// answer, and counts a refusal as a failure, so a repeat is answered rather
+// than refused, and processed once. The call keeps its delivery id -- the one
+// the Arandu or Standard Webhooks signature covered, or the key the
+// receiver's DedupeKey reads from the body -- under a unique index for the
+// receiver and its tenant, and the index, not a read before the write,
+// decides between two copies that arrive together. A body-only HMAC signs no
+// id, and without a DedupeKey every copy is processed. The id lasts as long
+// as the call, which Validate requires to be at least twice the validator's
+// tolerance.
+//
 // # Manager
 //
 // Manager, its Store and DatabaseStore are the way this package sent webhooks

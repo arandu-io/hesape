@@ -2,6 +2,8 @@ package webhook
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
@@ -302,15 +305,46 @@ func (c *client) take(w http.ResponseWriter, r *http.Request, rc *receiver) erro
 		}
 		return rc.Respond.Respond(w, r, nil)
 	}
+	key := deliveryKey(rc, to.validator, r, body)
 	if rc.ProcessSync != nil {
-		return c.processNow(w, r, rc, to, body)
+		return c.processNow(w, r, rc, to, body, key)
 	}
-	call, err := c.store(r.Context(), r, rc, to, body, true)
+	call, err := c.store(r.Context(), r, rc, to, body, key, true)
+	var repeat repeated
+	if errors.As(err, &repeat) {
+		// Stored and queued the first time: the sender did not see that
+		// answer, and is given it again rather than a second processing.
+		return rc.Respond.Respond(w, r, repeat.call)
+	}
 	if err != nil {
 		return err
 	}
 	return rc.Respond.Respond(w, r, call)
 }
+
+// deliveryKey is what tells a repeat of the call from another call: the key
+// the receiver's DedupeKey reads, or else the delivery id the validator's
+// signature covered, and empty when there is neither. A key wider than the
+// column is kept as its SHA-256, which is as unique and fits.
+func deliveryKey(rc *receiver, v SignatureValidator, r *http.Request, body []byte) string {
+	key := ""
+	if rc.DedupeKey != nil {
+		key = rc.DedupeKey(r, body)
+	} else if id, ok := v.(identifier); ok {
+		key = id.deliveryID(r)
+	}
+	if len(key) > maxDeliveryIDLen || !utf8.ValidString(key) {
+		sum := sha256.Sum256([]byte(key))
+		key = "sha256:" + hex.EncodeToString(sum[:])
+	}
+	return key
+}
+
+// repeated is a call whose delivery id the receiver already holds, carrying
+// the call that holds it.
+type repeated struct{ call *Call }
+
+func (repeated) Error() string { return "webhook: this delivery was already received" }
 
 // isForm reports whether the request says its body is a form.
 func isForm(r *http.Request) bool {
@@ -319,9 +353,28 @@ func isForm(r *http.Request) bool {
 
 // processNow stores the call, runs the receiver's SyncProcessor on it, keeps
 // the outcome, and answers what the processor said.
-func (c *client) processNow(w http.ResponseWriter, r *http.Request, rc *receiver, to addressed, body []byte) error {
-	call, err := c.store(r.Context(), r, rc, to, body, false)
-	if err != nil {
+//
+// A repeat of a delivery already processed is answered 200 with no body and
+// not processed again. A repeat of one whose processing failed -- the sender
+// saw the failure and tries again with the same id -- is processed again, by
+// whichever copy wins the claim on it. A repeat of one still being processed
+// is answered Statuses.Unavailable, which the sender retries: answering 200
+// there would report as done a delivery whose processing may yet fail.
+func (c *client) processNow(w http.ResponseWriter, r *http.Request, rc *receiver, to addressed, body []byte, key string) error {
+	call, err := c.store(r.Context(), r, rc, to, body, key, false)
+	var repeat repeated
+	if errors.As(err, &repeat) {
+		if call, err = c.retake(r.Context(), repeat.call); err != nil {
+			return err
+		}
+		switch {
+		case call == nil && repeat.call.Status == CallProcessed:
+			w.WriteHeader(http.StatusOK)
+			return nil
+		case call == nil:
+			return refusal(rc.Statuses.Unavailable, "webhook: this delivery is being processed")
+		}
+	} else if err != nil {
 		return err
 	}
 	result, failure := c.runSync(r.Context(), rc, call)
@@ -367,10 +420,35 @@ func (c *client) runSync(ctx context.Context, rc *receiver, call *Call) (Process
 	return result, failure
 }
 
+// retake claims a stored call whose synchronous processing failed, so a
+// repeat of its delivery processes it again, and answers nil when there is
+// nothing to claim: the call was processed, or is being processed, or another
+// repeat claimed it first. The claim is one conditional update, so of two
+// repeats that arrive together exactly one processes the call.
+func (c *client) retake(ctx context.Context, call *Call) (*Call, error) {
+	if call.Status != CallFailed {
+		return nil, nil
+	}
+	//arandu:system-grant the call was stored in this tenant by a request whose signature checked; a repeat of the same signed delivery claims it there.
+	g := auth.SystemGrant(CallReceive, call.TenantID)
+	claimed, err := Calls(c.db).WhereKey(call.ID).Where("status", "=", CallFailed).
+		Update(ctx, g, map[string]any{"status": CallReceived, "updated_at": c.now()})
+	if err != nil || claimed != 1 {
+		return nil, err
+	}
+	call.Status = CallReceived
+	return call, nil
+}
+
 // store keeps the call and, when queued, its processing, in one
 // transaction: a call is never stored without its job, nor queued without
 // its row.
-func (c *client) store(ctx context.Context, r *http.Request, rc *receiver, to addressed, body []byte, queued bool) (*Call, error) {
+//
+// A call with a delivery key its receiver already holds for the tenant is not
+// stored again: the unique index refuses the second row, whichever of two
+// copies arrived first, and store answers repeated with the call that holds
+// the key.
+func (c *client) store(ctx context.Context, r *http.Request, rc *receiver, to addressed, body []byte, key string, queued bool) (*Call, error) {
 	//arandu:system-grant the signature checked against the secret the application configured for this receiver, or for the record its Resolve found, and the tenant is that receiver's or that record's; nothing in the request chose it.
 	g := auth.SystemGrant(CallReceive, to.tenant)
 	call, err := Calls(c.db).New()
@@ -386,6 +464,9 @@ func (c *client) store(ctx context.Context, r *http.Request, rc *receiver, to ad
 	received := r.Header.Clone()
 	call.RemoteAddr, call.HeadersSHA256, call.received = clip(r.RemoteAddr, 255), HeadersDigest(r.Header), &received
 	call.Status, call.ProcessedAt, call.CreatedAt, call.UpdatedAt = CallReceived, now, now, now
+	if key != "" {
+		call.DeliveryID = &key
+	}
 	err = database.Transaction(ctx, c.db, func(ctx context.Context) error {
 		if _, err := call.Save(ctx, g); err != nil {
 			return err
@@ -395,6 +476,15 @@ func (c *client) store(ctx context.Context, r *http.Request, rc *receiver, to ad
 		}
 		return c.enqueue(ctx, rc, call)
 	})
+	if key != "" && errors.Is(err, database.ErrUniqueViolation) {
+		held, readErr := Calls(c.db).Where("name", "=", rc.Name).Where("delivery_id", "=", key).First(ctx, g)
+		if readErr != nil {
+			return nil, errors.Join(err, readErr)
+		}
+		if held != nil {
+			return nil, repeated{call: held}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

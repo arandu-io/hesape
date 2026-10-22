@@ -231,7 +231,7 @@ func (m *Module) Migrations() []foundation.Migration {
 	return []foundation.Migration{
 		createEndpoints{}, createCalls{}, extendEndpoints{}, createDeliveries{}, createAttempts{},
 		addCallReference{}, addCallRequest{},
-		widenTimePrecision,
+		widenTimePrecision, addCallDeliveryID{},
 	}
 }
 
