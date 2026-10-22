@@ -69,7 +69,13 @@ func (*Broadcast) Name() notifications.ChannelName { return notifications.Channe
 // connection to push to, which is the normal state of most recipients most of
 // the time. A notification that names its own channels through Broadcastable
 // overrides the route.
-func (c *Broadcast) Send(ctx context.Context, _ auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
+//
+// A Grant that only reads is refused with auth.ErrReadOnly, as the Notifier
+// refuses it.
+func (c *Broadcast) Send(ctx context.Context, g auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", err
+	}
 	buildable, ok := n.(BroadcastNotification)
 	if !ok {
 		return "", fmt.Errorf("notifications: %s named the broadcast channel and %T has no ToBroadcast", n.Key(), n)

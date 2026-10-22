@@ -41,7 +41,13 @@ func (*Database) Name() notifications.ChannelName { return notifications.Channel
 // The Grant goes straight through to the Store, which is where the tenant is
 // read off it. Nothing here decides who may be notified; that decision is the
 // one the caller made before it had a Grant to pass.
+//
+// A Grant that only reads is refused with auth.ErrReadOnly before the store is
+// reached, whichever store it is.
 func (c *Database) Send(ctx context.Context, g auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", err
+	}
 	if to.NotifiableID() == "" {
 		return "", notifications.ErrAnonymous
 	}

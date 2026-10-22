@@ -197,12 +197,22 @@ func (n *Notifier) Send(ctx context.Context, g auth.Grant, to Notifiable, note N
 // SendNow delivers one notification over the channels given rather than the
 // ones the notification names.
 //
+// A Grant that only reads -- an operator viewing somebody's account -- is
+// refused with auth.ErrReadOnly before any channel is asked, the mail
+// channel included.
+//
 // With no channels it is [Notifier.Send]. With them it is the escape hatch:
 // "this one, over these, whatever the notification usually does" -- the resend
 // button on a support screen, and the retry of one channel that was down when
 // the rest went out.
 func (n *Notifier) SendNow(ctx context.Context, g auth.Grant, to Notifiable, note Notification, channels ...ChannelName) error {
 	if err := g.Check(ActionSend); err != nil {
+		return err
+	}
+	// Telling somebody something is acting in the account, whatever channel
+	// carries it: an operator only viewing an account sends no e-mail, writes
+	// no row and pushes nothing in its owner's name.
+	if err := auth.Writable(g); err != nil {
 		return err
 	}
 	if to == nil {

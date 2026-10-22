@@ -66,7 +66,13 @@ func (*Mail) Name() notifications.ChannelName { return notifications.ChannelMail
 // A recipient with no address is notifications.ErrNotAddressed, which the
 // Notifier treats as "not reachable this way" and not as a failure: somebody
 // who never confirmed an e-mail address still gets the row in their bell menu.
-func (c *Mail) Send(ctx context.Context, _ auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
+//
+// A Grant that only reads is refused with auth.ErrReadOnly, as the Notifier
+// refuses it, for a caller that reaches the channel without it.
+func (c *Mail) Send(ctx context.Context, g auth.Grant, to notifications.Notifiable, n notifications.Notification) (string, error) {
+	if err := auth.Writable(g); err != nil {
+		return "", err
+	}
 	address := to.RouteFor(notifications.ChannelMail)
 	if address == "" {
 		return "", notifications.ErrNotAddressed
