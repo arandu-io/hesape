@@ -36,6 +36,8 @@ import (
 //   - Attempts against one code are limited, and the limit fails closed:
 //     storage that cannot be reached refuses the attempt rather than allowing
 //     it.
+//   - Wrong codes for one purpose and subject are limited across every code
+//     issued to them, so issuing another never restores the guesses spent.
 type CodeStore interface {
 	// Issue creates a code for purpose and subject and returns it in the clear
 	// -- the only time it exists in the clear -- for the caller to send.
@@ -66,6 +68,18 @@ const (
 	// hundred thousand of hitting a code before it dies, and it is more retries
 	// than anybody copying six digits out of another window has ever needed.
 	DefaultMaxAttempts = 5
+
+	// DefaultMaxFailures is how many wrong codes one purpose and subject may
+	// present within a failure window, across every code issued in it, when
+	// Config says nothing. Twenty against a million codes is one chance in fifty
+	// thousand a window, where the attempt limit alone allowed thousands of
+	// guesses a day by asking for a new code every minute; and it is more wrong
+	// codes than a person typing their own ever needs in a day.
+	DefaultMaxFailures = 20
+
+	// DefaultFailureWindow is how long wrong codes are counted for, from the
+	// first, when Config says nothing.
+	DefaultFailureWindow = 24 * time.Hour
 )
 
 // minKeyLen is the shortest application key this package accepts. It is the
@@ -97,6 +111,13 @@ var (
 	// ErrTooManyAttempts means this code has been presented as often as it is
 	// allowed to be. The code is finished; another has to be issued.
 	ErrTooManyAttempts = errors.New("onetime: this code has been tried too many times")
+
+	// ErrTooManyFailures means this purpose and subject have presented as many
+	// wrong codes as the failure window allows, across every code issued in it.
+	// No code is accepted, a fresh one included, until the window closes:
+	// issuing another does not reset it, because a reset on issue is what made
+	// a resend button a way to keep guessing.
+	ErrTooManyFailures = errors.New("onetime: too many wrong codes were presented for this purpose and subject, and none is accepted until the window closes")
 
 	// ErrCooldown is an issue that came too soon after the last one. The error
 	// returned always carries a [CooldownError], which says how long is left.
@@ -170,6 +191,25 @@ type Config struct {
 	// six-digit code, and a large number here is the same as no defence.
 	MaxAttempts int
 
+	// MaxFailures is how many wrong codes one purpose and subject may present
+	// within FailureWindow, across every code issued in it, before Consume
+	// refuses every attempt with [ErrTooManyFailures] until the window closes.
+	// Zero means [DefaultMaxFailures], and a negative value is refused.
+	//
+	// It is what MaxAttempts cannot be on its own. The attempt limit belongs to
+	// one code, and issuing the next starts it again, so with nothing above it
+	// five guesses a code and one code a minute is seven thousand guesses a day
+	// against one account. Issuing never resets this count.
+	//
+	// The cost is the usual one of a lockout: somebody who knows the subject
+	// can spend its budget, and the person waits out the window. That is the
+	// direction to fail in for a code that resets a password.
+	MaxFailures int
+
+	// FailureWindow is how long wrong codes are counted for, from the first one
+	// in the window. Zero means [DefaultFailureWindow].
+	FailureWindow time.Duration
+
 	// Now is the clock. A nil Now means time.Now; a test sets it.
 	Now func() time.Time
 }
@@ -193,9 +233,11 @@ type Codes struct {
 	// signature computed somewhere else from the same secret.
 	key []byte
 
-	ttl         time.Duration
-	cooldown    time.Duration
-	maxAttempts int
+	ttl           time.Duration
+	cooldown      time.Duration
+	maxAttempts   int
+	maxFailures   int
+	failureWindow time.Duration
 
 	now func() time.Time
 
@@ -229,14 +271,22 @@ func New(store cache.Store, appKey []byte, cfg Config) (*Codes, error) {
 	if cfg.MaxAttempts < 0 {
 		return nil, fmt.Errorf("onetime: %d attempts is not a limit", cfg.MaxAttempts)
 	}
+	if cfg.MaxFailures < 0 {
+		return nil, fmt.Errorf("onetime: %d failures is not a limit", cfg.MaxFailures)
+	}
+	if cfg.FailureWindow < 0 {
+		return nil, fmt.Errorf("onetime: a failure window of %s is not a window", cfg.FailureWindow)
+	}
 
 	c := &Codes{
-		store:       store,
-		ttl:         cfg.TTL,
-		cooldown:    cfg.Cooldown,
-		maxAttempts: cfg.MaxAttempts,
-		now:         cfg.Now,
-		random:      defaultRandom,
+		store:         store,
+		ttl:           cfg.TTL,
+		cooldown:      cfg.Cooldown,
+		maxAttempts:   cfg.MaxAttempts,
+		maxFailures:   cfg.MaxFailures,
+		failureWindow: cfg.FailureWindow,
+		now:           cfg.Now,
+		random:        defaultRandom,
 	}
 	if c.ttl == 0 {
 		c.ttl = DefaultTTL
@@ -246,6 +296,12 @@ func New(store cache.Store, appKey []byte, cfg Config) (*Codes, error) {
 	}
 	if c.maxAttempts == 0 {
 		c.maxAttempts = DefaultMaxAttempts
+	}
+	if c.maxFailures == 0 {
+		c.maxFailures = DefaultMaxFailures
+	}
+	if c.failureWindow == 0 {
+		c.failureWindow = DefaultFailureWindow
 	}
 	if c.now == nil {
 		c.now = time.Now
@@ -415,6 +471,19 @@ func (c *Codes) Consume(ctx context.Context, purpose, subject, code string) erro
 		return ErrExpired
 	}
 
+	// The failure budget, counted before the comparison for the reason the
+	// attempt is: a store that cannot count refuses rather than allowing an
+	// unlimited number of guesses. It belongs to the purpose and subject and
+	// not to a code, so a code issued since starts with what is left of it, and
+	// a right code takes its own count back below.
+	failures, err := c.store.Increment(ctx, failureKey(scope), 1, c.failureWindow)
+	if err != nil {
+		return fmt.Errorf("%w: counting the failure: %w", ErrUnavailable, err)
+	}
+	if failures > int64(c.maxFailures) {
+		return ErrTooManyFailures
+	}
+
 	// Counted first, and counted whether the guess turns out right or wrong.
 	// Anything that reaches this line has already got past the purpose and the
 	// subject, so what is left to do with the code is guess at it, and the
@@ -433,6 +502,11 @@ func (c *Codes) Consume(ctx context.Context, purpose, subject, code string) erro
 	if !hmac.Equal(outstanding.Digest, c.digest(purpose, subject, outstanding.Nonce, code)) {
 		return ErrInvalidCode
 	}
+
+	// A right code is not a failure. Taking its count back is housekeeping in
+	// the direction that costs nothing: if it fails, the budget is one smaller
+	// than it should be until the window closes.
+	_, _ = c.store.Increment(ctx, failureKey(scope), -1, c.failureWindow)
 
 	// The burn, and it is one call on purpose. Add writes only if the key is
 	// absent and says whether it wrote, so of any number of correct attempts
@@ -497,6 +571,11 @@ func (c *Codes) mac(label string, fields ...string) []byte {
 	return mac.Sum(nil)
 }
 
+// failureKey is the failure budget of one purpose and subject. It is per scope
+// and not per issue, which is the whole of its point: an issue that started a
+// new budget would be the reset it exists to stop.
+func failureKey(scope string) string { return failurePrefix + scope }
+
 // The three keys one code occupies, and why there are three.
 //
 // The record is per purpose-and-subject, because the question "what code is
@@ -509,6 +588,7 @@ const (
 	recordPrefix  = "onetime:code:"
 	attemptPrefix = "onetime:attempts:"
 	spentPrefix   = "onetime:spent:"
+	failurePrefix = "onetime:failures:"
 )
 
 func recordKey(scope string) string { return recordPrefix + scope }
