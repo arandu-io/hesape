@@ -183,7 +183,14 @@ func With(ctx context.Context, args ...any) context.Context {
 		return ctx
 	}
 	carried := append(Fields(ctx), attrs(args)...)
-	ctx = Into(ctx, For(ctx).With(args...))
+	// Under a Collector the fields are attached to the logger that writes into
+	// it, not to one Into wraps afterwards: slog does not say what a logger
+	// carries, so a wrapper laid on later records the line without them.
+	base := For(ctx)
+	if c := FromContext(ctx); c != nil {
+		base = collecting(base, c)
+	}
+	ctx = Into(ctx, base.With(args...))
 	return context.WithValue(ctx, ctxFieldsKey{}, carried)
 }
 

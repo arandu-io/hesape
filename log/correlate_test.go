@@ -120,3 +120,21 @@ func TestADecisionIsRecordedWithItsAnswerAndCaller(t *testing.T) {
 		t.Fatal("Decisions handed out the collector's own slice")
 	}
 }
+
+// TestFieldsAddedUnderACollectorWithNoLoggerAreRecorded: a request that holds a
+// collector and no logger of its own -- Observe running without the kernel's
+// logger above it -- writes through the default logger, and the fields With
+// attached are still on the line the collector records.
+func TestFieldsAddedUnderACollectorWithNoLoggerAreRecorded(t *testing.T) {
+	col := log.NewCollector("req-1")
+	ctx := log.With(log.WithCollector(context.Background(), col), "request_id", "req-1")
+	log.For(ctx).Info("traced")
+
+	lines := col.Logs()
+	if len(lines) != 1 {
+		t.Fatalf("the collector recorded %d lines, want 1", len(lines))
+	}
+	if got := lines[0]; got.Message != "traced" || got.Attrs["request_id"] != "req-1" {
+		t.Fatalf("recorded %+v, want the line with the field With attached", got)
+	}
+}
