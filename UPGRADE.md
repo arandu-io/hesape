@@ -27,6 +27,47 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.83.0 — Authorize records its decision, expiry follows the fake clock, and arandutest moves to the framework
+
+Nothing that compiled stops compiling. Three things change what they do.
+
+**`auth.Authorize` records every decision in the request's Collector.** The
+subject, its tenant, the action, the answer and the policy's reason for a
+refusal reach `Collector.Decisions`, and the trace, whenever the context
+carries a Collector; without one nothing is recorded or allocated. Code that
+called `log.FromContext(ctx).RecordDecision` itself after `Authorize` now
+records each decision twice: delete that call. `auth.Allows` records nothing.
+
+**The cache stores, the rate limiter and the session record table read the time
+through `support.Now`.** A test that pins the clock with `support.SetTestNow`,
+`Travel` or `FreezeTime` now moves their expiry as well: an entry written
+before a `Travel` past its ttl reads as missing, and a rate-limit window rolls.
+Wait a ttl out by travelling, never by sleeping, and put the clock back in
+`t.Cleanup`. `Lock.Block` keeps waiting on the wall clock.
+
+**`cachetest` travels the clock instead of sleeping.** Its expiry subtests pin
+`support`'s clock, so a test that runs the suite must not run in parallel with
+another that reads `support.Now`. A store whose entries expire on a server's
+clock never sees that clock move and fails those subtests; wrap it in the
+adapter's test in a type that implements `cachetest.ServerClock`:
+
+```go
+type serverClock struct{ *mystore.Store }
+
+func (serverClock) Elapse(d time.Duration) { time.Sleep(d) }
+
+func TestStoreContract(t *testing.T) {
+	cachetest.Run(t, func(t *testing.T) cache.Store { return serverClock{newStore(t)} })
+}
+```
+
+**`hesape/arandutest` is deprecated: moved to `github.com/arandu-io/framework/test`;
+removed in the next minor.** Every package under it carries the same notice --
+`arandutest`, `browser`, `browser/cdp`, `browser/conformance`, `trace`,
+`openapi`, `conformance` and `servertrace` -- and keeps working until then.
+Change the imports from `github.com/arandu-io/hesape/arandutest/...` to the
+same path under `github.com/arandu-io/framework/test/...`.
+
 ## v0.82.0 — the copied auth suites become kits, and a Collector records the request's log lines
 
 Nothing that compiled stops compiling. One thing changes what it does, and the
