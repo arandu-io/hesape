@@ -197,13 +197,18 @@ func (c *Client) submit(method, path string, form map[string]string) *Response {
 	// page, for the reason a header it sets does.
 	token := c.token()
 	values := url.Values{}
-	if token != "" {
-		values.Set("_token", token)
-	}
 	for k, v := range form {
 		values.Set(k, v)
 	}
-	return c.do(method, path, strings.NewReader(values.Encode()),
+	body := values.Encode()
+	if _, own := form["_token"]; token != "" && !own {
+		field := "_token=" + url.QueryEscape(token)
+		if body != "" {
+			field += "&"
+		}
+		body = field + body
+	}
+	return c.do(method, path, strings.NewReader(body),
 		"application/x-www-form-urlencoded", token)
 }
 

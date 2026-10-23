@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/arandutest"
@@ -333,4 +334,23 @@ func TestAFormValueArrivesExactlyAsTyped(t *testing.T) {
 	client.Post("/sign-in", map[string]string{"password": typed, "email": "a+b@example.com"}).
 		AssertOk().
 		AssertSee("password=[" + typed + "] token=[tok-1] fields=3")
+}
+
+// A _token the test writes into the form is the one the form carries, so a
+// test can post somebody else's token to the guard that has to refuse it.
+func TestATokenInTheFormReplacesTheOneOnThePage(t *testing.T) {
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		_ = r.ParseForm()
+		_, _ = w.Write([]byte("form carries " + strings.Join(r.PostForm["_token"], ",")))
+	}))
+
+	client.Get("/invoices/1")
+	client.Post("/invoices/1", map[string]string{"_token": "stolen"}).AssertSee("form carries stolen")
+
+	client.Get("/invoices/1")
+	client.Post("/invoices/1", nil).AssertSee("form carries tok-1")
 }
