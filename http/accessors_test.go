@@ -132,9 +132,9 @@ func TestWhatReadsAHeaderDeclaresItInVary(t *testing.T) {
 		ask  func(*hhttp.Context)
 		want []string
 	}{
-		"WantsJSON": {func(c *hhttp.Context) { c.WantsJSON() }, []string{"accept-encoding, Accept", "HX-Request", "X-Requested-With"}},
-		"IsHTMX":    {func(c *hhttp.Context) { c.IsHTMX(); c.IsHTMX() }, []string{"accept-encoding, Accept", "HX-Request"}},
-		"Targets":   {func(c *hhttp.Context) { c.Targets("note-7") }, []string{"accept-encoding, Accept", "HX-Target"}},
+		"WantsJSON": {func(c *hhttp.Context) { c.WantsJSON() }, []string{"accept-encoding, Accept, HX-Request, X-Requested-With"}},
+		"IsHTMX":    {func(c *hhttp.Context) { c.IsHTMX(); c.IsHTMX() }, []string{"accept-encoding, Accept, HX-Request"}},
+		"Targets":   {func(c *hhttp.Context) { c.Targets("note-7") }, []string{"accept-encoding, Accept, HX-Target"}},
 	} {
 		if got := answer(c.ask); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: Vary = %q, want %q", name, got, c.want)
@@ -146,6 +146,31 @@ func TestWhatReadsAHeaderDeclaresItInVary(t *testing.T) {
 	hhttp.NewContext(w, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil).WantsJSON()
 	if got := w.Header().Values("Vary"); !reflect.DeepEqual(got, []string{"*"}) {
 		t.Errorf("Vary = %q, want * left alone", got)
+	}
+}
+
+// TestVaryIsOneHeaderWithEveryName: each name went on a Vary line of its own,
+// and a reader of one header -- Header().Get, a test kit, a proxy that keeps
+// the first line -- saw Accept and lost the rest.
+func TestVaryIsOneHeaderWithEveryName(t *testing.T) {
+	w := httptest.NewRecorder()
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.Header().Add("Vary", "accept-encoding, Origin")
+	c := hhttp.NewContext(w, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil)
+	c.WantsJSON()
+	c.Targets("note-7")
+	c.IsHTMX()
+	want := []string{"Accept-Encoding, Origin, Accept, HX-Request, X-Requested-With, HX-Target"}
+	if got := w.Header().Values("Vary"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Vary = %q, want %q", got, want)
+	}
+
+	star := httptest.NewRecorder()
+	star.Header().Add("Vary", "Origin")
+	star.Header().Add("Vary", "*")
+	hhttp.NewContext(star, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil).WantsJSON()
+	if got := star.Header().Values("Vary"); !reflect.DeepEqual(got, []string{"Origin", "*"}) {
+		t.Errorf("Vary = %q, want a * on any line left alone", got)
 	}
 }
 

@@ -163,24 +163,40 @@ func (c *Context) User() (auth.Subject, bool) { return auth.SubjectFrom(c.Ctx())
 
 // vary adds each name to the Vary header of the answer, once, and none when
 // the header already says "*" or there is no answer to write it on.
+//
+// The header leaves as one line listing every name, the ones already there
+// first: a reader of the first line -- Header().Get, a test, a proxy that keeps
+// one -- sees the whole list, and a name written twice, in any case, is kept
+// once as first spelled.
 func (c *Context) vary(names ...string) {
 	if c.Response == nil {
 		return
 	}
 	h := c.Response.Header()
+	var list []string
 	present := map[string]bool{}
-	for _, value := range h.Values("Vary") {
+	keep := func(name string) {
+		name = strings.TrimSpace(name)
+		if key := strings.ToLower(name); name != "" && !present[key] {
+			list = append(list, name)
+			present[key] = true
+		}
+	}
+	values := h.Values("Vary")
+	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
-			present[strings.ToLower(strings.TrimSpace(part))] = true
+			keep(part)
 		}
 	}
 	if present["*"] {
 		return
 	}
+	have := len(list)
 	for _, name := range names {
-		if key := strings.ToLower(name); !present[key] {
-			h.Add("Vary", name)
-			present[key] = true
-		}
+		keep(name)
 	}
+	if len(list) == have && len(values) <= 1 {
+		return
+	}
+	h.Set("Vary", strings.Join(list, ", "))
 }
