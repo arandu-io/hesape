@@ -98,22 +98,27 @@ func (g Grant) ReadOnly() bool { return g.subject.Impersonator != nil && !g.subj
 // in.
 func (g Grant) Impersonator() *Subject { return g.subject.Impersonator }
 
-// Writable answers nil when g may be used to write, and ErrReadOnly when it
-// was issued to a subject somebody else is only viewing as. A subject
-// ImpersonateActing answered writes.
+// Writable answers nil when g may be used to write. It answers ErrReadOnly
+// when g was issued to a subject somebody else is only viewing as, and
+// ErrReadGrant, naming the action, when g was issued for an action its Policy
+// says does not write. A subject ImpersonateActing answered writes.
 //
 // Every statement of the database that writes asks it -- an insert, an
 // update, an upsert, a delete, a truncate, through the query builder or a
-// model -- so viewing as somebody cannot change their data whatever the
-// application forgot to hide. A store that keeps the account's own records
-// elsewhere asks it the same way: the filesystem Disk, the cache, a broadcast,
-// a webhook dispatch and a queued job all refuse a read-only Grant. SystemGrant
-// has no subject and is always writable: a job is nobody's impersonation.
+// model -- so neither viewing as somebody nor a Grant issued to read can
+// change data whatever the application forgot to check. A store that keeps
+// the account's own records elsewhere asks it the same way: the filesystem
+// Disk, the cache, a broadcast, a webhook dispatch and a queued job all refuse
+// such a Grant. SystemGrant and SystemGrantActing are always writable: a job
+// has no Policy and is nobody's impersonation.
 func Writable(g Grant) error {
-	if g.subject.Impersonator == nil || g.subject.Acting {
-		return nil
+	if g.subject.Impersonator != nil && !g.subject.Acting {
+		return fmt.Errorf("%w: %s viewing as %s", ErrReadOnly, g.subject.Impersonator.ID, g.subject.ID)
 	}
-	return fmt.Errorf("%w: %s viewing as %s", ErrReadOnly, g.subject.Impersonator.ID, g.subject.ID)
+	if g.reads {
+		return fmt.Errorf("%w: %s does not write", ErrReadGrant, g.action)
+	}
+	return nil
 }
 
 // SystemGrantActing is SystemGrant for work somebody set in motion while

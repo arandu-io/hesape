@@ -42,10 +42,11 @@ const defaultCacheTime = time.Hour
 // the Repository takes from it is the tenant, which is the part a cache key
 // cannot be built without.
 //
-// A read-only Grant -- one issued to a subject somebody else is only viewing
-// as -- reads and never writes: every method that stores, removes, flushes or
-// locks an entry refuses it with auth.ErrReadOnly, and Remember and Flexible
-// answer it with what they compute without storing it.
+// A Grant auth.Writable refuses -- one issued to a subject somebody else is
+// only viewing as, or for an action its Policy says does not write -- reads
+// and never writes: every method that stores, removes, flushes or locks an
+// entry refuses it with auth.ErrReadOnly or auth.ErrReadGrant, and Remember
+// and Flexible answer it with what they compute without storing it.
 type Repository struct {
 	store     Store
 	namespace string

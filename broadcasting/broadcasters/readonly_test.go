@@ -31,6 +31,28 @@ func TestADriverRefusesAViewingGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertDriversRefuse(t, g, auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowViewing }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// TestADriverRefusesAReadGrant: a driver refuses the Grant a policy issued for
+// an action it says does not write, as the manager does.
+func TestADriverRefusesAReadGrant(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: "acme"}, "order.view", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDriversRefuse(t, g, auth.ErrReadGrant)
+}
+
+// assertDriversRefuse broadcasts with g through every driver, wants each
+// refused with want, and wants nothing written.
+func assertDriversRefuse(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
 	channels := []broadcasting.Channel{broadcasting.NewPrivateChannel("orders.17")}
 
 	redis, connection := newRedisBroadcaster(t, "", "orders.{id}")
@@ -40,11 +62,11 @@ func TestADriverRefusesAViewingGrant(t *testing.T) {
 		"log":   broadcasters.NewLogBroadcaster(slog.New(slog.NewTextHandler(&written, nil))),
 	}
 	for name, driver := range drivers {
-		if err := driver.Broadcast(context.Background(), g, channels, "OrderShipped", nil); !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("%s answered %v for a viewing Grant, want auth.ErrReadOnly", name, err)
+		if err := driver.Broadcast(context.Background(), g, channels, "OrderShipped", nil); !errors.Is(err, want) {
+			t.Errorf("%s answered %v, want %v", name, err, want)
 		}
 	}
 	if len(connection.arguments) != 0 || written.Len() != 0 {
-		t.Fatalf("a viewing Grant reached a driver: redis got %v, the log got %q", connection.arguments, written.String())
+		t.Fatalf("a Grant that cannot write reached a driver: redis got %v, the log got %q", connection.arguments, written.String())
 	}
 }

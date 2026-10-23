@@ -211,6 +211,23 @@ type Policy[T any] interface {
 	Can(ctx context.Context, s Subject, a Action, resource T) error
 }
 
+// Writes is what a Policy implements to say which of its actions write.
+//
+// Authorize asks it about the action it was given, and a Grant issued for an
+// action the policy says does not write only reads: Writable refuses it with
+// ErrReadGrant, so a Grant issued to view a row cannot save or delete it, store
+// a file, fill the cache, broadcast, dispatch a webhook or queue a job. A
+// policy that does not implement Writes issues Grants that write.
+type Writes interface {
+	// Writes reports whether a changes anything.
+	Writes(a Action) bool
+}
+
+// ErrReadGrant is the refusal of a write made with a Grant issued for an
+// action its Policy says does not write. It wraps ErrForbidden, so a handler
+// that turns ErrForbidden into 403 answers it without a line changing.
+var ErrReadGrant = fmt.Errorf("%w: the grant was issued for an action that only reads", ErrForbidden)
+
 // Grant is the proof that an authorization decision happened.
 //
 // THIS IS THE CENTRAL PIECE OF THE FRAMEWORK. Grant has only unexported fields,
@@ -245,9 +262,15 @@ type Grant struct {
 	// caller who never authorized anything is told to. A Grant refused by
 	// SystemGrant is a different mistake, and Check says which.
 	reason string
+	// reads marks a Grant issued for an action its Policy says does not
+	// write. Writable refuses it.
+	reads bool
 }
 
 // Authorize runs the policy and, when allowed, issues the Grant.
+//
+// When the policy implements Writes and answers that a does not write, the
+// Grant only reads, and Writable refuses it.
 func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, resource T) (Grant, error) {
 	// An empty subject is refused before the policy is asked, because it is
 	// almost always a session that was not loaded -- and a policy asked about
@@ -266,7 +289,11 @@ func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, res
 		}
 		return Grant{}, fmt.Errorf("%w: %s denied for subject %s: %v", ErrForbidden, a, who, err)
 	}
-	return Grant{subject: s, action: a, valid: true}, nil
+	g := Grant{subject: s, action: a, valid: true}
+	if w, ok := p.(Writes); ok && !w.Writes(a) {
+		g.reads = true
+	}
+	return g, nil
 }
 
 // Allows asks the same question as Authorize and answers yes or no.

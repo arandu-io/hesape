@@ -30,12 +30,33 @@ func viewingGrant(t *testing.T, tenant string) auth.Grant {
 // held only in the database, so an operator viewing a customer's account could
 // overwrite, delete and flush the customer's cached state.
 func TestAViewingGrantWritesNoCacheEntry(t *testing.T) {
+	assertNoCacheWrite(t, viewingGrant(t, "acme"), auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowAll }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// TestAReadGrantWritesNoCacheEntry: a Grant a policy issued for an action it
+// says does not write stores, removes, flushes and locks nothing, and reads.
+func TestAReadGrantWritesNoCacheEntry(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: "acme"}, action, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoCacheWrite(t, g, auth.ErrReadGrant)
+}
+
+// assertNoCacheWrite runs every write of the cache with g on tenant acme,
+// wants each refused with want, and wants the entry left as it was.
+func assertNoCacheWrite(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
 	ctx := context.Background()
 	r := newRepository()
 	if err := r.Put(ctx, grantFor("acme"), "k", "original", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	g := viewingGrant(t, "acme")
 	ran := false
 	writes := map[string]func() error{
 		"Put":            func() error { return r.Put(ctx, g, "k", "changed", time.Hour) },
@@ -73,12 +94,12 @@ func TestAViewingGrantWritesNoCacheEntry(t *testing.T) {
 		},
 	}
 	for name, write := range writes {
-		if err := write(); !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("%s with a viewing Grant answered %v, want auth.ErrReadOnly", name, err)
+		if err := write(); !errors.Is(err, want) {
+			t.Errorf("%s answered %v, want %v", name, err, want)
 		}
 	}
 	if ran {
-		t.Error("WithoutOverlapping ran its callback under a lock a viewing Grant took")
+		t.Error("WithoutOverlapping ran its callback under a lock the Grant took")
 	}
 	got, err := cache.Get[string](ctx, r, g, "k")
 	if err != nil || got != "original" {

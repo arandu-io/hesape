@@ -25,10 +25,49 @@ func TestModelWritesRefuseAGrantThatOnlyReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertModelWritesRefused(t, g, auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowEverything }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// A member holding the Grant a policy issued to view a row -- one that says
+// viewing does not write -- saves, updates and deletes nothing through the
+// model, and reads with it.
+func TestModelWritesRefuseAGrantIssuedForReading(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: "acme"}, "users.view", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertModelWritesRefused(t, g, auth.ErrReadGrant)
+}
+
+// assertModelWritesRefused runs every model write with g, wants each refused
+// with want before a statement runs, and wants a read with g to run.
+func assertModelWritesRefused(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
+	ctx := context.Background()
 	writes := map[string]func(m *user) error{
 		"Save": func(m *user) error {
 			m.Name = "Ada"
 			_, err := m.Save(ctx, g)
+			return err
+		},
+		"Save existing": func(m *user) error {
+			if err := existing(m); err != nil {
+				return err
+			}
+			m.Name = "Grace"
+			_, err := m.Save(ctx, g)
+			return err
+		},
+		"Delete existing": func(m *user) error {
+			if err := existing(m); err != nil {
+				return err
+			}
+			_, err := m.Delete(ctx, g)
 			return err
 		},
 		"Create": func(m *user) error {
@@ -62,8 +101,8 @@ func TestModelWritesRefuseAGrantThatOnlyReads(t *testing.T) {
 	}
 	for name, write := range writes {
 		m, connection := newUserModel(softDeletes)
-		if err := write(m); !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("%s answered %v, want ErrReadOnly", name, err)
+		if err := write(m); !errors.Is(err, want) {
+			t.Errorf("%s answered %v, want %v", name, err, want)
 		}
 		if statements := connection.sqls(); len(statements) != 0 {
 			t.Errorf("%s reached the connection: %v", name, statements)
@@ -98,4 +137,13 @@ func TestModelWritesRunWithAGrantThatActs(t *testing.T) {
 	if len(connection.sqls()) != 1 {
 		t.Fatalf("the update did not reach the connection: %v", connection.sqls())
 	}
+}
+
+// existing makes m a row that was read from the database.
+func existing(m *user) error {
+	if err := m.SetRawAttributes(map[string]any{"id": int64(7), "name": "Ada", "email": "ada@example.com", "tenant_id": "acme"}, true); err != nil {
+		return err
+	}
+	m.r.exists = true
+	return nil
 }

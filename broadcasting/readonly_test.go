@@ -38,6 +38,28 @@ func (rescuedNow) ShouldRescue() bool { return true }
 // held only in the database, so an operator viewing a customer's account could
 // publish events into the customer's channels as the customer.
 func TestAViewingGrantBroadcastsNothing(t *testing.T) {
+	assertNothingBroadcast(t, viewingGrant(t), auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowAll }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// TestAReadGrantBroadcastsNothing: a Grant a policy issued for an action it
+// says does not write publishes nothing, queued or not.
+func TestAReadGrantBroadcastsNothing(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: queuedTenant}, "invoice.view", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNothingBroadcast(t, g, auth.ErrReadGrant)
+}
+
+// assertNothingBroadcast queues and handles broadcasts with g, wants each
+// refused with want, and wants no driver to have published.
+func assertNothingBroadcast(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
 	ctx := context.Background()
 	driver := &queuedBroadcastRecorder{}
 	worker := queue.NewWorker(queue.NullQueue{}, queue.WorkerOptions{})
@@ -51,21 +73,20 @@ func TestAViewingGrantBroadcastsNothing(t *testing.T) {
 	}, nil, adapter, nil)
 	manager.Extend("recorder", func(broadcasting.ConnectionConfig) (broadcasting.Broadcaster, error) { return driver, nil })
 
-	g := viewingGrant(t)
 	events := map[string]any{
 		"now":     &sentNow{queuedInvoiceSent{InvoiceID: "inv-17"}},
 		"rescued": &rescuedNow{sentNow{queuedInvoiceSent{InvoiceID: "inv-17"}}},
 		"queued":  &queuedInvoiceSent{Connection: "sync", InvoiceID: "inv-17"},
 	}
 	for name, event := range events {
-		if err := manager.Queue(ctx, g, event); !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("Queue of the %s event with a viewing Grant answered %v, want auth.ErrReadOnly", name, err)
+		if err := manager.Queue(ctx, g, event); !errors.Is(err, want) {
+			t.Errorf("Queue of the %s event answered %v, want %v", name, err, want)
 		}
 	}
-	if err := broadcasting.NewBroadcastEvent(&queuedInvoiceSent{InvoiceID: "inv-17"}).Handle(ctx, g, queuedBroadcastFactory{driver: driver}); !errors.Is(err, auth.ErrReadOnly) {
-		t.Errorf("Handle with a viewing Grant answered %v, want auth.ErrReadOnly", err)
+	if err := broadcasting.NewBroadcastEvent(&queuedInvoiceSent{InvoiceID: "inv-17"}).Handle(ctx, g, queuedBroadcastFactory{driver: driver}); !errors.Is(err, want) {
+		t.Errorf("Handle answered %v, want %v", err, want)
 	}
 	if got := driver.all(); len(got) != 0 {
-		t.Fatalf("a viewing Grant published %d broadcasts", len(got))
+		t.Fatalf("a Grant that cannot write published %d broadcasts", len(got))
 	}
 }

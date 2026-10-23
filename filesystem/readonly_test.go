@@ -38,6 +38,28 @@ func viewingGrant(t *testing.T, tenant string) auth.Grant {
 // still write, overwrite and delete the customer's files. Every Disk method
 // that writes refuses, and the file is as it was.
 func TestAViewingGrantChangesNoFile(t *testing.T) {
+	assertNoFileChanged(t, viewingGrant(t, "acme"), auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowAll }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// TestAReadGrantChangesNoFile: a Grant a policy issued for an action it says
+// does not write stores, moves and deletes nothing on a Disk, and reads.
+func TestAReadGrantChangesNoFile(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: "acme"}, "file.view", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoFileChanged(t, g, auth.ErrReadGrant)
+}
+
+// assertNoFileChanged runs every Disk write with g on tenant acme, wants each
+// refused with want, and wants g to list and read the file left as it was.
+func assertNoFileChanged(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
 	ctx := context.Background()
 	const tenant = "acme"
 	disk := filesystem.NewDisk("local", mustLocal(t))
@@ -51,7 +73,6 @@ func TestAViewingGrantChangesNoFile(t *testing.T) {
 		return "https://store.example/upload", nil, nil
 	})
 
-	g := viewingGrant(t, tenant)
 	writes := map[string]func() error{
 		"Put":           func() error { return disk.Put(ctx, g, "a.txt", strings.NewReader("changed"), "") },
 		"WriteStream":   func() error { return disk.WriteStream(ctx, g, "b.txt", strings.NewReader("new"), "") },
@@ -75,24 +96,24 @@ func TestAViewingGrantChangesNoFile(t *testing.T) {
 		},
 	}
 	for name, write := range writes {
-		if err := write(); !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("%s with a viewing Grant answered %v, want auth.ErrReadOnly", name, err)
+		if err := write(); !errors.Is(err, want) {
+			t.Errorf("%s answered %v, want %v", name, err, want)
 		}
 	}
 	if asked {
-		t.Error("the upload URL callback was asked for a viewing Grant")
+		t.Error("the upload URL callback was asked for a Grant that cannot write")
 	}
 
 	files, err := disk.AllFiles(ctx, g, "")
 	if err != nil {
-		t.Fatalf("a viewing Grant cannot list: %v", err)
+		t.Fatalf("the Grant cannot list: %v", err)
 	}
 	if len(files) != 1 || files[0] != "a.txt" {
 		t.Fatalf("the tenant holds %v after the refused writes, want only a.txt", files)
 	}
 	f, err := disk.Get(ctx, g, "a.txt")
 	if err != nil {
-		t.Fatalf("a viewing Grant cannot read: %v", err)
+		t.Fatalf("the Grant cannot read: %v", err)
 	}
 	defer f.Body.Close()
 	body, _ := io.ReadAll(f.Body)

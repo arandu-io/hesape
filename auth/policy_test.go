@@ -399,3 +399,112 @@ func (publicPolicy) Can(_ context.Context, s auth.Subject, a auth.Action, _ int)
 	}
 	return errors.New("not public")
 }
+
+const (
+	noteView   auth.Action = "note.view"
+	noteUpdate auth.Action = "note.update"
+	noteDelete auth.Action = "note.delete"
+)
+
+type note struct{ owner string }
+
+// notePolicy lets every member of the tenant view a note and only its owner
+// change it, and says which of its actions write.
+type notePolicy struct{}
+
+func (notePolicy) Can(_ context.Context, s auth.Subject, a auth.Action, n note) error {
+	switch a {
+	case noteView:
+		return nil
+	case noteUpdate, noteDelete:
+		if n.owner == s.ID {
+			return nil
+		}
+		return errors.New("not the owner")
+	}
+	return errors.New("unknown action")
+}
+
+func (notePolicy) Writes(a auth.Action) bool { return a != noteView }
+
+// A member allowed to view another member's note, and not to change it, holds
+// a Grant that reads the note and is refused every write, naming the action.
+func TestAGrantIssuedForReadingCannotWrite(t *testing.T) {
+	ctx := context.Background()
+	bea := auth.Subject{ID: "bea", Tenant: "acme"}
+	anas := note{owner: "ana"}
+	if _, err := auth.Authorize(ctx, notePolicy{}, bea, noteUpdate, anas); err == nil {
+		t.Fatal("precondition: bea must not be allowed note.update")
+	}
+	view, err := auth.Authorize(ctx, notePolicy{}, bea, noteView, anas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := view.Check(noteView); err != nil {
+		t.Fatalf("a read Grant does not read: %v", err)
+	}
+	err = auth.Writable(view)
+	if !errors.Is(err, auth.ErrReadGrant) || !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("Writable answered %v for a note.view Grant, want ErrReadGrant wrapping ErrForbidden", err)
+	}
+	if !strings.Contains(err.Error(), string(noteView)) {
+		t.Fatalf("the refusal does not name the action: %v", err)
+	}
+	if view.ReadOnly() {
+		t.Fatal("a read Grant reports the read-only mode of an impersonation")
+	}
+
+	update, err := auth.Authorize(ctx, notePolicy{}, auth.Subject{ID: "ana", Tenant: "acme"}, noteUpdate, anas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Writable(update); err != nil {
+		t.Fatalf("a Grant for an action that writes is refused: %v", err)
+	}
+}
+
+// A policy that does not declare its writes issues Grants that write, and so
+// do the system Grants, which have no policy.
+func TestGrantsWithoutADeclaredReadStillWrite(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), allowOwner{}, auth.Subject{ID: "bea", Tenant: "acme"}, actionView, resource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, g := range map[string]auth.Grant{
+		"a policy without Writes": g,
+		"SystemGrant":             auth.SystemGrant(noteView, "acme"),
+		"SystemGrantActing":       auth.SystemGrantActing(noteView, "acme", "op-1"),
+	} {
+		if err := auth.Writable(g); err != nil {
+			t.Errorf("%s: Writable answered %v, want nil", name, err)
+		}
+	}
+}
+
+// An operator acting in an account still holds a read Grant when the policy
+// says the action does not write; one only viewing is refused as before.
+func TestAReadGrantOfAnImpersonation(t *testing.T) {
+	ctx := context.Background()
+	acting, err := auth.ImpersonateActing(auth.Subject{ID: "op-1", Tenant: "acme"}, auth.Subject{ID: "ana", Tenant: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := auth.Authorize(ctx, notePolicy{}, acting, noteView, note{owner: "ana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Writable(g); !errors.Is(err, auth.ErrReadGrant) {
+		t.Fatalf("an acting operator's note.view Grant answered %v, want ErrReadGrant", err)
+	}
+	viewing, err := auth.Impersonate(auth.Subject{ID: "op-1", Tenant: "acme"}, auth.Subject{ID: "ana", Tenant: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err = auth.Authorize(ctx, notePolicy{}, viewing, noteUpdate, note{owner: "ana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Writable(g); !errors.Is(err, auth.ErrReadOnly) {
+		t.Fatalf("a viewing operator's note.update Grant answered %v, want ErrReadOnly", err)
+	}
+}

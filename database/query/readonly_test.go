@@ -29,8 +29,30 @@ func readOnlyGrant(t *testing.T) auth.Grant {
 // Every statement that writes refuses a Grant that only reads before the
 // connection is reached; a read with the same Grant runs.
 func TestEveryWriteRefusesAGrantThatOnlyReads(t *testing.T) {
+	assertEveryWriteRefused(t, readOnlyGrant(t), auth.ErrReadOnly)
+}
+
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowEverything }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// Every statement that writes refuses the Grant a policy issued for an action
+// it says does not write; a read with the same Grant runs.
+func TestEveryWriteRefusesAGrantIssuedForReading(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: "acme"}, "invoice.view", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEveryWriteRefused(t, g, auth.ErrReadGrant)
+}
+
+// assertEveryWriteRefused runs every write of the builder with g, wants each
+// refused with want before the connection is reached, and wants a read with
+// g to run.
+func assertEveryWriteRefused(t *testing.T, g auth.Grant, want error) {
+	t.Helper()
 	ctx := context.Background()
-	g := readOnlyGrant(t)
 	writes := map[string]func(c *fakeConnection) error{
 		"Insert": func(c *fakeConnection) error {
 			_, err := newTestBuilder(c).Insert(ctx, g, map[string]any{"name": "Ada"})
@@ -79,8 +101,8 @@ func TestEveryWriteRefusesAGrantThatOnlyReads(t *testing.T) {
 	for name, write := range writes {
 		connection := &fakeConnection{inserted: true, affected: 1}
 		err := write(connection)
-		if !errors.Is(err, auth.ErrReadOnly) {
-			t.Errorf("%s answered %v, want ErrReadOnly", name, err)
+		if !errors.Is(err, want) {
+			t.Errorf("%s answered %v, want %v", name, err, want)
 		}
 		for _, call := range connection.calls {
 			if call.kind != "select" {

@@ -45,6 +45,27 @@ func TestAReadOnlyGrantQueuesNothing(t *testing.T) {
 	}
 }
 
+// readsOnly allows everything and says none of its actions write.
+type readsOnly struct{ allowAll }
+
+func (readsOnly) Writes(auth.Action) bool { return false }
+
+// TestAReadGrantQueuesNothing: the worker runs a job under a Grant that
+// writes, so queuing with a Grant a policy issued for an action it says does
+// not write would be a way for a read to write.
+func TestAReadGrantQueuesNothing(t *testing.T) {
+	g, err := auth.Authorize(context.Background(), readsOnly{}, auth.Subject{ID: "bea", Tenant: tenant}, "invoice.send", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := jobs.New(g, "", "invoice.send", nil); !errors.Is(err, auth.ErrReadGrant) {
+		t.Fatalf("New answered %v for a read Grant, want auth.ErrReadGrant", err)
+	}
+	if err := jobs.Authorized(g, jobs.Job{Name: "invoice.send"}); !errors.Is(err, auth.ErrReadGrant) {
+		t.Fatalf("Authorized answered %v for a read Grant, want auth.ErrReadGrant", err)
+	}
+}
+
 // TestAJobPushedWhileActingNamesTheOperator: the record named the account
 // alone, and GrantFor rebuilt a system Grant that had forgotten who caused the
 // work.
