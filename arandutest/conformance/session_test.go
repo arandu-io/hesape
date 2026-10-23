@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -147,7 +148,11 @@ func (s *screens) start(w http.ResponseWriter, r *http.Request, user account.Acc
 	if s.defect == "a session for somebody else" {
 		subject.ID = "user-b"
 	}
-	if _, err := s.parts.Sessions.Start(r.Context(), w, subject); err != nil {
+	target := http.ResponseWriter(w)
+	if s.defect == "the session cookie never sent" {
+		target = httptest.NewRecorder()
+	}
+	if _, err := s.parts.Sessions.Start(r.Context(), target, subject); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -188,6 +193,7 @@ func init() {
 		"an expired pending cookie accepted":  {"AnExpiredPendingCookieWritesNoSession", "session writes = 1, want 0"},
 		"a lock answered as a wrong code":     {"ALockedAuthenticatorChallengeEndsThePendingSignIn", "want 303 to /auth/login"},
 		"a session for somebody else":         {"ARightPasswordWithoutAFactorWritesOneSession", `the session was written for "user-b"`},
+		"the session cookie never sent":       {"ARightPasswordWithoutAFactorWritesOneSession", "the session the sign-in wrote does not load"},
 	} {
 		broken["SessionMatrix/"+defect] = brokenCase{run: func(t *testing.T) { SessionMatrix(t, sessionFixture(defect)) }, want: want}
 	}
