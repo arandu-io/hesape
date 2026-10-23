@@ -8,7 +8,7 @@
 //		"password": "required|min:12|confirmed",
 //	})
 //
-//	in, err := ctx.Validate(requests.Register)
+//	in, err := hhttp.NewRequest(ctx.Request).Validate(requests.Register)
 //	if err != nil {
 //		return err
 //	}
