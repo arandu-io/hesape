@@ -3,6 +3,7 @@ package http_test
 import (
 	stdhttp "net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
@@ -114,6 +115,53 @@ func TestHtmxAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
 	plain.Header.Set("Accept", "text/html")
 	if hhttp.NewContext(httptest.NewRecorder(), plain, nil, nil).WantsJSON() {
 		t.Error("a browser navigation was going to get JSON")
+	}
+}
+
+// TestWhatReadsAHeaderDeclaresItInVary: each action wrote its own Vary, and
+// one that declared only Accept was cached across HX-Request, which
+// WantsJSON also reads.
+func TestWhatReadsAHeaderDeclaresItInVary(t *testing.T) {
+	answer := func(ask func(*hhttp.Context)) []string {
+		w := httptest.NewRecorder()
+		w.Header().Add("Vary", "accept-encoding, Accept")
+		ask(hhttp.NewContext(w, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil))
+		return w.Header().Values("Vary")
+	}
+	for name, c := range map[string]struct {
+		ask  func(*hhttp.Context)
+		want []string
+	}{
+		"WantsJSON": {func(c *hhttp.Context) { c.WantsJSON() }, []string{"accept-encoding, Accept", "HX-Request", "X-Requested-With"}},
+		"IsHTMX":    {func(c *hhttp.Context) { c.IsHTMX(); c.IsHTMX() }, []string{"accept-encoding, Accept", "HX-Request"}},
+		"Targets":   {func(c *hhttp.Context) { c.Targets("note-7") }, []string{"accept-encoding, Accept", "HX-Target"}},
+	} {
+		if got := answer(c.ask); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: Vary = %q, want %q", name, got, c.want)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	w.Header().Set("Vary", "*")
+	hhttp.NewContext(w, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil).WantsJSON()
+	if got := w.Header().Values("Vary"); !reflect.DeepEqual(got, []string{"*"}) {
+		t.Errorf("Vary = %q, want * left alone", got)
+	}
+}
+
+// TestTargetsReadsTheElementHtmxSwaps: the fragment for one element is
+// answered only to the swap that names it.
+func TestTargetsReadsTheElementHtmxSwaps(t *testing.T) {
+	req := httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "note-7")
+	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
+	if !ctx.Targets("note-7") || ctx.Targets("note-8") || ctx.Targets("") {
+		t.Fatal("Targets did not answer for the element named by HX-Target alone")
+	}
+	plain := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil), nil, nil)
+	if plain.Targets("") || plain.Targets("note-7") {
+		t.Fatal("a request with no HX-Target targets an element")
 	}
 }
 

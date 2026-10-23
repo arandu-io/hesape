@@ -352,7 +352,7 @@ func (c *Context) writeViewData(status int, name string, data any) error {
 		return err
 	}
 
-	c.Response.Header().Add("Vary", "Accept")
+	c.vary("Accept")
 	c.Response.Header().Set("Content-Type", ViewDataMediaType+"; charset=utf-8")
 	c.Response.WriteHeader(status)
 	_, err = c.Response.Write(encoded)

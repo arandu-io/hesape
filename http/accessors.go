@@ -107,7 +107,25 @@ func (c *Context) WithCookie(cookie *stdhttp.Cookie) *Context {
 // it is asked in one place per decision: Redirect and Refuse already ask it for
 // themselves, so a handler needs this only when the two shapes differ in what
 // they render.
-func (c *Context) IsHTMX() bool { return c.Request.Header.Get("HX-Request") == "true" }
+//
+// It adds HX-Request to the Vary header of the answer, because an answer that
+// asked is one a cache must keep apart from the answer to a request that did
+// not send it.
+func (c *Context) IsHTMX() bool {
+	c.vary("HX-Request")
+	return c.Request.Header.Get("HX-Request") == "true"
+}
+
+// Targets reports whether htmx made this request to swap the element whose id
+// is id, read from the HX-Target header. An empty id targets nothing.
+//
+// It is how one action answers a page to a navigation and a fragment to the
+// swap of one element. It adds HX-Target to the Vary header of the answer, for
+// the reason IsHTMX adds HX-Request.
+func (c *Context) Targets(id string) bool {
+	c.vary("HX-Target")
+	return id != "" && c.Request.Header.Get("HX-Target") == id
+}
 
 // WantsJSON reports whether this request asked for JSON rather than a page.
 //
@@ -118,7 +136,12 @@ func (c *Context) IsHTMX() bool { return c.Request.Header.Get("HX-Request") == "
 // because it must answer a failure on a request that never reached a Context.
 // The two are the same three lines and must not drift; folding them into one is
 // waiting on the layer that wires the handler.
+//
+// It adds the three headers it reads -- Accept, HX-Request and X-Requested-With
+// -- to the Vary header of the answer, so a cache never hands the JSON to a
+// browser or the page to a client that asked for JSON.
 func (c *Context) WantsJSON() bool {
+	c.vary("Accept", "HX-Request", "X-Requested-With")
 	r := c.Request
 	if r.Header.Get("HX-Request") == "true" {
 		return false
@@ -137,3 +160,27 @@ func (c *Context) WantsJSON() bool {
 // controller that could produce one would be a controller that authorises
 // itself.
 func (c *Context) User() (auth.Subject, bool) { return auth.SubjectFrom(c.Ctx()) }
+
+// vary adds each name to the Vary header of the answer, once, and none when
+// the header already says "*" or there is no answer to write it on.
+func (c *Context) vary(names ...string) {
+	if c.Response == nil {
+		return
+	}
+	h := c.Response.Header()
+	present := map[string]bool{}
+	for _, value := range h.Values("Vary") {
+		for _, part := range strings.Split(value, ",") {
+			present[strings.ToLower(strings.TrimSpace(part))] = true
+		}
+	}
+	if present["*"] {
+		return
+	}
+	for _, name := range names {
+		if key := strings.ToLower(name); !present[key] {
+			h.Add("Vary", name)
+			present[key] = true
+		}
+	}
+}
