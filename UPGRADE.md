@@ -27,6 +27,78 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.82.0 — the copied auth suites become kits, and a Collector records the request's log lines
+
+Nothing that compiled stops compiling. One thing changes what it does, and the
+copies of four test suites have something to be replaced by.
+
+**Under a Collector, the request logger writes into it.** `log.Into` and
+`log.WithCollector` now store the request logger wrapped so that every line
+logged through `log.For` is also kept by the request's Collector
+(`Collector.Logs`), whichever of the two is installed first. Without a
+Collector -- production without the tracing header -- the logger is stored as
+given and nothing allocates. Code that compared the logger `log.For` returns
+with the one it installed, inside a request that has a Collector, now gets the
+wrapper; compare the lines it wrote instead. `Collector.RecordDecision` is new,
+for the code that runs a policy to record the answer.
+
+**Replace the copied suites with the kits.** `tests/AuthContracts`,
+`tests/AuthSchema`, `tests/NativeAuth` and `tests/NativeAuthSession` were copied
+into every application and drifted. `hesape/arandutest/conformance` carries
+them once; delete the copies and call the kits from `tests/Conformance`, with
+the fixtures the copies already built:
+
+```go
+func TestBoundaries(t *testing.T) { conformance.Boundaries(t, "../..") }
+
+func TestSchema(t *testing.T) {
+	conformance.Schema(t, conformance.SchemaFixture{
+		Users: []migrations.Migration{appmigrations.CreateUsers{}, appmigrations.AddNameAndVerificationToUsers{}},
+		Open:  openEmptyConnection, // func(*testing.T) *database.Connection
+	})
+}
+
+func TestAccount(t *testing.T) { conformance.Account(t, accountFixture) } // the old AccountContract body
+
+func TestModelPersistence(t *testing.T) {
+	conformance.ModelPersistence(t, func(t *testing.T) conformance.ModelFixture {
+		return conformance.ModelFixture{
+			Fixture: accountFixture(t),
+			Role:    models.RoleAdmin,
+			GrantRole: func(a account.Account, role string) error {
+				a.(*models.User).Roles = models.Roles{role}
+				return nil
+			},
+		}
+	})
+}
+
+func TestSessionMatrix(t *testing.T) {
+	conformance.SessionMatrix(t, conformance.SessionFixture{
+		Account: func(hash string) account.Account {
+			return &models.User{ID: "user-a", TenantID: "tenant-a", Email: "ana@example.test", Password: hash, Roles: models.Roles{models.RoleMember}}
+		},
+		Handler: func(p conformance.SessionParts) http.Handler {
+			module := authui.New(p.Users, p.Factors, nil, p.Sessions, session.NewCSRF(p.AppKey, time.Hour), nil, nil,
+				p.AppKey, authui.FixedTenant(p.Tenant), false)
+			router := controllers.NewRouter()
+			module.Routes(router)
+			return router
+		},
+	})
+}
+```
+
+`tests/NativeAuth/RequestRedaction` becomes `conformance.Redaction`, one
+`conformance.Redacted` per request type with its secrets and the values a log
+line must still show. What stays in the application is what is only its own:
+the rows its old copy of the account rules wrote (`OldCopyRows`,
+`Compatibility`), its hooks, its registration forms.
+
+`hesape/arandutest/openapi` checks answers against the document
+`openapi:export` writes, for `tests/Contract`, and
+`hesape/arandutest/servertrace` files what the server did for each request
+under its X-Request-ID, for the trace a browser test writes.
 ## v0.81.0 — the browser tests are native: `arandutest/browser`, `browser/cdp` and `trace`
 
 Nothing here stops code compiling: the three packages are new. What changes is
