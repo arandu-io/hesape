@@ -208,7 +208,7 @@ func (modelKit) selfGrant(t *testing.T, f ModelFixture) {
 	if _, err := u.Register(context.Background(), "tenant-a", account.Registration{
 		Name: "Mallory", Email: "mallory@example.test", Password: kitPassword,
 	}); err == nil {
-		t.Fatalf("a guest registered an account holding the role %s", f.Role)
+		t.Fatalf("a registration whose Prepare hook granted the role %s was stored: the user policy must refuse a guest an account with privileges", f.Role)
 	}
 	var count int64
 	if err := f.DB.QueryRowContext(context.Background(), `SELECT count(*) FROM users`).Scan(&count); err != nil || count != 0 {
