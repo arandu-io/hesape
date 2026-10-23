@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/arandu-io/hesape/log"
 )
 
 // ErrForbidden is the only authorization error. Handlers translate it to 403.
@@ -271,7 +273,33 @@ type Grant struct {
 //
 // When the policy implements Writes and answers that a does not write, the
 // Grant only reads, and Writable refuses it.
+//
+// Every decision is recorded in the request's log.Collector when the context
+// carries one -- the subject, its tenant, the action, the answer and, for a
+// refusal, the policy's reason -- so a trace of the request shows which policy
+// answered what next to the statements and log lines around it. Without a
+// Collector nothing is recorded and nothing is allocated for it.
 func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, resource T) (Grant, error) {
+	g, why, err := decide(ctx, p, s, a, resource)
+	// Called here and not from decide, so the frame the record names as its
+	// caller is the code that asked for the Grant.
+	if c := log.FromContext(ctx); c != nil {
+		reason := ""
+		if why != nil {
+			reason = why.Error()
+		}
+		c.RecordDecision(s.ID, s.Tenant, string(a), err == nil, reason)
+	}
+	return g, err
+}
+
+// errAnonymous is the reason recorded for a subject refused before any policy
+// was asked.
+var errAnonymous = errors.New("anonymous subject: no session was loaded")
+
+// decide runs the policy. It answers the Grant, the reason for a refusal as
+// the policy gave it, and the error a caller of Authorize sees.
+func decide[T any](ctx context.Context, p Policy[T], s Subject, a Action, resource T) (Grant, error, error) {
 	// An empty subject is refused before the policy is asked, because it is
 	// almost always a session that was not loaded -- and a policy asked about
 	// nobody answers about nobody.
@@ -280,20 +308,20 @@ func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, res
 	// carries a marker only Guest sets. The policy decides about it like any
 	// other subject, and a policy that says nothing about guests refuses them.
 	if s.ID == "" && !s.guest {
-		return Grant{}, fmt.Errorf("%w: anonymous subject on %s", ErrForbidden, a)
+		return Grant{}, errAnonymous, fmt.Errorf("%w: anonymous subject on %s", ErrForbidden, a)
 	}
 	if err := p.Can(ctx, s, a, resource); err != nil {
 		who := s.ID
 		if s.guest {
 			who = "a guest"
 		}
-		return Grant{}, fmt.Errorf("%w: %s denied for subject %s: %v", ErrForbidden, a, who, err)
+		return Grant{}, err, fmt.Errorf("%w: %s denied for subject %s: %v", ErrForbidden, a, who, err)
 	}
 	g := Grant{subject: s, action: a, valid: true}
 	if w, ok := p.(Writes); ok && !w.Writes(a) {
 		g.reads = true
 	}
-	return g, nil
+	return g, nil, nil
 }
 
 // Allows asks the same question as Authorize and answers yes or no.
@@ -306,8 +334,12 @@ func Authorize[T any](ctx context.Context, p Policy[T], s Subject, a Action, res
 // it throws the Grant away, and without a Grant no repository is reachable. A
 // handler that acts on the answer of Allows still has to call Authorize to do
 // the work, and that call is the one that decides.
+//
+// It records no decision in the request's Collector: a view asks once per
+// button, and the decision worth reading in a trace is the one that issued a
+// Grant.
 func Allows[T any](ctx context.Context, p Policy[T], s Subject, a Action, resource T) bool {
-	_, err := Authorize(ctx, p, s, a, resource)
+	_, _, err := decide(ctx, p, s, a, resource)
 	return err == nil
 }
 

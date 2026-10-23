@@ -29,7 +29,8 @@ type DecisionRecord struct {
 // RecordDecision stores one Policy decision.
 //
 // It is the call the code that runs a policy makes after the answer is known,
-// with the answer: it cannot change it. The skip value walks past this method
+// with the answer: it cannot change it. auth.Authorize makes it for every
+// decision it is asked for. The skip value walks past this method
 // and the function that ran the policy, so Caller points at the code that
 // asked for the Grant.
 func (c *Collector) RecordDecision(subject, tenant, action string, allowed bool, reason string) {
