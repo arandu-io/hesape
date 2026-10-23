@@ -1,5 +1,5 @@
-github.com/arandu-io/hesape v0.80.0 h1:KcQHTs2kW1gbEup6tDCSD7iAW3Xu8rdmiUqb46Tl8ps=
-github.com/arandu-io/hesape v0.80.0/go.mod h1:EGvD/xu7BKqX/sT4p/XN+igAb5tBagA/VwoEqeVV1b0=
+github.com/arandu-io/hesape v0.81.0 h1:DQki0+xsyS3YBz/n54wgMRgpetuYpHX51/8M24tuqjo=
+github.com/arandu-io/hesape v0.81.0/go.mod h1:EGvD/xu7BKqX/sT4p/XN+igAb5tBagA/VwoEqeVV1b0=
 github.com/arandu-io/hesape/redis v0.11.0 h1:0Zx5EpYlPskple08uw+QNsDhQf1CrRVcIjhc6nnZ1dI=
 github.com/arandu-io/hesape/redis v0.11.0/go.mod h1:wSEoeCqNG0OR6uZW6xpEFvFZjLZbw6V2cpkUxU2uAsE=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
