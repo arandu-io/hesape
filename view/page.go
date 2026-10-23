@@ -70,14 +70,22 @@ type Layout interface {
 	// Any says whether the attempt that landed here was rejected, and
 	// All is one line per failed field for the banner that says so.
 	//
-	// The banner is the layout's, which is why these two are here and the
-	// per-field message is not: a page body draws "must be at least 12
+	// The banner is the layout's: a page body draws "must be at least 12
 	// characters" under the box it belongs to, and the layout draws the summary
-	// once, above everything. FieldError and OldValue are promoted methods on
-	// Page for the body to call, deliberately outside this interface -- Layout
-	// is what the LAYOUT asks for.
+	// once, above everything.
 	Any() bool
 	All() []string
+
+	// Flashed is the sentence the request that redirected here left under
+	// key, or empty. A layout draws the confirmation of a form that worked
+	// from it, once, above every page.
+	Flashed(key string) string
+	// FieldError and OldOr are the message and the typed value of one input
+	// of a rejected attempt. They are here so a layout can hand itself to a
+	// component that asks a page for them, as a toast in the layout's tray
+	// does; the body of a page asks them of its own data.
+	FieldError(name string) string
+	OldOr(name, fallback string) string
 }
 
 // Page is the chrome every screen hands the layout, embedded rather than

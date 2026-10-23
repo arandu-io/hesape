@@ -139,6 +139,36 @@ func TestPageStillSatisfiesLayout(t *testing.T) {
 	}
 }
 
+// toastPage is what a toast drawn in a layout's tray asks of the page it is
+// handed: the message and the typed value of an input, and what was flashed.
+type toastPage interface {
+	FieldError(name string) string
+	OldOr(name, fallback string) string
+	Flashed(key string) string
+}
+
+// TestALayoutDrawsTheFlash: a layout typed as Layout could not read what
+// Context.With left, nor hand itself to a component asking for a page, so the
+// confirmation of a form that worked was drawn nowhere.
+func TestALayoutDrawsTheFlash(t *testing.T) {
+	var _ toastPage = view.Layout(nil)
+
+	var layout view.Layout = view.Page{
+		Messages: map[string]string{hhttp.StatusKey: "Note saved."},
+		Errors:   validation.Errors{"title": {"is required"}},
+		Old:      url.Values{"title": {""}},
+	}
+	if got := layout.Flashed(hhttp.StatusKey); got != "Note saved." {
+		t.Errorf("Flashed = %q, want the sentence With left", got)
+	}
+	if got := layout.FieldError("title"); got != "is required" {
+		t.Errorf("FieldError = %q", got)
+	}
+	if got := layout.OldOr("title", "stored"); got != "" {
+		t.Errorf("OldOr = %q, want the cleared value that was typed", got)
+	}
+}
+
 // TestNewTakesTheCSRFTokenFromTheRequest: the middleware that protects forms
 // issues the token and stores it on the request; the controller writes
 // view.New(ctx, title) and nothing else, and the form carries the token.

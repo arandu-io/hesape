@@ -97,8 +97,9 @@ func FlashFrom(ctx context.Context) (*session.Flash, bool) {
 // the page that shows the result -- post, redirect, get -- so a reload reads
 // the page again instead of posting the form again, and the page shows what
 // happened because this carried it across the redirect. The page reads it as
-// view.Page.Flashed(key); a layout that draws Flashed(StatusKey) above every
-// page gives every form its confirmation without a controller passing it.
+// view.Page.Flashed(key), and a layout as view.Layout.Flashed(key): a layout
+// that draws Flashed(StatusKey) above every page gives every form its
+// confirmation without a controller passing it.
 //
 // The key names the sentence, and "status" -- StatusKey -- is the one a form
 // that worked uses. A second call adds to the first. The sentence is text for
