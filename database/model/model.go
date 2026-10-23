@@ -9,6 +9,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/database/query"
+	"github.com/arandu-io/hesape/support"
 )
 
 // Table returns the table this row belongs to, and nil for a row the framework
@@ -509,8 +510,10 @@ func qualifyColumn(m *Model, column string) string {
 // row now.
 func usesTimestamps(m *Model) bool { return m.r.table.timestamps && !m.r.noTimestamps }
 
-// freshTimestamp returns the current time in UTC.
-func freshTimestamp() time.Time { return time.Now().UTC() }
+// freshTimestamp returns the current time in UTC, read from the framework
+// clock so a test that freezes or travels in time moves created_at and
+// updated_at with it.
+func freshTimestamp() time.Time { return support.Now().UTC() }
 
 // updateTimestamps stamps the updated-at column, and the created-at column
 // when the row does not yet exist.
