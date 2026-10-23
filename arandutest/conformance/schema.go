@@ -89,9 +89,10 @@ var schemaRuns atomic.Int64
 //   - a fresh database gets the users columns the account rules read, and the
 //     second factor's two tables exactly, with the recovery codes' owner index;
 //   - the same address is accepted in two tenants and refused twice in one;
-//   - a second-factor instant keeps the microsecond, which the
-//     widen-two-factor-time-precision migration gives engines that would round
-//     it;
+//   - a second-factor instant keeps the microsecond, in a fresh database and
+//     in tables an application's own copy created to the second, which the
+//     widen-two-factor-time-precision migration widens on engines with a time
+//     precision;
 //   - a database holding only the users table upgrades by the second factor's
 //     migrations alone, runs nothing on a replay, and rolls back that batch
 //     newest first, leaving the users table.
@@ -168,25 +169,29 @@ func Schema(t *testing.T, f SchemaFixture) {
 		if _, err := h.migrator.Run(h.ctx, []string{path}, migrations.Options{}); err != nil {
 			t.Fatalf("migrating: %v", err)
 		}
-		instant := time.Date(2026, 10, 19, 12, 34, 56, 123456000, time.UTC)
-		if _, err := h.db.ExecContext(h.ctx,
-			`INSERT INTO user_two_factor (user_id, tenant_id, secret, confirmed_at, last_used_step, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			"user-a", "tenant-a", "sealed", instant, 0, instant); err != nil {
-			t.Fatalf("storing an enrolment: %v", err)
+		h.assertMicrosecond(t)
+	})
+
+	t.Run("TablesCreatedToTheSecondAreWidenedToTheMicrosecond", func(t *testing.T) {
+		h := newSchemaHarness(t, f.Open(t))
+		if err := h.migrator.RunPending(h.ctx, f.Users, migrations.Options{}); err != nil {
+			t.Fatalf("installing the users table: %v", err)
 		}
-		for _, column := range []string{"confirmed_at", "created_at"} {
-			var stored any
-			if err := h.db.QueryRowContext(h.ctx, `SELECT `+column+` FROM user_two_factor WHERE user_id = ?`, "user-a").Scan(&stored); err != nil {
-				t.Fatalf("reading %s: %v", column, err)
-			}
-			got, err := asTime(stored)
-			if err != nil {
-				t.Fatalf("reading %s: %v", column, err)
-			}
-			if !got.Equal(instant) {
-				t.Errorf("user_two_factor.%s read back %s, want %s: the column rounds the microsecond", column, got.UTC().Format(time.RFC3339Nano), instant.Format(time.RFC3339Nano))
-			}
+		// The second factor's tables as an application's own copy of the
+		// account rules created them, before instants kept the microsecond,
+		// recorded under the name the package's migration carries.
+		h.createSecondPrecisionTables(t)
+		if err := h.repository.Log(h.ctx, factorNames[0], 1); err != nil {
+			t.Fatalf("recording the copy's migration: %v", err)
 		}
+		applied, err := h.migrator.Run(h.ctx, []string{path}, migrations.Options{})
+		if err != nil {
+			t.Fatalf("upgrading: %v", err)
+		}
+		if !slices.Equal(applied, factorNames[1:]) {
+			t.Fatalf("the upgrade applied %v, want %v", applied, factorNames[1:])
+		}
+		h.assertMicrosecond(t)
 	})
 
 	t.Run("AnExistingSchemaUpgradesOnceAndRollsBackNewestFirst", func(t *testing.T) {
@@ -357,10 +362,11 @@ func parseTime(text string) (time.Time, error) {
 
 // schemaHarness is one fresh database with a migrator over it.
 type schemaHarness struct {
-	ctx      context.Context
-	db       *database.DB
-	builder  *schema.Builder
-	migrator *migrations.Migrator
+	ctx        context.Context
+	db         *database.DB
+	builder    *schema.Builder
+	migrator   *migrations.Migrator
+	repository *migrations.DatabaseMigrationRepository
 }
 
 func newSchemaHarness(t *testing.T, conn *database.Connection) *schemaHarness {
@@ -388,7 +394,7 @@ func newSchemaHarness(t *testing.T, conn *database.Connection) *schemaHarness {
 	}
 	return &schemaHarness{
 		ctx: ctx, db: database.Wrap(conn.GetRawPDO(), dialect),
-		builder: database.ForMigrations(conn).Schema(), migrator: migrator,
+		builder: database.ForMigrations(conn).Schema(), migrator: migrator, repository: repository,
 	}
 }
 
@@ -478,4 +484,59 @@ func (h *schemaHarness) insertUser(t *testing.T, id, tenant, email string) error
 		`INSERT INTO users (`+strings.Join(columns, ", ")+`) VALUES (`+strings.TrimSuffix(strings.Repeat("?, ", len(columns)), ", ")+`)`,
 		args...)
 	return err
+}
+
+// assertMicrosecond stores an enrolment whose instants carry microseconds and
+// reads them back unrounded.
+func (h *schemaHarness) assertMicrosecond(t *testing.T) {
+	t.Helper()
+	instant := time.Date(2026, 10, 19, 12, 34, 56, 123456000, time.UTC)
+	if _, err := h.db.ExecContext(h.ctx,
+		`INSERT INTO user_two_factor (user_id, tenant_id, secret, confirmed_at, last_used_step, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"user-a", "tenant-a", "sealed", instant, 0, instant); err != nil {
+		t.Fatalf("storing an enrolment: %v", err)
+	}
+	for _, column := range []string{"confirmed_at", "created_at"} {
+		var stored any
+		if err := h.db.QueryRowContext(h.ctx, `SELECT `+column+` FROM user_two_factor WHERE user_id = ?`, "user-a").Scan(&stored); err != nil {
+			t.Fatalf("reading %s: %v", column, err)
+		}
+		got, err := asTime(stored)
+		if err != nil {
+			t.Fatalf("reading %s: %v", column, err)
+		}
+		if !got.Equal(instant) {
+			t.Errorf("user_two_factor.%s read back %s, want %s: the column rounds the microsecond", column, got.UTC().Format(time.RFC3339Nano), instant.Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// createSecondPrecisionTables creates the second factor's two tables with the
+// columns the package's migration gives them and instants kept to the second,
+// which is how the applications' own copies created them. On an engine with
+// no time precision the difference does not exist, and the widening has
+// nothing to change.
+func (h *schemaHarness) createSecondPrecisionTables(t *testing.T) {
+	t.Helper()
+	if err := h.builder.Create(h.ctx, "user_two_factor", func(table *schema.Blueprint) {
+		table.String("user_id").Primary()
+		table.String("tenant_id")
+		table.Text("secret")
+		table.Timestamp("confirmed_at", 0).Nullable()
+		table.BigInteger("last_used_step")
+		table.Timestamp("created_at", 0)
+	}); err != nil {
+		t.Fatalf("creating the copy's user_two_factor: %v", err)
+	}
+	if err := h.builder.Create(h.ctx, "user_recovery_codes", func(table *schema.Blueprint) {
+		table.String("id").Primary()
+		table.String("tenant_id")
+		table.String("user_id")
+		table.Text("code_hash")
+		table.Timestamp("used_at", 0).Nullable()
+		table.Timestamp("created_at", 0)
+		table.Index([]string{"tenant_id", "user_id"}, "user_recovery_codes_owner_idx")
+	}); err != nil {
+		t.Fatalf("creating the copy's user_recovery_codes: %v", err)
+	}
 }
