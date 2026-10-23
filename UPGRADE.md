@@ -27,6 +27,39 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.81.0 — the browser tests are native: `arandutest/browser`, `browser/cdp` and `trace`
+
+Nothing here stops code compiling: the three packages are new. What changes is
+the browser harness each application wrote for itself, which the kit replaces.
+
+| what an application wrote | what it writes instead |
+|---|---|
+| a CDP client of its own, over `--remote-debugging-pipe` or a WebSocket | `browser.Open(t, tests.Drivers, browser.BaseURL(srv.URL))`, with `var Drivers = browser.Registry{"cdp": cdp.Launch}` once in `tests/TestCase.go` |
+| `//go:build browser` and a `tests/Browser` directory | `//go:build e2e` and `tests/E2E` |
+| `time.Sleep` after a click, a polling loop on `Runtime.evaluate` | nothing: every action waits for its element and for the page to settle (htmx settled, network idle, animations over), every expectation retries under the step timeout |
+| `document.querySelector` and a class name | `browser.Role`, `browser.Label`, `browser.Text`, `browser.TestID`; `browser.CSS(selector, reason)` when nothing else can say it |
+| `panic` in each check and a `recover` around the journey | the step fails the test with `t.Fatalf`, naming what it was still waiting for |
+| counting `Runtime.exceptionThrown`, a `securitypolicyviolation` listener, nothing for a 5xx | automatic: an exception, a `console.error`, a response of 500 or more and a CSP violation fail the step they happen in; `page.Allow(fragment)` accepts one a test is about |
+| a width × theme loop with a `scrollWidth` check and a geometry dump | `page.Responsive()`: 1440/768/390/320 × light/dark, with the geometry of what overflows in the trace |
+| screenshots and a JSON report under an evidence directory of its own | the trace, written on failure (and always with `ARANDU_E2E_TRACE=1`) to `ARANDU_E2E_TRACE_DIR/<test name>/` |
+| `PERATA_BROWSER_*`, `CHROME_PATH` read by hand | `CHROME_PATH`, `ARANDU_E2E_DRIVER`, `ARANDU_E2E_BROWSER`, `ARANDU_E2E_HEADED`, `ARANDU_E2E_SLOWMO`; no Chrome skips locally and fails in CI |
+
+A journey that read `b.navigate(base, path)` and `b.submit("#login", fields)`
+reads:
+
+```go
+page.Visit("/login")
+page.Fill("Email", "ana@example.test")
+page.Fill("Password", password)
+page.ClickRole("button", "Sign in")
+page.ExpectURL("/dashboard")
+```
+
+A driver other than `cdp` implements `browser.Driver` and passes
+`conformance.Run(t, itsFactory)`.
+
+---
+
 ## v0.80.0 — arandutest serves the application and signs in through the session
 
 Nothing stops compiling. Two things change what they do, and one is
