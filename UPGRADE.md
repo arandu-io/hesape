@@ -27,6 +27,40 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.79.0 — the account rules keep what the user policy says writes, and Vary is one line
+
+`auth/account.PolicyOf` returns `auth.Policy[account.Account]` instead of
+`account.PolicyFunc`. Passing it to `account.Config.Policy`, which is how it is
+used, needs nothing. Code that held the result in a variable typed
+`account.PolicyFunc` types it `auth.Policy[account.Account]`:
+
+```go
+var policy auth.Policy[account.Account] = account.PolicyOf(policies.UserPolicy{})
+```
+
+Two things change what they do.
+
+**A user policy that implements `auth.Writes` keeps it through `PolicyOf`.**
+The adapter answered `Can` and nothing else, so every Grant the account rules
+issued through it wrote, the one for `account.ActionUserView` and
+`account.ActionUserNamesPublic` included. What `PolicyOf` returns now answers
+`Writes` with the policy's own answers, and a Grant issued for an action the
+policy says does not write is refused on every write with `auth.ErrReadGrant`.
+The account rules write only under the Grants of `ActionUserCreate` and
+`ActionUserUpdate`, so a policy that says those two write runs them as before.
+A policy that does not implement `auth.Writes` is returned as a
+`PolicyFunc`, as before.
+
+**`Context.WantsJSON`, `Context.IsHTMX` and `Context.Targets` write `Vary` as
+one line.** Each header they read went on a `Vary` line of its own, so
+`Header().Get("Vary")` saw the first and lost the rest. The names already on
+the answer and the ones added are joined into one line, `Accept, HX-Request,
+X-Requested-With`, each once whatever its case, and a `Vary` that says `*` on
+any line is left alone. A test that read `Header().Values("Vary")` as one
+entry per name reads one entry with every name.
+
+---
+
 ## v0.78.0 — a Grant issued for reading cannot write, a layout draws the flash, and readers of a header declare it in Vary
 
 `view.Layout.Flashed`, `view.Layout.FieldError` and `view.Layout.OldOr` are
