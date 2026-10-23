@@ -31,10 +31,10 @@ type SchemaFixture struct {
 	Catalog string
 }
 
-// Column is one column of a table as Schema expects it: its name, its family
+// expectedColumn is one column of a table as Schema expects it: its name, its family
 // of type -- "varchar", "text", "integer" or "time", which every engine reads
 // back under its own spelling -- and whether it takes NULL.
-type Column struct {
+type expectedColumn struct {
 	Name     string
 	Family   string
 	Nullable bool
@@ -43,7 +43,7 @@ type Column struct {
 // usersColumns are the columns of the users table the account rules read and
 // write. The table may have more -- the roles, a document number -- and they
 // are the application's.
-var usersColumns = []Column{
+var usersColumns = []expectedColumn{
 	{Name: "id", Family: "string"},
 	{Name: "tenant_id", Family: "string"},
 	{Name: "email", Family: "string"},
@@ -58,7 +58,7 @@ var usersColumns = []Column{
 // The second factor's tables are hesape/auth/account's, so their columns are
 // exactly these.
 var (
-	twoFactorColumns = []Column{
+	twoFactorColumns = []expectedColumn{
 		{Name: "user_id", Family: "varchar"},
 		{Name: "tenant_id", Family: "varchar"},
 		{Name: "secret", Family: "text"},
@@ -66,7 +66,7 @@ var (
 		{Name: "last_used_step", Family: "integer"},
 		{Name: "created_at", Family: "time"},
 	}
-	recoveryCodeColumns = []Column{
+	recoveryCodeColumns = []expectedColumn{
 		{Name: "id", Family: "varchar"},
 		{Name: "tenant_id", Family: "varchar"},
 		{Name: "user_id", Family: "varchar"},
@@ -271,7 +271,7 @@ func catalogProblems(registered []migrations.Migration, wanted []string) []strin
 // columnProblems compares what a table has with what is expected of it.
 // exact also refuses a column that is not expected, and an order other than
 // the expected one.
-func columnProblems(table string, got []schema.ColumnInfo, want []Column, exact bool) []string {
+func columnProblems(table string, got []schema.ColumnInfo, want []expectedColumn, exact bool) []string {
 	var problems []string
 	byName := make(map[string]schema.ColumnInfo, len(got))
 	var order []string
