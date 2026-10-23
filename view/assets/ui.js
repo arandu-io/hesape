@@ -1749,14 +1749,109 @@
 		if (output) output.textContent = track.value;
 	}
 
+	/* ---- sidebar -----------------------------------------------------------
+	 *
+	 * A button whose data-sidebar-toggle names a sidebar's id folds it. On a
+	 * wide screen a sidebar the server drew with a mode -- data-sidebar-mode,
+	 * "full" or "slim" -- switches to the other one, and the choice is kept on
+	 * the device, so the next page comes back the way the last was left. On a
+	 * narrow screen, or for a sidebar drawn with no mode, the column is the
+	 * overlay and the button opens or closes it.
+	 *
+	 * The mode the server drew is right on the first paint with no script and
+	 * no storage, and it stays the answer whenever storage throws -- a private
+	 * window, blocked site data -- or holds anything but the two names. The
+	 * stylesheet follows the attribute, so switching it is all there is to do.
+	 *
+	 * The width the column turns into an overlay at is the sidebar's own
+	 * data-breakpoint, the one the vendored script reads, and 768 pixels
+	 * without it: the two must agree on which screen is narrow, or a press
+	 * would fold the strip while the overlay is what is on screen.
+	 */
+
+	var SIDEBAR_KEY = 'arandu.sidebar.';
+
+	function sidebarMode(value) {
+		return value === 'full' || value === 'slim' ? value : '';
+	}
+
+	function sidebarWide(sidebar) {
+		var breakpoint = parseInt(sidebar.getAttribute('data-breakpoint'), 10) || 768;
+		return window.innerWidth >= breakpoint;
+	}
+
+	/* Whether the sidebar is switching modes rather than opening and closing:
+	 * a wide screen, and a mode the server drew. */
+	function sidebarSwitches(sidebar) {
+		return sidebarWide(sidebar) && sidebarMode(sidebar.getAttribute('data-sidebar-mode')) !== '';
+	}
+
+	/* aria-expanded on every button that names the sidebar: the full column
+	 * is the expanded one, and the overlay is expanded while it is shown. */
+	function stampSidebarToggles(sidebar) {
+		var expanded = sidebarSwitches(sidebar)
+			? sidebar.getAttribute('data-sidebar-mode') === 'full'
+			: sidebar.getAttribute('aria-hidden') !== 'true';
+		var toggles = document.querySelectorAll('[data-sidebar-toggle]');
+		for (var i = 0; i < toggles.length; i++) {
+			if (toggles[i].getAttribute('data-sidebar-toggle') === sidebar.id) {
+				toggles[i].setAttribute('aria-expanded', expanded ? 'true' : 'false');
+			}
+		}
+	}
+
+	function toggleSidebar(button) {
+		var id = button.getAttribute('data-sidebar-toggle');
+		var sidebar = id ? document.getElementById(id) : null;
+		if (!sidebar) {
+			miss('sidebar', id);
+			return;
+		}
+		if (sidebarSwitches(sidebar)) {
+			var next = sidebar.getAttribute('data-sidebar-mode') === 'slim' ? 'full' : 'slim';
+			sidebar.setAttribute('data-sidebar-mode', next);
+			try {
+				window.localStorage.setItem(SIDEBAR_KEY + id, next);
+			} catch (e) {
+				/* Not remembered: this page is switched all the same. */
+			}
+		} else if (sidebar.contains(button) && !sidebarWide(sidebar) &&
+			!button.closest('[data-keep-mobile-sidebar-open]') &&
+			sidebar.getAttribute('data-sidebar-initialized')) {
+			/* The vendored script closes the overlay itself when a button
+			 * inside it is pressed, before this listener hears the click;
+			 * toggling here would open it again. */
+		} else if (typeof sidebar.toggle === 'function') {
+			sidebar.toggle();
+		}
+		stampSidebarToggles(sidebar);
+	}
+
+	/* The mode remembered on this device, put back on a sidebar that has just
+	 * been drawn. Only a sidebar the server drew with a mode is touched, and
+	 * only by one of the two names. */
+	function restoreSidebar(sidebar) {
+		if (!sidebar.id) return;
+		var saved = '';
+		try {
+			saved = sidebarMode(window.localStorage.getItem(SIDEBAR_KEY + sidebar.id));
+		} catch (e) {
+			/* Nothing remembered: the server's mode stands. */
+		}
+		if (saved) sidebar.setAttribute('data-sidebar-mode', saved);
+		if (sidebarSwitches(sidebar)) stampSidebarToggles(sidebar);
+	}
+
 	/* ---- the sweep ---------------------------------------------------------
 	 *
-	 * Two things a server cannot write and delegation cannot reach, because they
-	 * are state rather than events. Which accent is in force lives in the
-	 * browser, so no cached page can carry aria-current on the right button; and
+	 * Three things a server cannot write and delegation cannot reach, because
+	 * they are state rather than events. Which accent is in force lives in the
+	 * browser, so no cached page can carry aria-current on the right button;
 	 * the vendored stylesheet paints a hover highlight of its own until a
 	 * component says it is driving one, which is what the initialised marker
-	 * says. Both are idempotent, and neither gates any behaviour.
+	 * says; and the sidebar mode a person chose is remembered on the device,
+	 * not on the server that drew the page. All three are idempotent, and none
+	 * gates any behaviour.
 	 */
 
 	function each(scope, selector, fn) {
@@ -1778,6 +1873,7 @@
 		each(node, '[data-command]', function (palette) {
 			palette.setAttribute('data-command-initialized', 'true');
 		});
+		each(node, '[data-sidebar-mode]', restoreSidebar);
 	}
 
 	/* ---- the registry ------------------------------------------------------
@@ -1949,6 +2045,9 @@
 
 		var mode = from.closest('[data-theme-mode]');
 		if (mode) setMode(mode.getAttribute('data-theme-mode'));
+
+		var sidebarToggle = from.closest('[data-sidebar-toggle]');
+		if (sidebarToggle) toggleSidebar(sidebarToggle);
 
 		var option = from.closest('[data-combobox] ' + OPTION);
 		if (option) chooseOption(option.closest('[data-combobox]'), option);
