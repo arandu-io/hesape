@@ -62,3 +62,45 @@ func TestARequestWithNoTranslatorDrawsNoCatalogue(t *testing.T) {
 		t.Error("WithTranslator changed the page it was called on")
 	}
 }
+
+// TestAPageTranslatesInTheLanguageOfTheRequest: a view wrote
+// .Translator().Get(.Locale(), key, nil) for every sentence; Trans and Choice
+// say it in one call.
+func TestAPageTranslatesInTheLanguageOfTheRequest(t *testing.T) {
+	loader := translation.NewArrayLoader().AddMessages("pt-BR", "notes", translation.Lines{
+		"saved": "Nota :title salva por :who.",
+		"count": "{0} Nenhuma nota|{1} Uma nota|[2,*] :count notas",
+	}, "*")
+	page := view.Page{}.WithTranslator(translation.New(loader, "en", "en"), "pt-BR")
+
+	if got := page.Trans("notes.saved", translation.Replace{"title": "A", "who": "x"}, translation.Replace{"who": "Ana"}); got != "Nota A salva por Ana." {
+		t.Errorf("Trans = %q", got)
+	}
+	if got := page.Choice("notes.count", 3); got != "3 notas" {
+		t.Errorf("Choice = %q", got)
+	}
+	if got := page.Choice("notes.count", 1); got != "Uma nota" {
+		t.Errorf("Choice of one = %q", got)
+	}
+}
+
+// TestAPageWithNoTranslatorAnswersTheKey: the skeleton wired no translator,
+// and a view that asked Translator() for a line panicked on the nil.
+func TestAPageWithNoTranslatorAnswersTheKey(t *testing.T) {
+	page := view.Page{}
+	if got := page.Trans("notes.saved", translation.Replace{"title": "A"}); got != "notes.saved" {
+		t.Errorf("Trans = %q, want the key", got)
+	}
+	if got := page.Choice("notes.count", 2); got != "notes.count" {
+		t.Errorf("Choice = %q, want the key", got)
+	}
+	if got := page.Translator().Get(page.Locale(), "notes.saved", nil); got != "notes.saved" {
+		t.Errorf("Translator().Get = %q, want the key", got)
+	}
+	if got := page.Translator().Choice(page.Locale(), "notes.count", 2, nil); got != "notes.count" {
+		t.Errorf("Translator().Choice = %q, want the key", got)
+	}
+	if page.Translator().Has(page.Locale(), "notes.saved") || page.Translator().HasForLocale(page.Locale(), "notes.saved") {
+		t.Error("a nil translator has a line")
+	}
+}

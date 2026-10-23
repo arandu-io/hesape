@@ -1,6 +1,7 @@
 package view
 
 import (
+	"maps"
 	"net/url"
 	"strings"
 
@@ -247,12 +248,50 @@ func (p Page) BrandName() string { return p.AppName }
 func (p Page) CSRFToken() string { return p.Token }
 
 // Translator is the application's catalogue, or nil when the request carried
-// none (see translation.WithTranslator).
+// none (see translation.WithTranslator). A nil one answers every key
+// unchanged and has no line for any, so a view that asks it never fails.
 //
 // It is what a component asks a page for when it draws a word nobody wrote --
 // "Cancel", "Next page" -- so a screen that embeds Page says those words in the
 // request's language without a line of its own.
 func (p Page) Translator() *translation.Translator { return p.translator }
+
+// Trans is the line stored under key in the language of the request, with
+// the placeholders replace fills; several are merged in order, the last
+// winning.
+//
+//	{{ .Trans("notes.saved", translation.Replace{"title": .Note.Title}) }}
+//
+// A page with no translator answers the key unchanged, so a view drawn
+// without a catalogue shows the key rather than failing.
+func (p Page) Trans(key string, replace ...translation.Replace) string {
+	return p.translator.Get(p.locale, key, mergeReplace(replace))
+}
+
+// Choice is the segment of the line stored under key that number selects, in
+// the language of the request, with ":count" filled by number unless replace
+// carries it. A page with no translator answers the key unchanged.
+//
+//	{{ .Choice("notes.count", .Total) }}
+func (p Page) Choice(key string, number int, replace ...translation.Replace) string {
+	return p.translator.Choice(p.locale, key, number, mergeReplace(replace))
+}
+
+// mergeReplace is the replacements of Trans and Choice as one map: nil for
+// none, the map itself for one, and a merge for more.
+func mergeReplace(replace []translation.Replace) translation.Replace {
+	switch len(replace) {
+	case 0:
+		return nil
+	case 1:
+		return replace[0]
+	}
+	merged := translation.Replace{}
+	for _, r := range replace {
+		maps.Copy(merged, r)
+	}
+	return merged
+}
 
 // Locale is the language of the request being drawn, as translation.Locale
 // read it from the request context. Empty asks the translator for its own.

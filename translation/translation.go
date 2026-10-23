@@ -95,7 +95,13 @@ func New(l Loader, locale, fallback string) *Translator {
 // A key naming a group and no item -- "messages" rather than
 // "messages.welcome" -- returns the key, because the result is a sentence and
 // a group is not one.
+//
+// A nil Translator carries no catalogue and returns every key unchanged, so a
+// page drawn with none shows the key instead of failing.
 func (t *Translator) Get(locale, key string, replace Replace) string {
+	if t == nil {
+		return key
+	}
 	return t.get(locale, key, replace, true)
 }
 
@@ -147,7 +153,12 @@ func (t *Translator) get(locale, key string, replace Replace, fallback bool) str
 //
 // ":count" is filled with count unless replace already carries it. The count
 // is the number itself; use len at the call site for a collection.
+//
+// A nil Translator returns the key unchanged, as Get does.
 func (t *Translator) Choice(locale, key string, number int, replace Replace) string {
+	if t == nil {
+		return key
+	}
 	locale = t.localeForChoice(key, locale)
 
 	line := t.Get(locale, key, nil)
@@ -176,14 +187,21 @@ func (t *Translator) localeForChoice(key, locale string) string {
 }
 
 // Has answers Translator::has(): whether a line exists for key, in the given
-// locale or in the fallback.
+// locale or in the fallback. A nil Translator has no line for any key.
 func (t *Translator) Has(locale, key string) bool {
+	if t == nil {
+		return false
+	}
 	return t.has(locale, key, true)
 }
 
 // HasForLocale answers Translator::hasForLocale(): whether a line exists for
 // key in the given locale alone, with no fall through to the fallback locale.
+// A nil Translator has no line for any key.
 func (t *Translator) HasForLocale(locale, key string) bool {
+	if t == nil {
+		return false
+	}
 	return t.has(locale, key, false)
 }
 
