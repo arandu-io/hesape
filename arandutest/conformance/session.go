@@ -319,7 +319,8 @@ func (h *sessionHarness) post(path string, form url.Values, cookies ...*http.Coo
 func (h *sessionHarness) pendingCookie(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
 	t.Helper()
 	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == h.paths.PendingCookie && cookie.MaxAge > 0 {
+		// A cookie set with Max-Age or with Expires, and not one deleting it.
+		if cookie.Name == h.paths.PendingCookie && cookie.Value != "" && cookie.MaxAge >= 0 {
 			return cookie
 		}
 	}

@@ -69,7 +69,8 @@ func (s *screens) login(w http.ResponseWriter, r *http.Request) {
 		payload, _ := json.Marshal(pendingState{Tenant: s.parts.Tenant, UserID: user.AccountID(), Fingerprint: account.Fingerprint(user.PasswordHash())})
 		http.SetCookie(w, &http.Cookie{
 			Name: pendingCookie, Value: s.signer.Sign(pendingCookie, string(payload), 10*time.Minute),
-			Path: "/auth/two-factor", MaxAge: 600, HttpOnly: true,
+			// Expires and no Max-Age, as some published screens write it.
+			Path: "/auth/two-factor", Expires: time.Now().Add(10 * time.Minute), HttpOnly: true,
 		})
 		http.Redirect(w, r, "/auth/two-factor/challenge", http.StatusSeeOther)
 		return
