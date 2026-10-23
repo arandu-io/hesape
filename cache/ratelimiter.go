@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // Limit is how many attempts are allowed, over what period, against what key.
@@ -394,7 +396,7 @@ func (rl *RateLimiter) AvailableIn(l Limit) time.Duration {
 	if l.Decay <= 0 {
 		return 0
 	}
-	now := time.Now().UnixNano()
+	now := support.Now().UnixNano()
 	return time.Duration(int64(l.Decay) - now%int64(l.Decay))
 }
 
@@ -421,6 +423,6 @@ func (rl *RateLimiter) key(l Limit) (string, error) {
 	if l.MaxAttempts <= 0 {
 		return "", fmt.Errorf("cache: the rate limit on %q allows %d attempts, which is a closed door and not a limit", l.Key, l.MaxAttempts)
 	}
-	bucket := time.Now().UnixNano() / int64(l.Decay)
+	bucket := support.Now().UnixNano() / int64(l.Decay)
 	return "ratelimit:" + rl.CleanRateLimiterKey(l.Key) + ":" + strconv.FormatInt(bucket, 10), nil
 }

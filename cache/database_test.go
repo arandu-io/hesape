@@ -9,6 +9,7 @@ import (
 
 	"github.com/arandu-io/hesape/cache"
 	"github.com/arandu-io/hesape/cache/cachetest"
+	"github.com/arandu-io/hesape/support"
 )
 
 func newDatabaseStore(t *testing.T) (*cache.DatabaseStore, *fakeCacheDB) {
@@ -73,6 +74,7 @@ func TestDatabaseStoreForgetIfExpiredKeepsALiveEntry(t *testing.T) {
 // without a scheduled prune: a row nobody reads again is a row that stays, and
 // one that is read is one that goes.
 func TestDatabaseStoreReadRemovesAnExpiredRow(t *testing.T) {
+	frozenClock(t)
 	ctx := context.Background()
 	store, state := newDatabaseStore(t)
 
@@ -82,7 +84,7 @@ func TestDatabaseStoreReadRemovesAnExpiredRow(t *testing.T) {
 	if _, err := store.Get(ctx, "k"); err != nil {
 		t.Fatalf("Get before the ttl ran out: %v", err)
 	}
-	time.Sleep(80 * time.Millisecond)
+	support.Travel(80 * time.Millisecond)
 
 	if _, err := store.Get(ctx, "k"); !errors.Is(err, cache.ErrNotFound) {
 		t.Fatalf("Get after the ttl = %v, want cache.ErrNotFound", err)

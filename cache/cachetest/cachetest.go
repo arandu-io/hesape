@@ -23,6 +23,11 @@
 // not available, and is called once per subtest so no subtest can be affected
 // by what another one left behind.
 //
+// The expiry subtests pin support's clock and travel it past the ttl, so a
+// test that runs the suite must not run in parallel with another that reads
+// support.Now. A store whose entries expire on a server's clock is handed in
+// wrapped in a [ServerClock], which waits for real.
+//
 // It is named for net/http/httptest: a package whose name ends in "test" is a
 // package that imports testing, and every consumer of this one is a test.
 package cachetest
@@ -35,16 +40,45 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/support"
 )
 
 // expiry is the ttl the expiry subtests wait out.
 //
-// Short enough that the suite stays fast, long enough that a loaded machine
-// does not fail the test before the store does. The suite sleeps rather than
-// injecting a clock: a clock a store had to accept would be a testing seam in
-// the production interface, and an adapter talking to a real server could not
-// honour it anyway.
+// A store that reads the time through support.Now -- the array, file and
+// database stores -- is waited out by travelling with the fake clock, so the
+// value costs nothing. It is still short because a store whose entries expire
+// on a server's clock waits it out for real, through [ServerClock].
 const expiry = 80 * time.Millisecond
+
+// ServerClock is implemented by a store under test whose entries expire on a
+// clock support.Now does not move -- a server's, which no test can travel.
+//
+// The suite asks every store it is handed for it. One that has it is waited
+// out by Elapse; every other one is waited out by pinning support's clock for
+// the subtest and travelling it past the ttl, which is instant and does not
+// depend on how loaded the machine is. The store itself never implements it:
+// the adapter's test wraps the store it returns in a type that does, so the
+// production interface carries no testing seam.
+type ServerClock interface {
+	// Elapse returns once d has passed on the store's clock.
+	Elapse(d time.Duration)
+}
+
+// clockFor answers how a subtest moves the store's time forward. For a store
+// that reads support.Now it freezes that clock for the subtest, so every ttl
+// is computed from a known instant, and puts back what was pinned before when
+// the subtest ends.
+func clockFor(t *testing.T, s any) func(time.Duration) {
+	t.Helper()
+	if c, ok := s.(ServerClock); ok {
+		return c.Elapse
+	}
+	previous := support.GetTestNow()
+	support.FreezeTime()
+	t.Cleanup(func() { support.SetTestNow(previous) })
+	return func(d time.Duration) { support.Travel(d) }
+}
 
 // Run checks a Store against the contract Repository depends on.
 func Run(t *testing.T, newStore func(*testing.T) cache.Store) {
@@ -91,12 +125,13 @@ func Run(t *testing.T, newStore func(*testing.T) cache.Store) {
 
 	t.Run("AValueDoesNotOutliveItsTTL", func(t *testing.T) {
 		s := newStore(t)
+		elapse := clockFor(t, s)
 		ctx := context.Background()
 
 		if err := s.Put(ctx, "k", []byte("v"), expiry); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
-		time.Sleep(2 * expiry)
+		elapse(2 * expiry)
 
 		if _, err := s.Get(ctx, "k"); !errors.Is(err, cache.ErrNotFound) {
 			t.Fatalf("Get after the ttl = %v, want cache.ErrNotFound", err)
@@ -134,12 +169,13 @@ func Run(t *testing.T, newStore func(*testing.T) cache.Store) {
 
 	t.Run("AddSucceedsOnceTheKeyHasExpired", func(t *testing.T) {
 		s := newStore(t)
+		elapse := clockFor(t, s)
 		ctx := context.Background()
 
 		if _, err := s.Add(ctx, "k", []byte("first"), expiry); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
-		time.Sleep(2 * expiry)
+		elapse(2 * expiry)
 
 		ok, err := s.Add(ctx, "k", []byte("second"), time.Minute)
 		if err != nil {
@@ -204,16 +240,21 @@ func Run(t *testing.T, newStore func(*testing.T) cache.Store) {
 	// as long as traffic continued, and the window would never close.
 	t.Run("IncrementDoesNotRefreshTheExpiry", func(t *testing.T) {
 		s := newStore(t)
+		elapse := clockFor(t, s)
 		ctx := context.Background()
 
 		if _, err := s.Increment(ctx, "n", 1, expiry); err != nil {
 			t.Fatalf("Increment: %v", err)
 		}
-		time.Sleep(expiry / 2)
+		elapse(expiry / 2)
 		if _, err := s.Increment(ctx, "n", 1, expiry); err != nil {
 			t.Fatalf("Increment: %v", err)
 		}
-		time.Sleep(expiry)
+		// A quarter past the first deadline and a quarter before the one a
+		// refreshing store would have moved it to: at exactly one ttl, or
+		// at one and a half, both answers are the same and the check proves
+		// nothing.
+		elapse(expiry * 3 / 4)
 
 		n, err := s.Increment(ctx, "n", 1, expiry)
 		if err != nil {
@@ -371,12 +412,13 @@ func RunLocking(t *testing.T, newStore func(*testing.T) cache.Locking) {
 	// when the ttl expires, and there is no other way out.
 	t.Run("ALockDoesNotOutliveItsTTL", func(t *testing.T) {
 		s := newStore(t)
+		elapse := clockFor(t, s)
 		ctx := context.Background()
 
 		if _, err := s.AcquireLock(ctx, "lock:job", "token-a", expiry); err != nil {
 			t.Fatalf("AcquireLock: %v", err)
 		}
-		time.Sleep(2 * expiry)
+		elapse(2 * expiry)
 
 		ok, err := s.AcquireLock(ctx, "lock:job", "token-b", time.Minute)
 		if err != nil {

@@ -194,6 +194,8 @@ func (lk *Lock) Block(ctx context.Context, wait time.Duration, fn func(context.C
 	if sleep <= 0 {
 		sleep = defaultSleepBetweenBlockedAttempts
 	}
+	// The deadline is wall time and not support.Now: it bounds a real wait for
+	// another holder, and under a frozen test clock it would never arrive.
 	deadline := time.Now().Add(wait)
 
 	for {

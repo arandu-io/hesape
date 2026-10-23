@@ -89,6 +89,13 @@ t.Fatal("the system subject must carry the system role, so audits can find it")
 suite leans on, and `t.Parallel()` is common: use it where the test owns
 everything it touches.
 
+**A ttl is travelled, not slept through.** Code whose expiry a test waits out
+reads the time through `support.Now`; the test pins it with
+`support.FreezeTime`, moves it with `support.Travel`, and puts back what was
+pinned in `t.Cleanup`. The clock is global, so such a test does not call
+`t.Parallel()`. `cache/nosleep_test.go` refuses a `time.Sleep` in the cache
+tree and in `database/conformance`.
+
 ## Contract suites
 
 When an interface has more than one implementation, the behaviour is tested once
@@ -99,6 +106,10 @@ and every implementation is handed to it. Two exist:
   file and database stores in `cache`, and the RESP store in the `redis` module.
   It lives here and not in each adapter because there is one contract, not one
   per backend, and a copy is the thing that drifts.
+  It waits a ttl out by travelling `support`'s fake clock, which the three
+  stores in `cache` read through `support.Now`; the RESP store expires on the
+  server's clock, so the `redis` test wraps it in a `cachetest.ServerClock`
+  that sleeps.
 - **`database/conformance`** — `conformance.Run(t, dialect, driverName, dsn)`,
   called by all three connector modules. It exists because every test once ran
   against SQLite, which accepts `id TEXT PRIMARY KEY`; MySQL refuses it, so the

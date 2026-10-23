@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/support"
 )
 
 func TestOnlyOneHolderAtATime(t *testing.T) {
@@ -174,13 +175,14 @@ func TestALockNeedsATTLAndAName(t *testing.T) {
 }
 
 func TestAnExpiredLockIsFree(t *testing.T) {
+	frozenClock(t)
 	ctx := context.Background()
 	locks := cache.NewLocks(cache.NewArrayStore())
 
 	if err := locks.Lock("relay", 50*time.Millisecond).Acquire(ctx); err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	time.Sleep(100 * time.Millisecond)
+	support.Travel(100 * time.Millisecond)
 
 	if err := locks.Lock("relay", time.Minute).Acquire(ctx); err != nil {
 		t.Fatalf("Acquire after the ttl ran out: %v", err)

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // Filesystem is the slice of a file system FileStore needs.
@@ -348,11 +350,11 @@ func (s *FileStore) payload(key string) ([]byte, time.Duration, error) {
 		_ = s.files.Delete(path)
 		return nil, 0, ErrNotFound
 	}
-	if !time.Now().Before(expires) {
+	if !support.Now().Before(expires) {
 		_ = s.files.Delete(path)
 		return nil, 0, ErrNotFound
 	}
-	return value, time.Until(expires), nil
+	return value, expires.Sub(support.Now()), nil
 }
 
 // Many returns the stored bytes for several keys at once.
@@ -395,7 +397,7 @@ func (s *FileStore) write(path, key string, value []byte, ttl time.Duration) err
 	if err := s.ensureDirectory(path); err != nil {
 		return err
 	}
-	return s.files.Put(path, encodeFileEntry(key, value, time.Now().Add(ttl)), s.permission)
+	return s.files.Put(path, encodeFileEntry(key, value, support.Now().Add(ttl)), s.permission)
 }
 
 // ensureDirectory creates the shard a path lives in.
@@ -437,7 +439,7 @@ func (s *FileStore) Add(_ context.Context, key string, value []byte, ttl time.Du
 	// removing it. A third pass would be a third racer, and at that point the
 	// honest answer is that somebody else has it.
 	for range 2 {
-		added, err := s.files.PutIfAbsent(path, encodeFileEntry(key, value, time.Now().Add(ttl)), s.permission)
+		added, err := s.files.PutIfAbsent(path, encodeFileEntry(key, value, support.Now().Add(ttl)), s.permission)
 		if err != nil {
 			return false, fmt.Errorf("cache: writing %s: %w", path, err)
 		}
@@ -641,7 +643,7 @@ func (s *FileStore) AcquireLock(_ context.Context, key, token string, ttl time.D
 	}
 
 	for range 2 {
-		taken, err := s.files.PutIfAbsent(path, encodeFileEntry(key, []byte(token), time.Now().Add(ttl)), s.permission)
+		taken, err := s.files.PutIfAbsent(path, encodeFileEntry(key, []byte(token), support.Now().Add(ttl)), s.permission)
 		if err != nil {
 			return false, err
 		}
@@ -691,7 +693,7 @@ func (s *FileStore) CurrentOwner(_ context.Context, key string) (string, error) 
 		_ = s.files.Delete(path)
 		return "", nil
 	}
-	if !time.Now().Before(expires) {
+	if !support.Now().Before(expires) {
 		_ = s.files.Delete(path)
 		return "", nil
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/cache/events"
+	"github.com/arandu-io/hesape/support"
 )
 
 // foreverTTL is the deadline Forever, RememberForever and Sear write.
@@ -880,7 +881,7 @@ func Flexible[T any](ctx context.Context, r *Repository, g auth.Grant, key strin
 		return flexibleRefresh(ctx, r, g, key, createdKey, stale, compute)
 	}
 
-	if time.Unix(created, 0).Add(fresh).After(time.Now()) {
+	if time.Unix(created, 0).Add(fresh).After(support.Now()) {
 		return value, nil
 	}
 
@@ -935,7 +936,7 @@ func flexibleRefresh[T any](ctx context.Context, r *Repository, g auth.Grant, ke
 	// The value first. A timestamp written before the value it dates would let
 	// the next reader decide a value it cannot see is fresh.
 	if err := r.Put(ctx, g, key, computed, stale); err == nil {
-		_ = r.Put(ctx, g, createdKey, time.Now().Unix(), stale)
+		_ = r.Put(ctx, g, createdKey, support.Now().Unix(), stale)
 	}
 	return settled, nil
 }

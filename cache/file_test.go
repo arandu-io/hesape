@@ -12,6 +12,7 @@ import (
 
 	"github.com/arandu-io/hesape/cache"
 	"github.com/arandu-io/hesape/cache/cachetest"
+	"github.com/arandu-io/hesape/support"
 )
 
 // TestFileStoreContract is the reason cachetest exists: the store on disk
@@ -149,13 +150,14 @@ func TestFileStoreAddIsAtomic(t *testing.T) {
 }
 
 func TestFileStoreAddReplacesAnExpiredEntry(t *testing.T) {
+	frozenClock(t)
 	ctx := context.Background()
 	s := cache.NewFileStore(cache.LocalFilesystem{}, t.TempDir(), 0)
 
 	if _, err := s.Add(ctx, "k", []byte("old"), 30*time.Millisecond); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	time.Sleep(60 * time.Millisecond)
+	support.Travel(60 * time.Millisecond)
 
 	added, err := s.Add(ctx, "k", []byte("new"), time.Minute)
 	if err != nil {
@@ -167,17 +169,18 @@ func TestFileStoreAddReplacesAnExpiredEntry(t *testing.T) {
 }
 
 func TestFileStoreIncrementKeepsTheOriginalDeadline(t *testing.T) {
+	frozenClock(t)
 	ctx := context.Background()
 	s := cache.NewFileStore(cache.LocalFilesystem{}, t.TempDir(), 0)
 
 	if _, err := s.Increment(ctx, "hits", 1, 60*time.Millisecond); err != nil {
 		t.Fatalf("Increment: %v", err)
 	}
-	time.Sleep(30 * time.Millisecond)
+	support.Travel(30 * time.Millisecond)
 	if _, err := s.Increment(ctx, "hits", 1, time.Hour); err != nil {
 		t.Fatalf("Increment: %v", err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	support.Travel(50 * time.Millisecond)
 
 	// The second increment asked for an hour and must not have got it: the
 	// window belongs to the counter, not to the increment, which is what makes a

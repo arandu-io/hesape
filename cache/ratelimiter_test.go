@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/cache"
+	"github.com/arandu-io/hesape/support"
 )
 
 func TestAttemptCountsUpToTheLimitAndThenRefuses(t *testing.T) {
@@ -172,6 +173,7 @@ func TestClearForgetsTheWindow(t *testing.T) {
 // TestTheWindowRolls is the fixed window: the counter belongs to a window, and
 // the next window is a new counter rather than a decay of the old one.
 func TestTheWindowRolls(t *testing.T) {
+	frozenClock(t)
 	ctx := context.Background()
 	rl := cache.NewRateLimiter(cache.NewArrayStore())
 	limit := cache.Limit{Key: "203.0.113.1", MaxAttempts: 1, Decay: 100 * time.Millisecond}
@@ -187,7 +189,12 @@ func TestTheWindowRolls(t *testing.T) {
 		t.Fatal("the second attempt was allowed under a limit of one")
 	}
 
-	time.Sleep(refused.RetryAfter + 20*time.Millisecond)
+	// One nanosecond short of RetryAfter is still the same window.
+	support.Travel(refused.RetryAfter - time.Nanosecond)
+	if early, err := rl.Attempt(ctx, limit); err != nil || early.OK {
+		t.Fatalf("an attempt before RetryAfter = %+v, %v; want refused: the window rolled early", early, err)
+	}
+	support.Travel(time.Nanosecond)
 
 	got, err := rl.Attempt(ctx, limit)
 	if err != nil {

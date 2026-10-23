@@ -10,6 +10,7 @@ import (
 
 	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/database/schema"
+	"github.com/arandu-io/hesape/support"
 )
 
 // DatabaseHandler keeps the sessions of a [RecordStore] in a table, so they
@@ -89,7 +90,7 @@ func (h *DatabaseHandler[T]) Read(ctx context.Context, id string) (Record[T], er
 	if err != nil {
 		return Record[T]{}, fmt.Errorf("session: reading the session row: %w", err)
 	}
-	if expires <= time.Now().UnixMilli() {
+	if expires <= support.Now().UnixMilli() {
 		return Record[T]{}, ErrExpired
 	}
 
@@ -115,7 +116,7 @@ func (h *DatabaseHandler[T]) Write(ctx context.Context, id string, rec Record[T]
 	if err != nil {
 		return fmt.Errorf("session: encoding the session record: %w", err)
 	}
-	args := []any{string(raw), nullable(rec.Tenant), nullable(rec.SubjectID), time.Now().Add(ttl).UnixMilli(), id}
+	args := []any{string(raw), nullable(rec.Tenant), nullable(rec.SubjectID), support.Now().Add(ttl).UnixMilli(), id}
 
 	updated, err := h.update(ctx, args)
 	if err != nil {
@@ -185,7 +186,7 @@ func (h *DatabaseHandler[T]) DestroyIndex(ctx context.Context, tenant, subjectID
 // not count rows reports zero rather than an error.
 func (h *DatabaseHandler[T]) Prune(ctx context.Context) (int, error) {
 	result, err := h.conn.ExecContext(ctx,
-		`DELETE FROM `+h.table+` WHERE expires_at <= ?`, time.Now().UnixMilli())
+		`DELETE FROM `+h.table+` WHERE expires_at <= ?`, support.Now().UnixMilli())
 	if err != nil {
 		return 0, fmt.Errorf("session: pruning expired sessions: %w", err)
 	}

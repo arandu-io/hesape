@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // defaultLockTimeout is how long a database lock is held when nobody says.
@@ -570,6 +572,8 @@ func (s *DatabaseStore) drawLottery() bool {
 	// The clock is the die. It is not a good source of randomness and it does not
 	// need to be: nothing depends on which acquisition pays for the pruning, only
 	// on it being roughly two in a hundred of them.
+	// It reads the wall clock and not support.Now: a frozen test clock would
+	// make every draw the same.
 	return int(time.Now().UnixNano()%int64(s.lockLottery[1])) < s.lockLottery[0]
 }
 
@@ -577,10 +581,13 @@ func (s *DatabaseStore) drawLottery() bool {
 //
 // Milliseconds and not seconds: see DatabaseStore for what that costs and what
 // it buys.
-func nowMillis() int64 { return time.Now().UnixMilli() }
+//
+// It reads support.Now, so a test that travels with the fake clock moves every
+// expiry this store computes and compares.
+func nowMillis() int64 { return support.Now().UnixMilli() }
 
 // expiresAt is when an entry written now with this ttl stops being live.
-func expiresAt(ttl time.Duration) int64 { return time.Now().Add(ttl).UnixMilli() }
+func expiresAt(ttl time.Duration) int64 { return support.Now().Add(ttl).UnixMilli() }
 
 // likePrefix turns a key prefix into a LIKE pattern, escaping the two
 // characters LIKE reads as wildcards.

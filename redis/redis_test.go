@@ -85,15 +85,24 @@ type total struct {
 // own not-found instead of cache.ErrNotFound, which is exactly the defect the
 // kv version of this package shipped.
 func TestStoreContract(t *testing.T) {
-	cachetest.Run(t, func(t *testing.T) cache.Store { return store(t) })
+	cachetest.Run(t, func(t *testing.T) cache.Store { return serverClock{store(t)} })
 }
 
 // TestLockingContract checks the two calls cache.Lock makes. It is the half the
 // scheduler and the outbox relay depend on: with N replicas, a task scheduled
 // every minute runs N times unless exactly one of them wins a lock first.
 func TestLockingContract(t *testing.T) {
-	cachetest.RunLocking(t, func(t *testing.T) cache.Locking { return store(t) })
+	cachetest.RunLocking(t, func(t *testing.T) cache.Locking { return serverClock{store(t)} })
 }
+
+// serverClock is the store as the contract suites see it. Its entries expire
+// on the server's clock, which support's fake clock does not move, so the
+// suites wait a ttl out for real through Elapse: it is cachetest.ServerClock,
+// and the store itself carries no such method.
+type serverClock struct{ *redis.RedisStore }
+
+// Elapse sleeps, because the clock that has to move is the server's.
+func (serverClock) Elapse(d time.Duration) { time.Sleep(d) }
 
 func TestCacheRoundTrip(t *testing.T) {
 	repo := cache.New(store(t)).Namespace("invoice")

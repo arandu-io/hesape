@@ -8,6 +8,7 @@ import (
 
 	"github.com/arandu-io/hesape/database"
 	hsession "github.com/arandu-io/hesape/session"
+	"github.com/arandu-io/hesape/support"
 )
 
 // sessionPayload is what an application keeps in a session, for the round
@@ -77,10 +78,18 @@ func testTheSessionRecordTable(t *testing.T, dialect database.Dialect, db *datab
 		t.Errorf("a missing id read as %v, want ErrExpired", err)
 	}
 
-	if err := h.Write(ctx, "s-short", rec, time.Millisecond); err != nil {
+	// The handler reads the time through support.Now, so the row is expired by
+	// travelling past its ttl rather than by sleeping through it.
+	previous := support.GetTestNow()
+	support.FreezeTime()
+	t.Cleanup(func() { support.SetTestNow(previous) })
+	if err := h.Write(ctx, "s-short", rec, time.Minute); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	if _, err := h.Read(ctx, "s-short"); err != nil {
+		t.Fatalf("a row read before its ttl ran out: %v", err)
+	}
+	support.Travel(2 * time.Minute)
 	if _, err := h.Read(ctx, "s-short"); !errors.Is(err, hsession.ErrExpired) {
 		t.Errorf("an expired row read as %v, want ErrExpired", err)
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // ArrayStore is the in-process cache: a map, a mutex, and expiry.
@@ -207,7 +209,7 @@ func (s *ArrayStore) Increment(_ context.Context, key string, delta int64, ttl t
 	defer s.mu.Unlock()
 
 	n := int64(0)
-	expires := time.Now().Add(ttl)
+	expires := support.Now().Add(ttl)
 	if e, ok := s.live(s.entries, key); ok {
 		parsed, err := strconv.ParseInt(string(e.value), 10, 64)
 		if err != nil {
@@ -252,7 +254,7 @@ func (s *ArrayStore) Touch(_ context.Context, key string, ttl time.Duration) (bo
 	if !ok {
 		return false, nil
 	}
-	e.expires = time.Now().Add(ttl)
+	e.expires = support.Now().Add(ttl)
 	s.entries[key] = e
 	return true, nil
 }
@@ -368,7 +370,7 @@ func (s *ArrayStore) live(from map[string]entry, key string) (entry, bool) {
 	if !ok {
 		return entry{}, false
 	}
-	if !time.Now().Before(e.expires) {
+	if !support.Now().Before(e.expires) {
 		delete(from, key)
 		return entry{}, false
 	}
@@ -388,5 +390,5 @@ func errNotACounter(key string) error {
 func newEntry(value []byte, ttl time.Duration) entry {
 	stored := make([]byte, len(value))
 	copy(stored, value)
-	return entry{value: stored, expires: time.Now().Add(ttl)}
+	return entry{value: stored, expires: support.Now().Add(ttl)}
 }
