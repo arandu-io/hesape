@@ -263,6 +263,9 @@ func Serve(t *testing.T, boot Boot, opts ...Option) *Server {
 	}
 	routes.Refresh()
 
+	// The client below is outside the outbound guard on purpose: it reaches only
+	// the server this function started on 127.0.0.1, and a guard that refuses
+	// loopback would refuse the one address it exists to reach.
 	transport := &http.Transport{}
 	s := &Server{
 		URL: base, t: t, env: env, app: app, handler: app.Handler, sessions: app.Sessions, routes: routes,
