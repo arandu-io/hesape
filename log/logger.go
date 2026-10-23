@@ -124,7 +124,14 @@ func New(env string, level slog.Level) *slog.Logger {
 }
 
 // Into stores the request-scoped logger in the context.
+//
+// Under a Collector -- development, or an authorized tracing header -- the
+// logger is stored writing into the collector as well, so the lines of a
+// request are recorded with it whichever of the two was installed first.
 func Into(ctx context.Context, l *slog.Logger) context.Context {
+	if c := FromContext(ctx); c != nil && l != nil {
+		l = collecting(l, c)
+	}
 	return context.WithValue(ctx, ctxLoggerKey{}, l)
 }
 

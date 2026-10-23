@@ -194,6 +194,8 @@ func TestEveryCollectorMethodIsSafeToCall(t *testing.T) {
 	col.RecordEvent("invoice.paid", nil)
 	col.RecordExternal("GET", "https://example.test", 200, time.Millisecond)
 	col.RecordRender("invoice/show", time.Millisecond)
+	col.RecordDecision("u1", "tenant-a", "invoice.view", true, "")
+	col.RecordLog(log.Record{Message: "issued"})
 	log.Dump(log.WithCollector(context.Background(), col), "label", 1)
 
 	done := make(chan struct{})
@@ -204,6 +206,8 @@ func TestEveryCollectorMethodIsSafeToCall(t *testing.T) {
 		_ = col.Events()
 		_ = col.External()
 		_ = col.Renders()
+		_ = col.Decisions()
+		_ = col.Logs()
 		_ = col.QueryCount()
 		_ = col.QueryTime()
 		_ = col.SlowQueries(0)

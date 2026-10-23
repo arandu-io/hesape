@@ -2,6 +2,7 @@ package log
 
 import (
 	"context"
+	"log/slog"
 	"runtime"
 	"sync"
 	"time"
@@ -47,7 +48,8 @@ func WithCollectorSlot(ctx context.Context) context.Context {
 }
 
 // Collector accumulates everything that happened inside ONE request: queries,
-// dumps, events and outbound HTTP calls.
+// dumps, events, outbound HTTP calls, the lines the request logged and the
+// Policy decisions it was answered.
 //
 // Cost: the Collector is only installed in the context in development or when
 // the request carries an authorized tracing header. In production, without the
@@ -61,11 +63,13 @@ type Collector struct {
 	// The slices are unexported and reachable only through the accessors below,
 	// which copy under the lock. Read directly, every one of them races against
 	// a goroutine the handler started and did not wait for.
-	queries  []QueryRecord
-	dumps    []DumpRecord
-	events   []EventRecord
-	external []ExternalRecord
-	renders  []RenderRecord
+	queries   []QueryRecord
+	dumps     []DumpRecord
+	events    []EventRecord
+	external  []ExternalRecord
+	renders   []RenderRecord
+	logs      []Record
+	decisions []DecisionRecord
 }
 
 // QueryRecord is one database call, with the file and line that issued it --
@@ -126,11 +130,22 @@ func NewCollector(requestID string) *Collector {
 
 // WithCollector installs the collector in the context, and fills the slot when
 // one was reserved upstream, so a middleware outside this one can still reach it.
+//
+// The request logger the context carries, if any, is installed again writing
+// into the collector too, and so is one Into installs later: every line the
+// request logs through For lands in Logs.
 func WithCollector(ctx context.Context, c *Collector) context.Context {
 	if s, ok := ctx.Value(ctxSlotKey{}).(*collectorSlot); ok {
 		s.set(c)
 	}
-	return context.WithValue(ctx, ctxCollectorKey{}, c)
+	ctx = context.WithValue(ctx, ctxCollectorKey{}, c)
+	// The logger already in the context is the request's, so from here on
+	// it also writes into this collector: a line logged under the collector
+	// belongs to the request it records.
+	if l, ok := ctx.Value(ctxLoggerKey{}).(*slog.Logger); ok && l != nil && c != nil {
+		ctx = context.WithValue(ctx, ctxLoggerKey{}, collecting(l, c))
+	}
+	return ctx
 }
 
 // FromContext is the read side of WithCollector.
