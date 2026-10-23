@@ -46,18 +46,17 @@ func Observe(dev bool, tracingSecret string, recorder *log.Recorder) pipeline.Mi
 
 			ctx := r.Context()
 
-			l := log.For(ctx).With(
-				"request_id", id,
-				"method", r.Method,
-				"path", r.URL.Path,
-			)
-			ctx = log.Into(ctx, l)
-
 			// The Collector costs memory: only install it in development or
 			// under the tracing secret.
 			if dev || (tracingSecret != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get(log.TracingHeader)), []byte(tracingSecret)) == 1) {
 				ctx = log.WithCollector(ctx, log.NewCollector(id))
 			}
+
+			// The fields go on after the Collector, so the logger that writes into
+			// it carries them: a line recorded for the debug console names the
+			// request it belongs to, as the line on stdout does.
+			ctx = log.With(ctx, "request_id", id, "method", r.Method, "path", r.URL.Path)
+			l := log.For(ctx)
 
 			rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rw, r.WithContext(ctx))
