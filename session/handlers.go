@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/filesystem"
+	"github.com/arandu-io/hesape/support"
 )
 
 // sessionIsExpired is the one place the expiry boundary is written, for the
@@ -87,7 +88,7 @@ func (h *ArraySessionHandler) Read(_ context.Context, sessionID string) (string,
 	if !ok {
 		return "", nil
 	}
-	if sessionIsExpired(time.Since(entry.written), h.lifetime) {
+	if sessionIsExpired(support.Now().Sub(entry.written), h.lifetime) {
 		return "", nil
 	}
 	return entry.data, nil
@@ -97,7 +98,7 @@ func (h *ArraySessionHandler) Read(_ context.Context, sessionID string) (string,
 func (h *ArraySessionHandler) Write(_ context.Context, sessionID, data string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.storage[sessionID] = arraySession{data: data, written: time.Now()}
+	h.storage[sessionID] = arraySession{data: data, written: support.Now()}
 	return nil
 }
 
@@ -118,7 +119,7 @@ func (h *ArraySessionHandler) GC(_ context.Context, lifetime time.Duration) (int
 
 	deleted := 0
 	for id, entry := range h.storage {
-		if sessionIsExpired(time.Since(entry.written), lifetime) {
+		if sessionIsExpired(support.Now().Sub(entry.written), lifetime) {
 			delete(h.storage, id)
 			deleted++
 		}

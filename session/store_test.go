@@ -18,6 +18,7 @@ import (
 	"github.com/arandu-io/hesape/encryption"
 	"github.com/arandu-io/hesape/filesystem"
 	"github.com/arandu-io/hesape/session"
+	"github.com/arandu-io/hesape/support"
 )
 
 func newStoreOver(h session.SessionHandler) *session.Store {
@@ -614,7 +615,7 @@ func TestAnUnreadablePayloadStartsAnEmptySessionRatherThanFailing(t *testing.T) 
 }
 
 func TestAnExpiredSessionReadsAsEmpty(t *testing.T) {
-	handler := session.NewArraySessionHandler(time.Millisecond)
+	handler := session.NewArraySessionHandler(time.Hour)
 	ctx := context.Background()
 
 	first := startedStore(t, handler)
@@ -623,7 +624,8 @@ func TestAnExpiredSessionReadsAsEmpty(t *testing.T) {
 	if err := first.Save(ctx); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	support.Travel(2 * time.Hour)
+	t.Cleanup(support.TravelBack)
 
 	second := session.NewStore("arandu_session", handler, id)
 	if err := second.Start(ctx); err != nil {
