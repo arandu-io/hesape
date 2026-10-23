@@ -27,12 +27,16 @@
 // always leaks into production -- usually on the day somebody copies a test
 // into a handler.
 //
-// The same rule is why acting as somebody is Client.ActingAs and nothing else.
-// The subject travels under auth.WithSubject, which is the key the edge
-// middleware writes and every policy reads. A package-level ActingAs used to
-// live here writing a context key of its own, which no policy, no repository
-// and no middleware ever read: it authenticated nothing, and a test written
-// against it passed while proving the opposite of what it said. Code that calls
+// The same rule is why acting as somebody is As. It starts a session on the
+// application's own session store, the call its sign-in makes, and every
+// request afterwards is loaded by the application's guards and answered by
+// its SubjectResolver, so a role taken away in the test is gone on the next
+// request. Client.ActingAs, which puts a subject straight onto the request
+// under auth.WithSubject, skips the guard and the resolver, and is deprecated
+// for it. A package-level ActingAs used to live here writing a context key of
+// its own, which no policy, no repository and no middleware ever read: it
+// authenticated nothing, and a test written against it passed while proving
+// the opposite of what it said. Code that calls
 // a service, a job or a seeder directly does not need this package for it --
 // auth.WithSubject is the whole answer, and it is the real one.
 //

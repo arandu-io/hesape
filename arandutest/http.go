@@ -76,11 +76,16 @@ func NewClient(t *testing.T, h http.Handler) *Client {
 //
 // A client of a running server cannot carry a subject on a context the server
 // never sees, and refuses.
+//
+// Deprecated: the subject reaches the handler without passing the guard, the
+// session store or the resolver, so roles written in the test are roles nobody
+// re-reads and a demotion never takes effect. Use [As], which starts a real
+// session for the account and lets the application's guards load it.
 func (c *Client) ActingAs(s auth.Subject) *Client {
 	c.t.Helper()
 	if c.remote != nil {
 		c.t.Fatalf("ActingAs cannot reach a server over the network: the subject would travel on a " +
-			"context the server never sees.")
+			"context the server never sees. Sign in with arandutest.As.")
 	}
 	if s.ID == "" && !s.IsGuest() {
 		c.t.Fatalf("ActingAs was handed a subject with no id; " +
