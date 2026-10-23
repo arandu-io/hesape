@@ -38,8 +38,9 @@
 // that names the instantiation. The rules here are written once over the
 // Account interface and compiled once, in this package, whatever the number of
 // applications and packages that use them. PolicyOf is the one generic
-// declaration: a function whose body is a type assertion, so a package calling
-// it compiles that assertion and nothing more.
+// declaration: a function whose body is two type assertions -- the account to
+// the application's user, and the policy to auth.Writes -- so a package calling
+// it compiles those and nothing more.
 //
 // # What this package owns
 //

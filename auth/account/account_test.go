@@ -387,6 +387,53 @@ func TestPolicyOfForwardsTheApplicationsPolicyOverItsOwnType(t *testing.T) {
 // stranger is an Account that is not the application's user type.
 type stranger struct{ member }
 
+// writingMemberPolicy is memberPolicy declaring which account actions write.
+type writingMemberPolicy struct{ memberPolicy }
+
+func (writingMemberPolicy) Writes(a auth.Action) bool {
+	return a == account.ActionUserCreate || a == account.ActionUserUpdate || a == account.ActionUserDelete
+}
+
+// TestPolicyOfKeepsWhatThePolicySaysWrites: the adapter answered Can and
+// nothing else, so a user policy that declared its reads had every Grant the
+// account rules issued through it write, the one to view an account included.
+func TestPolicyOfKeepsWhatThePolicySaysWrites(t *testing.T) {
+	ctx := context.Background()
+	ana := auth.Subject{ID: "ana", Tenant: "acme"}
+	mine := account.Account(&member{ID: "ana", TenantID: "acme"})
+
+	declared := account.PolicyOf[*member](writingMemberPolicy{})
+	view, err := auth.Authorize(ctx, declared, ana, account.ActionUserView, mine)
+	if err != nil {
+		t.Fatalf("Authorize view: %v", err)
+	}
+	if err := auth.Writable(view); !errors.Is(err, auth.ErrReadGrant) {
+		t.Errorf("a Grant to view the account writes: Writable = %v, want ErrReadGrant", err)
+	}
+	update, err := auth.Authorize(ctx, declared, ana, account.ActionUserUpdate, mine)
+	if err != nil {
+		t.Fatalf("Authorize update: %v", err)
+	}
+	if err := auth.Writable(update); err != nil {
+		t.Errorf("a Grant to update the account cannot write: %v", err)
+	}
+	if err := declared.Can(ctx, ana, account.ActionUserUpdate, &stranger{}); err == nil {
+		t.Error("an account of another type was decided about by a policy that declares its writes")
+	}
+
+	undeclared := account.PolicyOf(memberPolicy{})
+	if _, ok := any(undeclared).(auth.Writes); ok {
+		t.Error("a policy that declares nothing was given a Writes")
+	}
+	view, err = auth.Authorize(ctx, undeclared, ana, account.ActionUserView, mine)
+	if err != nil {
+		t.Fatalf("Authorize view: %v", err)
+	}
+	if err := auth.Writable(view); err != nil {
+		t.Errorf("a policy that declares nothing issued a Grant that cannot write: %v", err)
+	}
+}
+
 // TestARegistrationAndADraftNeverPrintThePassword: both carry the password in
 // clear, and a handler that logged one, or wrapped it in an error, printed it.
 func TestARegistrationAndADraftNeverPrintThePassword(t *testing.T) {
