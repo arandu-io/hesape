@@ -27,6 +27,44 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.80.0 — arandutest serves the application and signs in through the session
+
+Nothing stops compiling. Two things change what they do, and one is
+deprecated.
+
+**A form a test client posts is URL-encoded.** `Client.Post`, `Put`, `Patch`
+and `Delete` used to join the form by hand, replacing only spaces, so a value
+holding `&`, `=`, `+` or `%` reached the handler as a different form. A test
+that encoded a value itself to get past that now sends the encoding literally:
+pass the value as a person types it.
+
+```go
+// Before: the test escaped what the client did not.
+client.Post("/login", map[string]string{"password": "a%26b"})
+// Now:
+client.Post("/login", map[string]string{"password": "a&b"})
+```
+
+A `_token` the test puts in the form replaces the one read off the last page,
+where both used to be sent and the page's won.
+
+**`Client.ActingAs` is deprecated.** The subject it puts on the request skips
+the guard, the session store and the `SubjectResolver`, so roles written in the
+test are never re-read. Sign in with `arandutest.As`, which starts the session
+on the application's store, after creating the account where the resolver
+reads it:
+
+```go
+server := arandutest.Serve(t, tests.Boot, arandutest.Migrate(tests.Migrate))
+user := tests.Register(t, server, "alice@example.com")
+arandutest.As(t, server, auth.Subject{ID: user.ID, Tenant: user.Tenant}).
+	Get(server.Route("invoices.index")).AssertOk()
+```
+
+`As` refuses a subject carrying roles or actions: give the account the role in
+the test's database instead. `ActingAs` still works on a client of a handler,
+and fails the test on the client of a running server (`Server.Client`), which
+could never carry it.
 ## v0.79.0 — the account rules keep what the user policy says writes, and Vary is one line
 
 `auth/account.PolicyOf` returns `auth.Policy[account.Account]` instead of
