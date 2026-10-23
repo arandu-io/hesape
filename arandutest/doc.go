@@ -9,6 +9,12 @@
 // statements a block ran (AssertQueryCount), and the two pieces a test needs to
 // say something about domain events (DrainOutbox, Collected).
 //
+// Serve boots the application the way its binary boots, on a free port of
+// 127.0.0.1 and over a database of the test's own -- a copy of a migrated
+// Postgres template, or a temporary SQLite file -- and stops it when the test
+// ends. Server.Client sends requests over that socket; a Client from NewClient
+// calls a handler in process.
+//
 // Every application writes the same six things: send a request, do not follow
 // the redirect, keep the cookie, act as somebody, assert about the HTML that
 // came back, assert about the row that was written.
@@ -52,6 +58,6 @@
 //
 // There is no assertion language over JSON here: what these handlers answer
 // with is HTML fragments, and [Response.AssertSee] over the fragment is the
-// assertion that matches. There is no per-process schema cloning, no console
-// command runner and no view-level assertion.
+// assertion that matches. There is no console command runner and no
+// view-level assertion.
 package arandutest

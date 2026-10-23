@@ -24,6 +24,11 @@ type Client struct {
 	handler http.Handler
 	cookies []*http.Cookie
 
+	// base and remote are set on a client of a running server, which sends
+	// every request over the socket to base instead of calling handler.
+	base   string
+	remote *http.Client
+
 	// subject is who this client is, when ActingAs said so. It is a pointer
 	// because the zero Subject is a meaningful value -- the session somebody
 	// forgot to load, which Authorize refuses -- and nil has to mean "nobody
@@ -68,8 +73,15 @@ func NewClient(t *testing.T, h http.Handler) *Client {
 // Authorize refuses it too, so every request would come back forbidden with
 // nothing saying why. auth.Guest is how a test says "anonymous reader" on
 // purpose.
+//
+// A client of a running server cannot carry a subject on a context the server
+// never sees, and refuses.
 func (c *Client) ActingAs(s auth.Subject) *Client {
 	c.t.Helper()
+	if c.remote != nil {
+		c.t.Fatalf("ActingAs cannot reach a server over the network: the subject would travel on a " +
+			"context the server never sees.")
+	}
 	if s.ID == "" && !s.IsGuest() {
 		c.t.Fatalf("ActingAs was handed a subject with no id; " +
 			"that is the session nobody loaded, Authorize refuses it, and every " +
@@ -190,6 +202,18 @@ func (c *Client) submit(method, path string, form map[string]string) *Response {
 		"application/x-www-form-urlencoded", token)
 }
 
+// Cookies returns the cookies this client holds, the session among them, as
+// the server last set them. They are what a browser is handed to be signed in
+// as the same person.
+func (c *Client) Cookies() []*http.Cookie {
+	out := make([]*http.Cookie, len(c.cookies))
+	for i, ck := range c.cookies {
+		copied := *ck
+		out[i] = &copied
+	}
+	return out
+}
+
 func (c *Client) token() string {
 	const marker = `name="_token" value="`
 	at := strings.Index(c.lastBody, marker)
@@ -207,7 +231,15 @@ func (c *Client) token() string {
 func (c *Client) do(method, path string, body io.Reader, contentType, csrfToken string) *Response {
 	c.t.Helper()
 
-	req := httptest.NewRequest(method, path, body)
+	var req *http.Request
+	if c.remote != nil {
+		var err error
+		if req, err = http.NewRequestWithContext(c.t.Context(), method, c.base+path, body); err != nil {
+			c.t.Fatalf("%s %s: %v", method, path, err)
+		}
+	} else {
+		req = httptest.NewRequest(method, path, body)
+	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -227,7 +259,11 @@ func (c *Client) do(method, path string, body io.Reader, contentType, csrfToken 
 	}
 
 	rec := httptest.NewRecorder()
-	c.handler.ServeHTTP(rec, req)
+	if c.remote != nil {
+		c.send(rec, req)
+	} else {
+		c.handler.ServeHTTP(rec, req)
+	}
 
 	// Cookies the response set are kept, so a session survives the next call.
 	// Without this every request after a login is anonymous, and the test that
@@ -238,6 +274,25 @@ func (c *Client) do(method, path string, body io.Reader, contentType, csrfToken 
 	c.lastBody = rec.Body.String()
 
 	return &Response{t: c.t, rec: rec, path: method + " " + path}
+}
+
+// send makes the request over the socket and writes what came back into rec,
+// so a response from a running server is asserted about exactly as one from a
+// handler called in process.
+func (c *Client) send(rec *httptest.ResponseRecorder, req *http.Request) {
+	c.t.Helper()
+	resp, err := c.remote.Do(req)
+	if err != nil {
+		c.t.Fatalf("%s %s: %v", req.Method, req.URL.RequestURI(), err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	for name, values := range resp.Header {
+		rec.Header()[name] = values
+	}
+	rec.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(rec, resp.Body); err != nil {
+		c.t.Fatalf("%s %s: reading the body: %v", req.Method, req.URL.RequestURI(), err)
+	}
 }
 
 // keep stores one Set-Cookie the way a browser stores it: by name and path, so
