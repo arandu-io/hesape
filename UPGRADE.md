@@ -27,6 +27,73 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.78.0 — a Grant issued for reading cannot write, a layout draws the flash, and readers of a header declare it in Vary
+
+`view.Layout.Flashed`, `view.Layout.FieldError` and `view.Layout.OldOr` are
+added to the interface. A page that embeds `view.Page` already answers the
+three and needs nothing; a type that implements `view.Layout` by hand adds
+them:
+
+```go
+func (p MyChrome) Flashed(key string) string     { return p.Messages[key] }
+func (p MyChrome) FieldError(name string) string { return p.Errors.First(name) }
+func (p MyChrome) OldOr(name, fallback string) string {
+	if _, typed := p.Old[name]; typed {
+		return p.Old.Get(name)
+	}
+	return fallback
+}
+```
+
+A layout typed by `view.Layout` can then draw what `Context.With` left, with
+`.Flashed("status")` or by handing itself to a toast as its page.
+
+Four things change what they do.
+
+**A Grant issued for an action its Policy says does not write is refused on
+every write.** A Policy that implements the new `auth.Writes` --
+`Writes(a auth.Action) bool` -- has the Grant of every action it answers
+`false` for marked by `auth.Authorize`, and `auth.Writable` refuses it with
+`auth.ErrReadGrant`, which wraps `auth.ErrForbidden` and names the action. The
+query builder and the model (insert, update, upsert, delete, truncate, `Save`,
+`Delete`), the filesystem Disk, the cache, broadcasts, webhook dispatch,
+`jobs.New`, the outbox and notifications refuse it, so a service that
+authorized `note.view` and then saved the note fails with 403 instead of
+writing. Authorize the action that writes before writing:
+
+```go
+func (NotePolicy) Writes(a auth.Action) bool { return a != NoteView && a != NoteList }
+
+g, err := auth.Authorize(ctx, policies.NotePolicy{}, who, policies.NoteUpdate, *note)
+```
+
+`cache.Remember` and `cache.Flexible` answer such a Grant with what they
+compute without storing it, as they answer a viewing impersonation: a page
+that remembers a value under a `view` Grant computes it on every request.
+Remember under a Grant that writes, or a `SystemGrant`, when the value has to
+be kept. A Policy that does not implement `Writes`, `SystemGrant` and
+`SystemGrantActing` issue Grants that write, as before.
+
+**`Context.WantsJSON` and `Context.IsHTMX` add the headers they read to
+`Vary`.** `WantsJSON` adds `Accept`, `HX-Request` and `X-Requested-With`,
+`IsHTMX` adds `HX-Request`, each once and none when `Vary` already says `*`.
+An action that wrote `Vary` by hand for those headers can drop the line; one
+that reads `HX-Target` asks the new `Context.Targets(id)`, which adds
+`HX-Target`. An answer that asked either now carries the header, so a cache in
+front of the application keeps the page, the fragment and the JSON apart.
+
+**A nil `*translation.Translator` answers instead of panicking.** `Get` and
+`Choice` return the key unchanged and `Has` and `HasForLocale` answer false,
+so a view that writes `.Translator().Get(.Locale(), key, nil)` on a request
+with no translator shows the key instead of failing the page. The new
+`view.Page.Trans(key, replace...)` and `view.Page.Choice(key, n, replace...)`
+say the same line in one call.
+
+**The validation package doc shows `hhttp.NewRequest(ctx.Request).Validate`**,
+the entry point that exists, instead of `ctx.Validate`.
+
+---
+
 ## v0.77.0 — authorization read on every request, a received webhook processed once, and impersonation read-only in notifications and the outbox
 
 Nothing in the API breaks. Five things change what they do; run `aru migrate`
