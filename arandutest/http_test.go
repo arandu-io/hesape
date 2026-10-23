@@ -310,3 +310,27 @@ func TestTheHTMXDeleteThePayloadGeneratorEmitsIsReachable(t *testing.T) {
 		AssertStatus(http.StatusNoContent).
 		AssertRedirect("/invoices")
 }
+
+// A form value is URL-encoded on the way out. Joined by hand, a password with
+// an ampersand arrived cut in two, a plus arrived as a space and a percent sign
+// broke the whole body, so a test could not type the input it was about.
+func TestAFormValueArrivesExactlyAsTyped(t *testing.T) {
+	const typed = "a&b=c+d%e f/ã"
+	client := arandutest.NewClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(tokenPage))
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte("password=[" + r.PostFormValue("password") + "] token=[" +
+			r.PostFormValue("_token") + "] fields=" + strconv.Itoa(len(r.PostForm))))
+	}))
+
+	client.Get("/sign-in")
+	client.Post("/sign-in", map[string]string{"password": typed, "email": "a+b@example.com"}).
+		AssertOk().
+		AssertSee("password=[" + typed + "] token=[tok-1] fields=3")
+}

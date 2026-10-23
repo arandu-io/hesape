@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -172,15 +173,20 @@ func (c *Client) Delete(path string, form map[string]string) *Response {
 func (c *Client) submit(method, path string, form map[string]string) *Response {
 	c.t.Helper()
 
+	// Encoded, not joined: a value holding &, =, + or % would otherwise
+	// arrive as a different form -- a password cut at its ampersand, a plus
+	// read as a space -- and the test would be asserting about input nobody
+	// typed. A _token the test put in the form replaces the one read off the
+	// page, for the reason a header it sets does.
 	token := c.token()
-	values := make([]string, 0, len(form)+1)
+	values := url.Values{}
 	if token != "" {
-		values = append(values, "_token="+token)
+		values.Set("_token", token)
 	}
 	for k, v := range form {
-		values = append(values, k+"="+strings.ReplaceAll(v, " ", "+"))
+		values.Set(k, v)
 	}
-	return c.do(method, path, strings.NewReader(strings.Join(values, "&")),
+	return c.do(method, path, strings.NewReader(values.Encode()),
 		"application/x-www-form-urlencoded", token)
 }
 
