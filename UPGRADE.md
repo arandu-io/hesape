@@ -27,6 +27,36 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.84.0 — ui.js folds the sidebar, and collected lines name their request
+
+Nothing that compiled stops compiling. Two things change what they do.
+
+**`ui.js` answers `data-sidebar-toggle`.** A button whose
+`data-sidebar-toggle` holds a sidebar's id now folds it: on a screen at or
+above the sidebar's `data-breakpoint` (768 pixels without one), a sidebar
+drawn with a mode (`data-sidebar-mode`, which kyse's `SidebarProps.Mode`
+writes) switches between `full` and `slim`, and the choice is kept in
+`localStorage` under `arandu.sidebar.<id>` and put back on the next page and
+on every htmx swap; below it, or with no mode, the button opens and closes
+the overlay. The button gets `aria-expanded`. A project that wrote this action
+itself should delete it and draw the button with the attribute:
+
+| Before | After |
+|---|---|
+| `arandu.ui.action('toggle-sidebar', ...)` and `data-kyse-on-click="toggle-sidebar" data-target="nav"` | `<button type="button" data-sidebar-toggle="nav">` |
+| a script that read `localStorage` on load and set `data-sidebar-mode` | nothing: the sweep does it |
+
+Keeping both would fold the column twice per press, which leaves it where it
+was. A choice stored under a key of the project's own is not read: it is
+forgotten once, on the first page after the upgrade.
+
+**`foundation.Observe` puts `request_id`, `method` and `path` on the lines its
+Collector records**, as it already did on stdout, and `log.With` attaches its
+fields to the logger that writes into a Collector. Code that read a collected
+line's attributes and added those three itself can stop.
+
+---
+
 ## v0.83.0 — Authorize records its decision, expiry follows the fake clock, and arandutest moves to the framework
 
 Nothing that compiled stops compiling. Three things change what they do.
