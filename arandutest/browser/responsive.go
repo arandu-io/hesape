@@ -9,9 +9,13 @@ import (
 
 // Widths are the viewport widths Responsive walks, from a desktop down to the
 // narrowest phone still sold.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 var Widths = []int{1440, 768, 390, 320}
 
 // Schemes are the colour schemes Responsive walks.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 var Schemes = []string{"light", "dark"}
 
 // heights pairs each width with the height of a device that has it, so a
@@ -29,6 +33,8 @@ var heights = map[int]int{1440: 900, 768: 1024, 390: 844, 320: 640}
 // The scheme is emulated with prefers-color-scheme, and the dark class on the
 // root element is set to match, for pages whose stylesheet keys dark mode on
 // the class. The viewport and scheme the page had are restored afterwards.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Responsive() {
 	p.t.Helper()
 	var overflowed []string

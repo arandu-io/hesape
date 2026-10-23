@@ -14,6 +14,8 @@ import (
 //
 // Names and text are compared exactly after collapsing whitespace. A label
 // whose text ends in the asterisk of a required field matches without it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Locator struct {
 	kind   string
 	a, b   string
@@ -28,28 +30,40 @@ type Locator struct {
 //	browser.Role("heading", "New invoice")
 //
 // A text, email, tel, url or password input is a "textbox".
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Role(role, name string) Locator { return Locator{kind: "role", a: role, b: name} }
 
 // Label finds a form control by the text of its label, its aria-labelledby or
 // its aria-label.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Label(text string) Locator { return Locator{kind: "label", a: text} }
 
 // Text finds the innermost element whose visible text is text, or a button
 // input whose value is.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Text(text string) Locator { return Locator{kind: "text", a: text} }
 
 // TestID finds the element whose data-testid is id.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func TestID(id string) Locator { return Locator{kind: "testid", a: id} }
 
 // Modal finds an open modal dialog -- a <dialog> opened with showModal, or an
 // element with role dialog or alertdialog and aria-modal="true" -- by its
 // accessible name, which falls back to its first heading. An empty name
 // matches any modal.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Modal(name string) Locator { return Locator{kind: "modal", a: name} }
 
 // CSS finds elements by a selector. reason is why no role, label, text or test
 // id can say the same; an empty reason fails the step that uses the locator,
 // because a class name is styling and styling changes.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func CSS(selector, reason string) Locator {
 	return Locator{kind: "css", a: selector, b: strings.TrimSpace(reason)}
 }
@@ -58,6 +72,8 @@ func CSS(selector, reason string) Locator {
 // finds:
 //
 //	browser.Role("button", "Delete").In(browser.Modal("Delete invoice"))
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (l Locator) In(parent Locator) Locator {
 	p := parent
 	l.parent = &p
@@ -65,6 +81,8 @@ func (l Locator) In(parent Locator) Locator {
 }
 
 // String describes the locator the way failures name it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (l Locator) String() string {
 	var own string
 	switch l.kind {
@@ -103,6 +121,8 @@ func (l Locator) problem() string {
 }
 
 // MarshalJSON encodes the locator for the page script.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (l Locator) MarshalJSON() ([]byte, error) {
 	type wire struct {
 		Kind   string   `json:"kind"`

@@ -66,4 +66,6 @@
 //
 // The browser tests of an application carry the e2e build tag, so the
 // ordinary go test never starts a browser.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package browser

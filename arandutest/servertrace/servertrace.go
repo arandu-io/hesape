@@ -35,6 +35,8 @@
 // application's data -- a password hash, an address -- and a trace is an
 // artifact a CI run uploads. The statement and where it was issued from are
 // what finding the problem takes.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package servertrace
 
 import (
@@ -54,9 +56,13 @@ import (
 
 // Header is the response header that carries the request id, and the request
 // header a client may send one in.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const Header = "X-Request-ID"
 
 // Section is what the server did for one request.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Section struct {
 	RequestID  string     `json:"request_id"`
 	Method     string     `json:"method"`
@@ -70,6 +76,8 @@ type Section struct {
 }
 
 // Line is one line the request logged.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Line struct {
 	Time    time.Time      `json:"time"`
 	Level   string         `json:"level"`
@@ -78,6 +86,8 @@ type Line struct {
 }
 
 // Query is one statement the request ran.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Query struct {
 	SQL        string  `json:"sql"`
 	Args       int     `json:"args"`
@@ -91,6 +101,8 @@ type Query struct {
 
 // Decision is one Policy decision: who asked, for which action, and whether a
 // Grant was issued.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Decision struct {
 	Subject string `json:"subject"`
 	Tenant  string `json:"tenant"`
@@ -102,6 +114,8 @@ type Decision struct {
 
 // Recorder keeps a section for every request that went through its
 // middleware. It is safe for concurrent use.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Recorder struct {
 	mu       sync.Mutex
 	sections []Section
@@ -109,9 +123,13 @@ type Recorder struct {
 }
 
 // New returns an empty recorder.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func New() *Recorder { return &Recorder{index: map[string]int{}} }
 
 // Section returns the section recorded under a request id.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Section(requestID string) (Section, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -123,6 +141,8 @@ func (r *Recorder) Section(requestID string) (Section, bool) {
 }
 
 // Sections returns every recorded section, in the order the requests finished.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Sections() []Section {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -132,6 +152,8 @@ func (r *Recorder) Sections() []Section {
 // Middleware records a section for every request that goes through next. It
 // goes outside everything the application installs, so the collector it
 // reserves is the one the application's own fills.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		id := req.Header.Get(Header)

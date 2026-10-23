@@ -17,6 +17,8 @@
 // The base is ARANDU_E2E_TRACE_DIR when it is set and a directory under the
 // system's temporary directory otherwise. It is written when the test failed,
 // and after every test when ARANDU_E2E_TRACE=1.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package trace
 
 import (
@@ -32,12 +34,18 @@ import (
 
 // Version is the format version written into every trace. A reader refuses a
 // version it does not know rather than guessing at fields that moved.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const Version = 1
 
 // FileName is the name of the JSON document inside a trace directory.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const FileName = "trace.json"
 
 // Trace is the whole record of one test.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Trace struct {
 	Version  int       `json:"version"`
 	Test     string    `json:"test"`
@@ -59,6 +67,8 @@ type Trace struct {
 }
 
 // Step is one thing the test did: a visit, a click, an expectation.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Step struct {
 	Index    int           `json:"index"`
 	Action   string        `json:"action"`
@@ -79,6 +89,8 @@ type Step struct {
 }
 
 // Request is one network request the page made, with its answer.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Request struct {
 	ID              string    `json:"id"`
 	Method          string    `json:"method"`
@@ -93,6 +105,8 @@ type Request struct {
 
 // Message is one line of the page's console, or one entry of the browser's own
 // log about the page.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Message struct {
 	Time   time.Time `json:"time"`
 	Level  string    `json:"level"`
@@ -103,6 +117,8 @@ type Message struct {
 
 // Failure is one reason the test failed that the test did not assert itself:
 // an exception, a console error, a 5xx, a blocked resource, an overflow.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Failure struct {
 	Time time.Time `json:"time"`
 	Kind string    `json:"kind"`
@@ -110,6 +126,8 @@ type Failure struct {
 }
 
 // Server is the server's side of one request.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Server struct {
 	Logs      []LogLine  `json:"logs,omitempty"`
 	Queries   []Query    `json:"queries,omitempty"`
@@ -117,6 +135,8 @@ type Server struct {
 }
 
 // LogLine is one log record the server wrote while answering the request.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type LogLine struct {
 	Time    time.Time      `json:"time"`
 	Level   string         `json:"level"`
@@ -125,6 +145,8 @@ type LogLine struct {
 }
 
 // Query is one statement the server ran while answering the request.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Query struct {
 	SQL      string        `json:"sql"`
 	Duration time.Duration `json:"duration_ns,omitempty"`
@@ -133,6 +155,8 @@ type Query struct {
 
 // Decision is one authorization decision: which policy answered which action,
 // and the grant it issued or the reason it refused.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Decision struct {
 	Policy  string `json:"policy"`
 	Action  string `json:"action"`
@@ -143,6 +167,8 @@ type Decision struct {
 
 // Recorder collects a trace while a test runs. It is safe for concurrent use:
 // a driver delivers network and console events from a goroutine of its own.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Recorder struct {
 	mu    sync.Mutex
 	trace Trace
@@ -151,6 +177,8 @@ type Recorder struct {
 }
 
 // NewRecorder starts the trace of the named test.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func NewRecorder(test string) *Recorder {
 	return &Recorder{
 		trace: Trace{Version: Version, Test: test, Started: time.Now()},
@@ -160,6 +188,8 @@ func NewRecorder(test string) *Recorder {
 }
 
 // SetDriver names the engine the trace was taken with.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) SetDriver(driver, browser string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -169,6 +199,8 @@ func (r *Recorder) SetDriver(driver, browser string) {
 // Step records a step with the PNG and the DOM taken after it. Either capture
 // may be nil. The index and the file names are assigned here, and the recorded
 // step is returned.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Step(s Step, screenshot, dom []byte) Step {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -188,6 +220,8 @@ func (r *Recorder) Step(s Step, screenshot, dom []byte) Step {
 
 // Request records a request, or completes the one already recorded under the
 // same id: a field left empty keeps what an earlier call wrote.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Request(q Request) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -225,6 +259,8 @@ func (r *Recorder) Request(q Request) {
 }
 
 // Console records a console message.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Console(m Message) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -232,6 +268,8 @@ func (r *Recorder) Console(m Message) {
 }
 
 // Fail records a failure the test did not assert itself.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Fail(f Failure) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -241,6 +279,8 @@ func (r *Recorder) Fail(f Failure) {
 // Server adds what the server did for a request. Calls for the same id append
 // to each other, so the log, the query recorder and the policy can each report
 // on their own.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Server(requestID string, s Server) {
 	if requestID == "" {
 		return
@@ -261,6 +301,8 @@ func (r *Recorder) Server(requestID string, s Server) {
 }
 
 // Snapshot returns a copy of the trace as recorded so far.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Snapshot() Trace {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -282,6 +324,8 @@ func (r *Recorder) Snapshot() Trace {
 // Write writes the trace into dir, replacing whatever an earlier run left
 // there, and marks it failed or not. The JSON is written last, so a directory
 // with a trace.json is a complete one.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Recorder) Write(dir string, failed bool) error {
 	r.mu.Lock()
 	r.trace.Failed = failed
@@ -320,6 +364,8 @@ func (r *Recorder) Write(dir string, failed bool) error {
 }
 
 // Read reads the trace written into dir.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Read(dir string) (*Trace, error) {
 	data, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil {
@@ -337,6 +383,8 @@ func Read(dir string) (*Trace, error) {
 
 // Always reports whether a trace is written after every test and not only
 // after a failing one, which ARANDU_E2E_TRACE=1 asks for.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Always() bool {
 	switch strings.ToLower(os.Getenv("ARANDU_E2E_TRACE")) {
 	case "1", "true", "yes", "on":
@@ -348,6 +396,8 @@ func Always() bool {
 // Dir is the directory the trace of the named test is written to:
 // ARANDU_E2E_TRACE_DIR, or arandu-e2e under the system's temporary directory,
 // followed by the test's name with each subtest a directory of its own.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Dir(test string) string {
 	base := os.Getenv("ARANDU_E2E_TRACE_DIR")
 	if base == "" {

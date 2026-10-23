@@ -11,6 +11,8 @@
 // writes to, drops or alters a database under any other name. The database the
 // connection URL names is only connected to, because a server has to be asked
 // from inside some database to create another.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package dbclone
 
 import (
@@ -33,16 +35,22 @@ import (
 
 // Prefix starts the name of every database this package creates, and is the
 // only prefix it ever drops.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const Prefix = "arandutest_"
 
 // Server is a connection to a Postgres server, held to create, clone and drop
 // the databases of a test run.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Server struct {
 	raw   string
 	admin *sql.DB
 }
 
 // Open connects to the server raw names, inside the database it names.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Open(raw string) (*Server, error) {
 	cfg, err := database.ParseURL(raw)
 	if err != nil {
@@ -59,14 +67,20 @@ func Open(raw string) (*Server, error) {
 }
 
 // Close closes the connection to the server. The databases stay.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) Close() error { return s.admin.Close() }
 
 // URL is the connection URL of the database called name on this server: the
 // URL the server was opened with, with its database replaced.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) URL(name string) (string, error) { return URLFor(s.raw, name) }
 
 // URLFor is raw with the database it names replaced by name. The user, the
 // password, the host and the options are kept as they were written.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func URLFor(raw, name string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -81,6 +95,8 @@ func URLFor(raw, name string) (string, error) {
 
 // Key reduces what identifies a template -- the package directory, the
 // migration -- to the short hex token a database name can carry.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Key(parts ...string) string {
 	h := sha256.New()
 	for _, p := range parts {
@@ -93,10 +109,14 @@ func Key(parts ...string) string {
 // TemplateName is the template of one migration in one build: the family the
 // migration belongs to, and the build the schema was migrated by. A family
 // holds one template at a time; the next build replaces it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func TemplateName(family, build string) string { return Prefix + family + "_t" + build }
 
 // CloneName is a name for one test's database in a family, unique by the
 // random part.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func CloneName(family string) (string, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
@@ -122,6 +142,8 @@ const buildingSuffix = "_b"
 // same template wait for one migration rather than run two. Templates of the
 // same family from earlier builds are dropped once the new one exists; one that
 // is in use is left for a later run.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) EnsureTemplate(ctx context.Context, family, build string, migrate func(ctx context.Context, url string) error) (string, error) {
 	name := TemplateName(family, build)
 	conn, err := s.admin.Conn(ctx)
@@ -200,6 +222,8 @@ var cloneMu sync.Mutex
 
 // Clone copies the template into a new database of the family and answers its
 // name and its URL.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) Clone(ctx context.Context, family, template string) (string, string, error) {
 	name, err := CloneName(family)
 	if err != nil {
@@ -234,6 +258,8 @@ func (s *Server) Clone(ctx context.Context, family, template string) (string, st
 
 // Drop removes a database this package created, closing whatever is still
 // connected to it. A name without the prefix is refused.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) Drop(ctx context.Context, name string) error {
 	if !strings.HasPrefix(name, Prefix) {
 		return fmt.Errorf("dbclone: refusing to drop %q, which this package did not create", name)
@@ -245,6 +271,8 @@ func (s *Server) Drop(ctx context.Context, name string) error {
 }
 
 // Exists reports whether the server holds a database called name.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (s *Server) Exists(ctx context.Context, name string) (bool, error) {
 	conn, err := s.admin.Conn(ctx)
 	if err != nil {
@@ -258,6 +286,8 @@ func (s *Server) Exists(ctx context.Context, name string) (bool, error) {
 // database because somebody is connected to it (SQLSTATE 55006). The driver's
 // error type belongs to a module the core does not import, so the code is read
 // from the text every driver prints it in.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func InUse(err error) bool {
 	if err == nil {
 		return false
@@ -321,6 +351,8 @@ var (
 // Build identifies the binary running: the hash of its own executable. A test
 // binary is rebuilt whenever its code or a migration compiled into it changes,
 // and a rebuilt binary migrates a template of its own.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Build() (string, error) {
 	buildOnce.Do(func() {
 		path, err := os.Executable()

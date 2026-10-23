@@ -20,6 +20,8 @@ var methods = []string{"get", "put", "post", "delete", "options", "head", "patch
 //
 // It is safe for concurrent use: the schemas it reads are built once per
 // pointer and kept.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Document struct {
 	raw        map[string]any
 	operations map[string]*operation
@@ -56,6 +58,8 @@ type compiled struct {
 
 // Load reads the document at path, failing the test when it cannot be read or
 // is not an OpenAPI document.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Load(t testing.TB, path string) *Document {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -70,6 +74,8 @@ func Load(t testing.TB, path string) *Document {
 }
 
 // Parse reads a document from its JSON form, as openapi:export writes it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Parse(data []byte) (*Document, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -115,6 +121,8 @@ func Parse(data []byte) (*Document, error) {
 
 // Operations lists every operation in the document by method and path, in
 // path order.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (d *Document) Operations() []string {
 	return append([]string(nil), d.names...)
 }

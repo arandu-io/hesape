@@ -20,6 +20,8 @@ import (
 //
 // Methods are called from one goroutine at a time. The function handed to
 // Listen is called from the driver's own goroutine.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Driver interface {
 	// Info names the engine and the browser behind it.
 	Info() Info
@@ -78,6 +80,8 @@ type Driver interface {
 }
 
 // Info names a driver and its browser.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Info struct {
 	// Driver is the name the driver is registered under, such as "cdp".
 	Driver string
@@ -88,6 +92,8 @@ type Info struct {
 }
 
 // Viewport is the size of the page's visible area in CSS pixels.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Viewport struct {
 	Width, Height int
 	// Scale is the device pixel ratio; zero means 1.
@@ -97,6 +103,8 @@ type Viewport struct {
 }
 
 // Media is what CSS media queries see.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Media struct {
 	// Type is "screen" or "print"; empty means screen.
 	Type string
@@ -107,6 +115,8 @@ type Media struct {
 }
 
 // EventKind says what an Event reports.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type EventKind string
 
 // The events a driver reports.
@@ -115,27 +125,45 @@ const (
 	// the page. Level is "error", "warning", "info", "log" or "debug"; Source
 	// is "console-api" for a call to console.* and the browser's own source
 	// name (such as "network" or "security") otherwise.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventConsole EventKind = "console"
 	// EventException is an exception the page did not catch, including an
 	// unhandled promise rejection.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventException EventKind = "exception"
 	// EventRequest is a request leaving the page.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventRequest EventKind = "request"
 	// EventResponse is the status and headers of the answer to a request.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventResponse EventKind = "response"
 	// EventRequestFinished is a request whose body has been read.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventRequestFinished EventKind = "request-finished"
 	// EventRequestFailed is a request that ended without an answer; Text is
 	// the browser's reason.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventRequestFailed EventKind = "request-failed"
 	// EventNavigationStarted is the main frame starting to load a document.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventNavigationStarted EventKind = "navigation-started"
 	// EventNavigationFinished is the main frame done loading, whether the
 	// document loaded or the navigation was abandoned.
+	//
+	// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 	EventNavigationFinished EventKind = "navigation-finished"
 )
 
 // Event is something the page did that the test did not ask for directly.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Event struct {
 	Kind EventKind
 	Time time.Time
@@ -159,15 +187,21 @@ type Event struct {
 
 // ErrNoBrowser is wrapped by a Factory that found no browser to start. Launch
 // turns it into a skip on a developer's machine and a failure in CI.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 var ErrNoBrowser = errors.New("browser: no browser was found")
 
 // ErrDocumentChanged is wrapped by Evaluate when the document the expression
 // ran in went away under it, as it does during a navigation. The page treats it
 // as "not yet" while it waits.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 var ErrDocumentChanged = errors.New("browser: the document changed during the evaluation")
 
 // Options is what a Factory is launched with. OptionsFromEnv reads them from
 // the environment.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Options struct {
 	// Browser is the engine wanted: "chromium" (the default), "firefox" or
 	// "webkit". A driver refuses one it cannot drive.
@@ -181,6 +215,8 @@ type Options struct {
 
 // Factory launches a Driver. Each call returns a browsing context isolated from
 // every other one the Factory returned.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Factory func(ctx context.Context, opts Options) (Driver, error)
 
 // Registry is the drivers an application can run its browser tests with, by
@@ -190,14 +226,20 @@ type Factory func(ctx context.Context, opts Options) (Driver, error)
 //
 // There is no registration by import and no package-level list: the drivers a
 // test can run with are the ones written there.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Registry map[string]Factory
 
 // DefaultDriver is the driver chosen when ARANDU_E2E_DRIVER is empty and the
 // registry holds more than one.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const DefaultDriver = "cdp"
 
 // Select returns the driver ARANDU_E2E_DRIVER names. With the variable empty it
 // is the only one registered, or DefaultDriver.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r Registry) Select() (string, Factory, error) {
 	name := strings.TrimSpace(os.Getenv("ARANDU_E2E_DRIVER"))
 	if name == "" {
@@ -223,6 +265,8 @@ func (r Registry) Select() (string, Factory, error) {
 // OptionsFromEnv reads ARANDU_E2E_BROWSER, ARANDU_E2E_HEADED and
 // ARANDU_E2E_SLOWMO. SlowMo is a Go duration ("250ms") or a number of
 // milliseconds ("250").
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func OptionsFromEnv() (Options, error) {
 	opts := Options{Browser: strings.ToLower(strings.TrimSpace(os.Getenv("ARANDU_E2E_BROWSER")))}
 	if opts.Browser == "" {
@@ -245,6 +289,8 @@ func OptionsFromEnv() (Options, error) {
 // Factory that found no browser skips the test, naming where it looked -- and
 // fails it when CI is set, because a browser suite that skips in CI is a suite
 // that never runs.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Launch(t testing.TB, factory Factory, opts Options) Driver {
 	t.Helper()
 	d, err := factory(t.Context(), opts)

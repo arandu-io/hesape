@@ -32,6 +32,8 @@ import (
 // Every step is recorded -- a PNG and the DOM after it, the network and the
 // console -- and written in the trace format when the test fails, or always
 // with ARANDU_E2E_TRACE=1.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Page struct {
 	t        testing.TB
 	d        Driver
@@ -56,32 +58,46 @@ type Page struct {
 // Resolver turns a route name and its parameters into a path or a URL. The
 // application's router provides it, so a test visits "invoices.show" and not a
 // path it would have to keep in step with the routes.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Resolver func(name string, params ...any) (string, error)
 
 // Option configures a Page.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Option func(*Page)
 
 // BaseURL is the address relative paths are visited against, such as the
 // address of the server the test started.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func BaseURL(url string) Option {
 	return func(p *Page) { p.base = strings.TrimRight(url, "/") }
 }
 
 // Routes is how a route name becomes a URL. Without it, Visit and ExpectURL
 // accept paths and URLs only.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Routes(r Resolver) Option { return func(p *Page) { p.routes = r } }
 
 // Timeout bounds every step: an action or an expectation that is not done by
 // then fails, saying what it was still waiting for. The default is five
 // seconds.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Timeout(d time.Duration) Option { return func(p *Page) { p.timeout = d } }
 
 // WithViewport is the viewport the page opens with. The default is 1440x900.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func WithViewport(v Viewport) Option { return func(p *Page) { p.viewport = v } }
 
 // WithTrace records into r instead of a recorder of the page's own, so
 // whatever else the test runs -- the server, above all -- can add to the same
 // trace.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func WithTrace(r *trace.Recorder) Option { return func(p *Page) { p.rec = r } }
 
 const (
@@ -94,6 +110,8 @@ const (
 // Open launches the driver ARANDU_E2E_DRIVER picks from drivers, with the
 // options the environment sets, and opens a page on it. The driver is closed
 // when the test ends.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Open(t testing.TB, drivers Registry, opts ...Option) *Page {
 	t.Helper()
 	_, factory, err := drivers.Select()
@@ -109,6 +127,8 @@ func Open(t testing.TB, drivers Registry, opts ...Option) *Page {
 
 // New opens a page on a driver already running. The page installs its script
 // and listens to the driver; call it once per driver.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func New(t testing.TB, d Driver, opts ...Option) *Page {
 	t.Helper()
 	p := &Page{
@@ -149,13 +169,19 @@ func New(t testing.TB, d Driver, opts ...Option) *Page {
 // Driver returns the driver under the page, for the rare test that needs the
 // contract itself. It is the interface and never a concrete driver: a test
 // that reaches for one engine's API stops running on the others.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Driver() Driver { return p.d }
 
 // Trace returns the recorder the page writes, for adding the server's side.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Trace() *trace.Recorder { return p.rec }
 
 // Allow accepts the automatic failures whose text contains fragment, for a
 // test about an error page or a script that is expected to complain.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Allow(fragment string) *Page {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -164,6 +190,8 @@ func (p *Page) Allow(fragment string) *Page {
 }
 
 // URL returns the address of the document the last step ended on.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) URL() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -526,6 +554,8 @@ func (p *Page) resolve(target string, params []any) (string, error) {
 //
 //	page.Visit("/invoices")
 //	page.Visit("invoices.show", invoice.ID)
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Visit(target string, params ...any) {
 	p.t.Helper()
 	p.step("visit", target, func(ctx context.Context) error {
@@ -543,6 +573,8 @@ func (p *Page) Visit(target string, params ...any) {
 // Click clicks the element the locator finds with the pointer, at the centre
 // of its first box, once it is the only visible match, enabled, still and not
 // covered by anything.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Click(l Locator) {
 	p.t.Helper()
 	p.step("click", l.String(), func(ctx context.Context) error { return p.click(ctx, l) })
@@ -563,12 +595,16 @@ func (p *Page) click(ctx context.Context, l Locator) error {
 }
 
 // ClickRole clicks the element with the role and accessible name.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ClickRole(role, name string) {
 	p.t.Helper()
 	p.Click(Role(role, name))
 }
 
 // ClickText clicks the innermost element whose visible text is text.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ClickText(text string) {
 	p.t.Helper()
 	p.Click(Text(text))
@@ -576,12 +612,16 @@ func (p *Page) ClickText(text string) {
 
 // Fill types value into the form control labelled label, replacing what was
 // there: it clicks the control, selects its content and types.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Fill(label, value string) {
 	p.t.Helper()
 	p.FillIn(Label(label), value)
 }
 
 // FillIn types value into the control the locator finds.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) FillIn(l Locator, value string) {
 	p.t.Helper()
 	p.step("fill", l.String(), func(ctx context.Context) error { return p.fill(ctx, l, value) })
@@ -630,12 +670,16 @@ func (p *Page) fill(ctx context.Context, l Locator, value string) error {
 
 // Select picks the option whose text, or failing that whose value, is option
 // in the select labelled label.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Select(label, option string) {
 	p.t.Helper()
 	p.SelectIn(Label(label), option)
 }
 
 // SelectIn picks the option in the select the locator finds.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) SelectIn(l Locator, option string) {
 	p.t.Helper()
 	p.step("select", l.String()+" option="+option, func(ctx context.Context) error {
@@ -663,18 +707,24 @@ func (p *Page) SelectIn(l Locator, option string) {
 // Check ticks the checkbox or radio labelled label, clicking it -- or its
 // label, when the control itself is hidden behind a styled one -- unless it is
 // ticked already.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Check(label string) {
 	p.t.Helper()
 	p.CheckIn(Label(label), true)
 }
 
 // Uncheck clears the checkbox labelled label.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Uncheck(label string) {
 	p.t.Helper()
 	p.CheckIn(Label(label), false)
 }
 
 // CheckIn sets the checkbox or radio the locator finds to want.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) CheckIn(l Locator, want bool) {
 	p.t.Helper()
 	action := "check"
@@ -715,6 +765,8 @@ func (p *Page) CheckIn(l Locator, want bool) {
 // Submit submits the form of the field filled last, or the only form on the
 // page, the way pressing Enter in it does: the submit event fires, so htmx and
 // validation see it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Submit() {
 	p.t.Helper()
 	p.step("submit", "", func(ctx context.Context) error {
@@ -737,6 +789,8 @@ func (p *Page) Submit() {
 
 // Press presses a key in the focused element: "Enter", "Tab", "Escape",
 // "ArrowDown", a character, or a chord such as "Shift+Tab".
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Press(key string) {
 	p.t.Helper()
 	p.step("press", key, func(ctx context.Context) error {
@@ -784,6 +838,8 @@ func normalize(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // ExpectText waits until text is part of what the page reads, whitespace
 // collapsed.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectText(text string) {
 	p.t.Helper()
 	want := normalize(text)
@@ -797,6 +853,8 @@ func (p *Page) ExpectText(text string) {
 }
 
 // ExpectNoText waits until text is not part of what the page reads.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectNoText(text string) {
 	p.t.Helper()
 	want := normalize(text)
@@ -812,6 +870,8 @@ func (p *Page) ExpectNoText(text string) {
 // ExpectURL waits until the page is at target: a URL compared whole, a path
 // compared with the path (and the query, when target has one), or a route
 // name with its parameters through Routes.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectURL(target string, params ...any) {
 	p.t.Helper()
 	p.step("expect url", target, func(ctx context.Context) error {
@@ -842,6 +902,8 @@ func (p *Page) ExpectURL(target string, params ...any) {
 }
 
 // ExpectVisible waits until the locator finds exactly one visible element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectVisible(l Locator) {
 	p.t.Helper()
 	p.step("expect visible", l.String(), func(ctx context.Context) error {
@@ -851,6 +913,8 @@ func (p *Page) ExpectVisible(l Locator) {
 }
 
 // ExpectHidden waits until the locator finds no visible element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectHidden(l Locator) {
 	p.t.Helper()
 	p.step("expect hidden", l.String(), func(ctx context.Context) error {
@@ -864,6 +928,8 @@ func (p *Page) ExpectHidden(l Locator) {
 //
 //	page.ClickRole("button", "Delete")
 //	page.ExpectModal("Delete invoice").ClickRole("button", "Delete")
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) ExpectModal(name string) *Element {
 	p.t.Helper()
 	l := Modal(name)
@@ -873,9 +939,13 @@ func (p *Page) ExpectModal(name string) *Element {
 
 // Find returns the element the locator names, for acting on or inside it.
 // Nothing is looked up until an action or an expectation runs.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Find(l Locator) *Element { return &Element{p: p, l: l} }
 
 // Screenshot records the page as it is, under name, in the trace.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Screenshot(name string) {
 	p.t.Helper()
 	p.step("screenshot", name, func(ctx context.Context) error { return p.settle(ctx) })
@@ -884,6 +954,8 @@ func (p *Page) Screenshot(name string) {
 // Evaluate runs a JavaScript expression in the page and decodes its value
 // into out, which may be nil. It is for reading what no expectation reads;
 // acting through it skips everything a person's action goes through.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Evaluate(expression string, out any) {
 	p.t.Helper()
 	ctx, cancel := context.WithTimeout(p.t.Context(), p.timeout)
@@ -895,6 +967,8 @@ func (p *Page) Evaluate(expression string, out any) {
 
 // SetCookies stores cookies for BaseURL in the page's browsing context, as a
 // response from the server would have.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) SetCookies(cookies ...*http.Cookie) {
 	p.t.Helper()
 	ctx, cancel := context.WithTimeout(p.t.Context(), p.timeout)
@@ -910,6 +984,8 @@ func (p *Page) SetCookies(cookies ...*http.Cookie) {
 // Pause stops the test with the browser open, when ARANDU_E2E_HEADED shows
 // it, until window.__arandu.resume() is called in the page's DevTools
 // console. Without a window to look at, or in CI, it does nothing.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (p *Page) Pause() {
 	p.t.Helper()
 	if !truthy(os.Getenv("ARANDU_E2E_HEADED")) || os.Getenv("CI") != "" {
@@ -935,45 +1011,71 @@ func (p *Page) Pause() {
 }
 
 // Element is what a locator finds, for acting on it or inside it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Element struct {
 	p *Page
 	l Locator
 }
 
 // Locator returns the element's locator.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Locator() Locator { return e.l }
 
 // Find returns the element child finds inside this one.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Find(child Locator) *Element { return &Element{p: e.p, l: child.In(e.l)} }
 
 // Click clicks the element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Click() { e.p.t.Helper(); e.p.Click(e.l) }
 
 // ClickRole clicks the element with the role and name inside this one.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) ClickRole(role, name string) { e.p.t.Helper(); e.p.Click(Role(role, name).In(e.l)) }
 
 // ClickText clicks the element with the text inside this one.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) ClickText(text string) { e.p.t.Helper(); e.p.Click(Text(text).In(e.l)) }
 
 // Fill types value into the element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Fill(value string) { e.p.t.Helper(); e.p.FillIn(e.l, value) }
 
 // Select picks an option of the element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Select(option string) { e.p.t.Helper(); e.p.SelectIn(e.l, option) }
 
 // Check ticks the element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Check() { e.p.t.Helper(); e.p.CheckIn(e.l, true) }
 
 // Uncheck clears the element.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) Uncheck() { e.p.t.Helper(); e.p.CheckIn(e.l, false) }
 
 // ExpectVisible waits until the element is visible.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) ExpectVisible() { e.p.t.Helper(); e.p.ExpectVisible(e.l) }
 
 // ExpectHidden waits until the element is not visible.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) ExpectHidden() { e.p.t.Helper(); e.p.ExpectHidden(e.l) }
 
 // ExpectText waits until the element's visible text contains text.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (e *Element) ExpectText(text string) {
 	e.p.t.Helper()
 	want := normalize(text)

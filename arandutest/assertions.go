@@ -13,9 +13,13 @@ import (
 // that code, so a failure prints the body the same way.
 
 // AssertCreated asserts a 201.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertCreated() *Response { r.t.Helper(); return r.AssertStatus(http.StatusCreated) }
 
 // AssertAccepted asserts a 202.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertAccepted() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusAccepted)
@@ -23,6 +27,8 @@ func (r *Response) AssertAccepted() *Response {
 
 // AssertNoContent asserts a 204 and an empty body. A 204 that carries a body is
 // a handler writing something nobody reads.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertNoContent() *Response {
 	r.t.Helper()
 	r.AssertStatus(http.StatusNoContent)
@@ -33,79 +39,107 @@ func (r *Response) AssertNoContent() *Response {
 }
 
 // AssertFound asserts a 302.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertFound() *Response { r.t.Helper(); return r.AssertStatus(http.StatusFound) }
 
 // AssertNotModified asserts a 304.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertNotModified() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusNotModified)
 }
 
 // AssertBadRequest asserts a 400.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertBadRequest() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusBadRequest)
 }
 
 // AssertUnauthorized asserts a 401.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertUnauthorized() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusUnauthorized)
 }
 
 // AssertForbidden asserts a 403, which is what a policy that refused answers.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertForbidden() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusForbidden)
 }
 
 // AssertNotFound asserts a 404.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertNotFound() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusNotFound)
 }
 
 // AssertMethodNotAllowed asserts a 405.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertMethodNotAllowed() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusMethodNotAllowed)
 }
 
 // AssertConflict asserts a 409, which is what a duplicate key answers.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertConflict() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusConflict)
 }
 
 // AssertGone asserts a 410.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertGone() *Response { r.t.Helper(); return r.AssertStatus(http.StatusGone) }
 
 // AssertUnprocessable asserts a 422, which is what a rejected form answers to a
 // request that asked for JSON.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertUnprocessable() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusUnprocessableEntity)
 }
 
 // AssertTooManyRequests asserts a 429.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertTooManyRequests() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusTooManyRequests)
 }
 
 // AssertInternalServerError asserts a 500.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertInternalServerError() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusInternalServerError)
 }
 
 // AssertServiceUnavailable asserts a 503.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertServiceUnavailable() *Response {
 	r.t.Helper()
 	return r.AssertStatus(http.StatusServiceUnavailable)
 }
 
 // AssertSuccessful asserts a status from 200 to 299.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertSuccessful() *Response {
 	r.t.Helper()
 	if r.rec.Code < 200 || r.rec.Code > 299 {
@@ -115,6 +149,8 @@ func (r *Response) AssertSuccessful() *Response {
 }
 
 // AssertServerError asserts a status from 500 to 599.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertServerError() *Response {
 	r.t.Helper()
 	if r.rec.Code < 500 || r.rec.Code > 599 {
@@ -125,6 +161,8 @@ func (r *Response) AssertServerError() *Response {
 
 // AssertHeader asserts the header is present and, when a value is given, that
 // it holds exactly that value.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertHeader(name string, value ...string) *Response {
 	r.t.Helper()
 	values, ok := r.rec.Header()[http.CanonicalHeaderKey(name)]
@@ -139,6 +177,8 @@ func (r *Response) AssertHeader(name string, value ...string) *Response {
 }
 
 // AssertHeaderMissing asserts the header is absent.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertHeaderMissing(name string) *Response {
 	r.t.Helper()
 	if values, ok := r.rec.Header()[http.CanonicalHeaderKey(name)]; ok {
@@ -149,6 +189,8 @@ func (r *Response) AssertHeaderMissing(name string) *Response {
 
 // AssertRedirectContains asserts the response redirects to an address that
 // contains fragment, reading HX-Redirect as [Response.AssertRedirect] does.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertRedirectContains(fragment string) *Response {
 	r.t.Helper()
 	got := r.redirect()
@@ -170,6 +212,8 @@ func (r *Response) redirect() string {
 // AssertCookie asserts the response sets the cookie and, when a value is
 // given, that it carries exactly that value -- as it crossed the wire, signed
 // or sealed if the application signs or seals it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertCookie(name string, value ...string) *Response {
 	r.t.Helper()
 	c := r.cookie(name)
@@ -184,6 +228,8 @@ func (r *Response) AssertCookie(name string, value ...string) *Response {
 }
 
 // AssertCookieMissing asserts the response does not set the cookie.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertCookieMissing(name string) *Response {
 	r.t.Helper()
 	if c := r.cookie(name); c != nil {
@@ -195,6 +241,8 @@ func (r *Response) AssertCookieMissing(name string) *Response {
 // AssertCookieExpired asserts the response sets the cookie in the form that
 // deletes it -- a negative MaxAge, or an expiry in the past -- which is what a
 // sign-out has to send.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertCookieExpired(name string) *Response {
 	r.t.Helper()
 	c := r.cookie(name)
@@ -221,6 +269,8 @@ func (r *Response) cookie(name string) *http.Cookie {
 
 // AssertDownload asserts the response offers a file download and, when a name
 // is given, that the file is offered under it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertDownload(filename ...string) *Response {
 	r.t.Helper()
 	disposition := r.rec.Header().Get("Content-Disposition")
@@ -243,6 +293,8 @@ func (r *Response) AssertDownload(filename ...string) *Response {
 }
 
 // AssertContent asserts the body is exactly value.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertContent(value string) *Response {
 	r.t.Helper()
 	if got := r.rec.Body.String(); got != value {
@@ -253,6 +305,8 @@ func (r *Response) AssertContent(value string) *Response {
 
 // AssertSeeInOrder asserts every value is in the body, each after the one
 // before it -- the order of rows in a listing, which AssertSee cannot tell.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertSeeInOrder(values ...string) *Response {
 	r.t.Helper()
 	r.inOrder(r.rec.Body.String(), values)
@@ -262,6 +316,8 @@ func (r *Response) AssertSeeInOrder(values ...string) *Response {
 // AssertSeeText asserts the text is on the page once the markup is taken off
 // and the entities decoded: what a person reads, rather than what the HTML
 // says.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertSeeText(text string) *Response {
 	r.t.Helper()
 	if !strings.Contains(r.text(), text) {
@@ -272,6 +328,8 @@ func (r *Response) AssertSeeText(text string) *Response {
 
 // AssertSeeTextInOrder is [Response.AssertSeeInOrder] over the text a person
 // reads.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertSeeTextInOrder(values ...string) *Response {
 	r.t.Helper()
 	r.inOrder(r.text(), values)
@@ -280,6 +338,8 @@ func (r *Response) AssertSeeTextInOrder(values ...string) *Response {
 
 // AssertDontSeeText asserts the text is not on the page once the markup is
 // taken off and the entities decoded.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertDontSeeText(text string) *Response {
 	r.t.Helper()
 	if strings.Contains(r.text(), text) {
@@ -333,6 +393,8 @@ func (r *Response) text() string {
 
 // DecodeJSON returns the body as a decoded JSON payload, for the assertions
 // hesape/testing writes over one. A body that is not JSON fails the test.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) DecodeJSON() *htesting.AssertableJSONString {
 	r.t.Helper()
 	decoded := htesting.NewAssertableJSONString(r.t, r.rec.Body.String())
@@ -344,6 +406,8 @@ func (r *Response) DecodeJSON() *htesting.AssertableJSONString {
 
 // AssertJSON asserts the payload holds data, as a subset: keys the payload
 // has and data does not name are ignored.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSON(data any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertSubset(data, false)
@@ -351,6 +415,8 @@ func (r *Response) AssertJSON(data any) *Response {
 }
 
 // AssertExactJSON asserts the payload is data, no more and no less.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertExactJSON(data any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertExact(data)
@@ -358,6 +424,8 @@ func (r *Response) AssertExactJSON(data any) *Response {
 }
 
 // AssertJSONPath asserts the value at a dotted path, "data.0.id".
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONPath(path string, expect any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertPath(path, expect)
@@ -365,6 +433,8 @@ func (r *Response) AssertJSONPath(path string, expect any) *Response {
 }
 
 // AssertJSONMissingPath asserts nothing is at the dotted path.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONMissingPath(path string) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertMissingPath(path)
@@ -372,6 +442,8 @@ func (r *Response) AssertJSONMissingPath(path string) *Response {
 }
 
 // AssertJSONFragment asserts data appears somewhere in the payload.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONFragment(data any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertFragment(data)
@@ -380,6 +452,8 @@ func (r *Response) AssertJSONFragment(data any) *Response {
 
 // AssertJSONMissing asserts data appears nowhere in the payload -- the half
 // that catches a field leaking into an API answer.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONMissing(data any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertMissing(data, false)
@@ -388,6 +462,8 @@ func (r *Response) AssertJSONMissing(data any) *Response {
 
 // AssertJSONStructure asserts the payload has the keys structure names, at the
 // depth it names them.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONStructure(structure any) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertStructure(structure, nil, false)
@@ -396,6 +472,8 @@ func (r *Response) AssertJSONStructure(structure any) *Response {
 
 // AssertJSONCount asserts how many elements the payload, or the value at key,
 // holds.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertJSONCount(count int, key ...string) *Response {
 	r.t.Helper()
 	r.DecodeJSON().AssertCount(count, key...)

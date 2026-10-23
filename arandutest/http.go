@@ -19,6 +19,8 @@ import (
 // redirect cannot tell a 200 from a 302 that happened to land somewhere with the
 // same words on it, and "it redirected me to the sign-in screen" is the most
 // common way a feature test passes while proving the opposite of what it says.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Client struct {
 	t       *testing.T
 	handler http.Handler
@@ -46,6 +48,8 @@ type Client struct {
 }
 
 // NewClient returns a client over a handler.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func NewClient(t *testing.T, h http.Handler) *Client {
 	t.Helper()
 	return &Client{t: t, handler: h}
@@ -80,7 +84,9 @@ func NewClient(t *testing.T, h http.Handler) *Client {
 // Deprecated: the subject reaches the handler without passing the guard, the
 // session store or the resolver, so roles written in the test are roles nobody
 // re-reads and a demotion never takes effect. Use [As], which starts a real
-// session for the account and lets the application's guards load it.
+// session for the account and lets the application's guards load it. The
+// package moved to github.com/arandu-io/framework/test and is removed in the
+// next minor.
 func (c *Client) ActingAs(s auth.Subject) *Client {
 	c.t.Helper()
 	if c.remote != nil {
@@ -121,6 +127,8 @@ func (c *Client) ActingAs(s auth.Subject) *Client {
 // replaceable. That is deliberate: refusing a stolen token and refusing a body
 // that is not the shape it claims are both behaviour a test has to be able to
 // provoke, and neither can be provoked by a client that always knows better.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) WithHeader(name, value string) *Client {
 	if value == "" {
 		c.headers.Del(name)
@@ -134,10 +142,14 @@ func (c *Client) WithHeader(name, value string) *Client {
 }
 
 // Get sends a GET.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Get(path string) *Response { return c.do(http.MethodGet, path, nil, "", "") }
 
 // Options sends an OPTIONS, which carries no body for the same reason a GET
 // does not: it asks what may be done with the address rather than doing it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Options(path string) *Response {
 	return c.do(http.MethodOptions, path, nil, "", "")
 }
@@ -147,6 +159,8 @@ func (c *Client) Options(path string) *Response {
 // The CSRF token is read off the last page this client loaded and sent with the
 // request, because that is what a browser does -- and a test that skips it is a
 // test that proves the form works with protection disabled.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Post(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPost, path, form)
 }
@@ -157,12 +171,16 @@ func (c *Client) Post(path string, form map[string]string) *Response {
 // generated resource registers PUT beside POST, so a client without this leaves
 // a route of every generated module unreachable -- and a test that reaches for
 // POST instead proves something about a route the application does not have.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Put(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPut, path, form)
 }
 
 // Patch sends a form as a PATCH: the part of what is at the address that
 // changed. It carries the token and the cookies exactly as [Client.Post] does.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Patch(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPatch, path, form)
 }
@@ -174,6 +192,8 @@ func (c *Client) Patch(path string, form map[string]string) *Response {
 // the guard that is in front of a post: a request that reaches it without one is
 // refused, and a client that could not send one would need the guard turned off
 // to pass.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Delete(path string, form map[string]string) *Response {
 	return c.submit(http.MethodDelete, path, form)
 }
@@ -215,6 +235,8 @@ func (c *Client) submit(method, path string, form map[string]string) *Response {
 // Cookies returns the cookies this client holds, the session among them, as
 // the server last set them. They are what a browser is handed to be signed in
 // as the same person.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (c *Client) Cookies() []*http.Cookie {
 	out := make([]*http.Cookie, len(c.cookies))
 	for i, ck := range c.cookies {
@@ -336,6 +358,8 @@ func (c *Client) keep(ck *http.Cookie) {
 }
 
 // Response is what came back, with the assertions worth having.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Response struct {
 	t    *testing.T
 	rec  *httptest.ResponseRecorder
@@ -346,6 +370,8 @@ type Response struct {
 //
 // The body is printed on failure, because the answer to "why is this a 500" is
 // in it and finding out otherwise means running the test again with a print.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertStatus(want int) *Response {
 	r.t.Helper()
 	if r.rec.Code != want {
@@ -355,9 +381,13 @@ func (r *Response) AssertStatus(want int) *Response {
 }
 
 // AssertOk asserts a 200 status. It is [Response.AssertStatus] with that code.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertOk() *Response { return r.AssertStatus(http.StatusOK) }
 
 // AssertSee fails unless the text is in the body.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertSee(text string) *Response {
 	r.t.Helper()
 	if !strings.Contains(r.rec.Body.String(), text) {
@@ -371,6 +401,8 @@ func (r *Response) AssertSee(text string) *Response {
 // It is the half people skip, and the half that catches a leak: a draft in a
 // public listing, an address in a page that should not name one, a button
 // somebody without the permission can see.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertDontSee(text string) *Response {
 	r.t.Helper()
 	if strings.Contains(r.rec.Body.String(), text) {
@@ -384,6 +416,8 @@ func (r *Response) AssertDontSee(text string) *Response {
 // It reads HX-Redirect as well as Location, because a handler answering an HTMX
 // request redirects with a header and a 204 -- and a test that only reads
 // Location says "redirected to \"\"" for a response that is correct.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertRedirect(want string) *Response {
 	r.t.Helper()
 
@@ -399,9 +433,13 @@ func (r *Response) AssertRedirect(want string) *Response {
 
 // GetContent returns the response body, for an assertion this package does not
 // have.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) GetContent() string { return r.rec.Body.String() }
 
 // Header reads one response header.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) Header(name string) string { return r.rec.Header().Get(name) }
 
 func (r *Response) body() string {

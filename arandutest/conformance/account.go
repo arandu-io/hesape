@@ -22,6 +22,8 @@ import (
 //
 // It is accounttest.Run under the name the other kits share, so an
 // application's tests/Conformance calls every kit the same way.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func Account(t *testing.T, open func(t *testing.T) accounttest.Fixture) {
 	t.Helper()
 	accounttest.Run(t, open)
@@ -30,6 +32,8 @@ func Account(t *testing.T, open func(t *testing.T) accounttest.Fixture) {
 // ModelFixture is the application's half of the account rules over one fresh
 // database: what Account is handed, and what the application's user model
 // adds to it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type ModelFixture struct {
 	accounttest.Fixture
 
@@ -66,6 +70,8 @@ type ModelFixture struct {
 //     and the password and its hash appear in it never.
 //
 // open is called once per subtest.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func ModelPersistence(t *testing.T, open func(t *testing.T) ModelFixture) {
 	t.Helper()
 	m := modelKit{}

@@ -22,6 +22,8 @@ import (
 // the row against the same struct that wrote it proves the struct equals
 // itself. Naming the columns is what makes the assertion say something -- and
 // it is the only spelling that catches the field that never reached SQL.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 type Match map[string]any
 
 // NotNull is the value a Match carries to ask that a column holds something,
@@ -35,6 +37,8 @@ type Match map[string]any
 // a match is compared with a placeholder, and a placeholder holding a sentinel
 // would compare against the sentinel -- so this one is read where the statement
 // is built and becomes IS NOT NULL instead.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 var NotNull = notNull{}
 
 // notNull is unexported so that NotNull is the only one of it. A second value
@@ -58,6 +62,8 @@ func (notNull) String() string { return "NOT NULL" }
 // tenant belongs in the match -- without it the assertion proves the row exists
 // somewhere, which in a multi-tenant application is the bug rather than the
 // assurance.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func AssertDatabaseHas(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
 	t.Helper()
 
@@ -74,6 +80,8 @@ func AssertDatabaseHas(t *testing.T, ctx context.Context, db *database.DB, table
 //
 // It is the half that catches a delete that deleted nothing, an update that
 // wrote to the wrong tenant's row, and a rollback that did not roll back.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func AssertDatabaseMissing(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
 	t.Helper()
 
@@ -92,6 +100,8 @@ func AssertDatabaseMissing(t *testing.T, ctx context.Context, db *database.DB, t
 // AssertDatabaseHas answered with a number. What this one answers is the
 // question a match cannot -- that the handler wrote one row and not three, and
 // that the seeder ran once.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func AssertDatabaseCount(t *testing.T, ctx context.Context, db *database.DB, table string, want int) {
 	t.Helper()
 
@@ -111,6 +121,8 @@ func AssertDatabaseCount(t *testing.T, ctx context.Context, db *database.DB, tab
 // A model that was told to use another is asserted about with
 // [AssertDatabaseHas] and [NotNull] directly, which is what these two are: the
 // name for the column almost every model uses.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 const DeletedAtColumn = "deleted_at"
 
 // AssertSoftDeleted fails unless a row matching is there and is marked deleted.
@@ -128,6 +140,8 @@ const DeletedAtColumn = "deleted_at"
 //
 // The match must not name the deleted_at column itself -- that is the half this
 // assertion supplies, and a match that supplied it too could contradict it.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func AssertSoftDeleted(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
 	t.Helper()
 
@@ -154,6 +168,8 @@ func AssertSoftDeleted(t *testing.T, ctx context.Context, db *database.DB, table
 // only asks whether the row is still live.
 //
 // The match must not name the deleted_at column itself.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func AssertNotSoftDeleted(t *testing.T, ctx context.Context, db *database.DB, table string, where Match) {
 	t.Helper()
 
@@ -188,6 +204,8 @@ func withDeletedAt(where Match, value any) (Match, error) {
 
 // String renders the match the way the failure message needs it: in column
 // order, so two runs of the same failing test print the same line.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (m Match) String() string {
 	if len(m) == 0 {
 		return "{}"

@@ -39,6 +39,8 @@ import (
 // The browser calls the application in process. For a browser driven over the
 // socket -- an end-to-end journey -- hand it [Client.Cookies]: the session is
 // the application's, so the same cookies sign it in at [Server.URL].
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func As(t *testing.T, server *Server, who auth.Subject) *Client {
 	t.Helper()
 	if server == nil {

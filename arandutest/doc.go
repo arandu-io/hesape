@@ -64,4 +64,6 @@
 // with is HTML fragments, and [Response.AssertSee] over the fragment is the
 // assertion that matches. There is no console command runner and no
 // view-level assertion.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package arandutest

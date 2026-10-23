@@ -43,4 +43,6 @@
 // server and session helpers of hesape/arandutest when it uses them. A kit
 // never opens a database itself: the engine is the application's, which is
 // what lets the same kit run on SQLite, Postgres and MySQL.
+//
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 package conformance
