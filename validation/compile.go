@@ -59,6 +59,20 @@ type Option func(*settings)
 type settings struct {
 	messages Messages
 	registry *Registry
+	deferred bool
+}
+
+// WithModuleRules lets a rule set name a rule that no registry has been given
+// yet. The rule set compiles with those names unresolved, which is what a set
+// declared in a package-level variable needs: it is compiled when the program
+// starts, and the modules are installed on the Factory after that, where the
+// application is wired.
+//
+// A set compiled this way is resolved by the Factory that runs it, and checked at
+// boot by Factory.Check, which fails naming every rule nothing declares. Run
+// without a Factory, a rule still unresolved panics.
+func WithModuleRules() Option {
+	return func(s *settings) { s.deferred = true }
 }
 
 // WithRegistry compiles a rule set against the rules a registry declares as well
@@ -180,7 +194,7 @@ func compile(r Rules, file string, line int, opts []Option) (*Set, error) {
 		source:   r,
 		opts:     opts,
 	}
-	c := &compiler{set: s, file: file, line: line, registry: cfg.registry}
+	c := &compiler{set: s, file: file, line: line, registry: cfg.registry, deferred: cfg.deferred}
 
 	// Fields in sorted order and rules in written order, so the failures come
 	// out the same way on every run and a golden file does not churn.
@@ -217,6 +231,7 @@ type compiler struct {
 	line     int
 	errs     CompileErrors
 	registry *Registry
+	deferred bool
 }
 
 func (c *compiler) fail(f *field, ruleName, format string, args ...any) {
@@ -274,6 +289,18 @@ func (c *compiler) textRule(f *field, segment string, seen map[string]bool) (*ru
 	ruleName = strings.TrimSpace(ruleName)
 
 	sp, ok := c.lookup(ruleName)
+	if !ok && c.deferred && isRuleName(ruleName) {
+		args, err := parseArgs(ruleName, rest, hasArgs)
+		if err != nil {
+			c.fail(f, ruleName, "rule %q has a malformed argument list: %s", ruleName, err)
+			return nil, false
+		}
+		if _, deliberate := refused[ruleName]; !deliberate {
+			seen[ruleName] = true
+			c.set.pending = append(c.set.pending, ruleName)
+			return &rule{name: ruleName, args: args, spec: unresolvedSpec, unresolved: true}, true
+		}
+	}
 	if !ok {
 		c.reject(f, ruleName)
 		return nil, false

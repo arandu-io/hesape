@@ -332,6 +332,10 @@ func (v *Validator) validateAttribute(f *field, r *rule) {
 		return
 	}
 
+	if r.unresolved {
+		panic("validation: rule " + r.name + " is declared by no registry. Install the module " +
+			"that has it on the Factory (Factory.Use) and run the set through the Factory")
+	}
 	if r.object != nil {
 		v.runObject(f, r, value)
 		return

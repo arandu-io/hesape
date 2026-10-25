@@ -1065,3 +1065,25 @@ func titleCase(s string) string {
 	}
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
+
+// unresolvedSpec stands in for a rule a module will declare. It is never run: a
+// Factory resolves the set first, and a Validator that meets it panics.
+var unresolvedSpec = &spec{
+	maxArgs: -1,
+	message: func(*field, *rule) string { return "is not valid" },
+}
+
+// isRuleName reports whether the text is shaped like a rule name, so that a typo
+// like "Requried" or an empty segment is still refused at compile and only a name
+// a module could declare is left for later.
+func isRuleName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
+}

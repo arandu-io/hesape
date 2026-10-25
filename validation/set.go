@@ -31,6 +31,10 @@ type Set struct {
 	// compiled again against another registry.
 	source Rules
 	opts   []Option
+
+	// pending lists the rules the set names that nothing had declared when it was
+	// compiled.
+	pending []string
 }
 
 // field is one input and the rules written against it, in the order written.
@@ -76,6 +80,10 @@ type rule struct {
 	// ValidationRule or a function. Its spec holds only what the compiler asks of
 	// every rule.
 	object *objectRule
+
+	// unresolved is set for a rule no registry has declared yet. See
+	// WithModuleRules.
+	unresolved bool
 
 	// dynamic is set for a rule decided by looking at the request.
 	dynamic *dynamicRule

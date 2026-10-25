@@ -2,6 +2,7 @@ package validation
 
 import (
 	"github.com/arandu-io/hesape/str"
+	"sync"
 
 	"github.com/arandu-io/hesape/auth"
 )
@@ -40,6 +41,19 @@ type Factory struct {
 	// declared.
 	excludeUnvalidatedArrayKeys bool
 
+	// resolved remembers the sets Resolve compiled again, keyed by the set they
+	// came from.
+	resolved sync.Map
+
+	// requests is the request types compiled by ForRequest.
+	requests requestCache
+
+	// registry is the rules the modules of the application declared.
+	registry *Registry
+
+	// locale is the locale a Validator is made for when its request names none.
+	locale string
+
 	// resolver is what Resolver registered: another way of building the
 	// Validator itself.
 	resolver func(data Data, rules *Set, opts []ValidatorOption) *Validator
@@ -56,7 +70,31 @@ func NewFactory(translator Translator) *Factory {
 		customMessages:              map[string]any{},
 		customAttributes:            map[string]string{},
 		excludeUnvalidatedArrayKeys: true,
+		registry:                    NewRegistry(),
 	}
+}
+
+// Use installs the rules of the modules the application uses:
+//
+//	factory.Use(br.Rules())
+//
+// Each module hands over a [Provider] that declares its rules, the sentences they
+// say in each locale and how they fill the placeholders of those sentences. This
+// is the one place a module's rules enter validation, and it is called where the
+// application is assembled. It returns the Factory, so calls chain.
+func (f *Factory) Use(providers ...Provider) *Factory {
+	f.registry.Use(providers...)
+	return f
+}
+
+// Registry returns the registry of the rules the Factory's modules declared.
+func (f *Factory) Registry() *Registry { return f.registry }
+
+// SetLocale sets the locale a Validator speaks when its request names none. The
+// empty locale, the default, is the translator's own.
+func (f *Factory) SetLocale(locale string) *Factory {
+	f.locale = locale
+	return f
 }
 
 // Make returns a Validator over the data and the rules, with everything this
@@ -66,7 +104,11 @@ func NewFactory(translator Translator) *Factory {
 // strings are parsed and checked at boot -- see MustCompile. Per-call overrides
 // are the WithCustomMessages and WithCustomAttributes options.
 func (f *Factory) Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
-	v := f.resolve(data, rules, opts)
+	resolved, err := f.Resolve(rules)
+	if err != nil {
+		panic(err)
+	}
+	v := f.resolve(data, resolved, opts)
 
 	// The presence verifier is responsible for checking the unique and exists
 	// data for the validator. It is behind an interface so that more than one
@@ -91,7 +133,7 @@ func (f *Factory) resolve(data Data, rules *Set, opts []ValidatorOption) *Valida
 		return f.resolver(data, rules, opts)
 	}
 
-	base := []ValidatorOption{WithTranslator(f.translator)}
+	base := []ValidatorOption{WithTranslator(f.translator), WithRegistryOf(f.registry), WithLocale(f.locale)}
 	if !f.excludeUnvalidatedArrayKeys {
 		base = append(base, WithUnvalidatedArrayKeys())
 	}
@@ -118,6 +160,8 @@ func (f *Factory) addExtensions(v *Validator) {
 // Extend registers a rule this application adds, and the sentence it says when
 // it fails.
 //
+// Deprecated: see the package-level Extend. Use declares a rule in a Registry.
+//
 // It registers into the one catalogue MustCompile checks against, so the name is
 // real for every rule set compiled after this call -- which is why it belongs at
 // start-up, before any set is compiled.
@@ -129,6 +173,8 @@ func (f *Factory) Extend(rule string, extension ExtensionFunc, message ...string
 
 // ExtendImplicit registers a rule that runs even when the attribute is blank, the
 // way `required` does.
+//
+// Deprecated: see Extend. RuleDef.Implicit is the same thing.
 func (f *Factory) ExtendImplicit(rule string, extension ExtensionFunc, message ...string) {
 	ExtendImplicit(rule, extension, first(message))
 
@@ -136,6 +182,8 @@ func (f *Factory) ExtendImplicit(rule string, extension ExtensionFunc, message .
 }
 
 // ExtendDependent registers a rule whose first parameter names another field.
+//
+// Deprecated: see Extend. RuleDef.Dependent is the same thing.
 func (f *Factory) ExtendDependent(rule string, extension ExtensionFunc, message ...string) {
 	ExtendDependent(rule, extension, first(message))
 

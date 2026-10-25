@@ -289,19 +289,32 @@ func (v *Validator) AddDependentExtensions(extensions map[string]ExtensionFunc) 
 // Extend registers a rule of the application's own: a rule name, the check
 // behind it, and the sentence it says.
 //
-// It is called from an init or from main, before any rule set is compiled. An
-// empty message leaves the rule saying "is not valid".
+// It writes into the table every rule set in the process is compiled against, so
+// it has to run before any set is compiled -- which, for a set in a package-level
+// variable, means from an init function of a package that set imports. That is
+// registration as a side effect of an import, in an order the compiler picks and
+// in a table that cannot say who filled it, and the wiring of an Arandu
+// application is written out instead.
+//
+// Deprecated: declare the rule in a Registry with RuleDef and install it on the
+// Factory with Factory.Use, from where the application is assembled. The rule
+// then has its sentence in each locale and its replacer beside it, and nothing
+// is registered by an import. Extend keeps working for code that has not moved.
 func Extend(rule string, extension ExtensionFunc, message string) {
 	registerExtension(rule, extension, message, false, nil)
 }
 
 // ExtendImplicit is Extend for a rule that runs even when the value is blank.
+//
+// Deprecated: see Extend. RuleDef.Implicit is the same thing.
 func ExtendImplicit(rule string, extension ExtensionFunc, message string) {
 	registerExtension(rule, extension, message, true, nil)
 }
 
 // ExtendDependent is Extend for a rule whose first parameter names another
 // field.
+//
+// Deprecated: see Extend. RuleDef.Dependent is the same thing.
 func ExtendDependent(rule string, extension ExtensionFunc, message string) {
 	registerExtension(rule, extension, message, false, []int{0})
 }

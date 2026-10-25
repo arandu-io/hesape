@@ -224,7 +224,8 @@ func replaceComparison(v *Validator, message, attribute, rule string, parameters
 	if value == nil {
 		return keepCase(message, "value", v.GetDisplayableAttribute(other))
 	}
-	size, _ := v.GetSize(attribute, value)
+	_, mine := numericText(v.GetValue(attribute))
+	size, _ := v.sizeOf(attribute, value, mine || v.HasRule(attribute, numericRules))
 	return keepCase(message, "value", sizeText(size))
 }
 

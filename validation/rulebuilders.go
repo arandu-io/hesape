@@ -1055,6 +1055,7 @@ func (p *Password) siblingOptions() []ValidatorOption {
 	}
 	return []ValidatorOption{
 		WithTranslator(p.validator.trans),
+		WithLocale(p.validator.locale),
 		WithCustomMessages(p.validator.CustomMessages()),
 		WithCustomAttributes(p.validator.CustomAttributes()),
 	}
@@ -1067,7 +1068,7 @@ func (p *Password) line(key, fallback string) string {
 	if p.validator == nil || p.validator.trans == nil {
 		return fallback
 	}
-	if sentence := line(p.validator.GetTranslator().Get(key, nil, ""), key); sentence != key {
+	if sentence := line(p.validator.GetTranslator().Get(key, nil, p.validator.locale), key); sentence != key {
 		return sentence
 	}
 	return fallback
@@ -1334,7 +1335,7 @@ func translatedOr(v *Validator, key, fallback string) string {
 	if v == nil || v.trans == nil {
 		return fallback
 	}
-	if sentence := line(v.GetTranslator().Get(key, nil, ""), key); sentence != key {
+	if sentence := line(v.GetTranslator().Get(key, nil, v.locale), key); sentence != key {
 		return sentence
 	}
 	return fallback

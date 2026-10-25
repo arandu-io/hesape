@@ -217,9 +217,16 @@ func (v *Validator) getMessage(attribute, rule string) string {
 
 		key := "validation." + lowerRule
 
-		if value := line(v.translator().Get(key, nil, ""), key); value != key {
+		if value := line(v.translator().Get(key, nil, v.locale), key); value != key {
 			return value
 		}
+	}
+
+	// A rule a module declared says its sentence in the locale of the request.
+	// It comes after the language files, so an application overrides a module's
+	// wording by defining validation.<rule>.
+	if sentence, found := v.moduleLine(attribute, lowerRule); found {
+		return sentence
 	}
 
 	if fallback, found := v.getFromLocalArray(attribute, lowerRule, v.fallbackMessages); found {
@@ -231,6 +238,36 @@ func (v *Validator) getMessage(attribute, rule string) string {
 	// The last resort is the sentence the compiled rule set carries, which is
 	// the one the field is drawn with.
 	return v.messageFor(attribute, lowerRule)
+}
+
+// registryOf returns the registry whose rules this run uses: the one the
+// Validator was given, and otherwise the one its set was compiled against.
+func (v *Validator) registryOf() *Registry {
+	if v.registry != nil {
+		return v.registry
+	}
+	if v.initialRules != nil {
+		return v.initialRules.registry
+	}
+	return nil
+}
+
+// moduleLine returns the sentence a rule a module declared says in this run's
+// locale.
+func (v *Validator) moduleLine(attribute, rule string) (string, bool) {
+	f, declared := v.set.byName[attribute]
+	if !declared {
+		return "", false
+	}
+	r := f.rule(rule)
+	if r == nil {
+		return "", false
+	}
+	locale := v.locale
+	if defaulted, ok := v.trans.(interface{ DefaultLocale() string }); ok && locale == "" {
+		locale = defaulted.DefaultLocale()
+	}
+	return v.registryOf().line(r.spec, locale)
 }
 
 // getInlineMessage returns the message the caller passed to the validator, with
@@ -298,7 +335,7 @@ func (v *Validator) getFromLocalArray(attribute, lowerRule string, source map[st
 // under validation.custom, and answering with the last key when it holds none.
 func (v *Validator) getCustomMessageFromTranslator(keys []string) string {
 	for _, key := range keys {
-		if message := line(v.translator().Get(key, nil, ""), key); message != key {
+		if message := line(v.translator().Get(key, nil, v.locale), key); message != key {
 			return message
 		}
 
@@ -307,7 +344,7 @@ func (v *Validator) getCustomMessageFromTranslator(keys []string) string {
 		// for the given key. Otherwise, we will simply return the key back out.
 		shortKey := strings.TrimPrefix(key, "validation.custom.")
 
-		custom, _ := v.translator().Get("validation.custom", nil, "").(map[string]any)
+		custom, _ := v.translator().Get("validation.custom", nil, v.locale).(map[string]any)
 
 		if message := v.getWildcardCustomMessages(arr.Dot(custom), shortKey, key); message != key {
 			return message
@@ -337,7 +374,7 @@ func (v *Validator) getWildcardCustomMessages(messages map[string]any, search, d
 func (v *Validator) getSizeMessage(attribute, rule string) string {
 	key := "validation." + str.Snake(rule, "_") + "." + v.attributeTypeFor(attribute, rule)
 
-	return line(v.translator().Get(key, nil, ""), key)
+	return line(v.translator().Get(key, nil, v.locale), key)
 }
 
 // attributeTypeFor is getAttributeType for the sentence one rule says. The four
@@ -385,6 +422,9 @@ func (v *Validator) MakeReplacements(message, attribute, rule string, parameters
 	lowerRule := str.Snake(rule, "_")
 
 	if replacer, registered := v.replacers[lowerRule]; registered {
+		return replacer(message, attribute, lowerRule, parameters, v)
+	}
+	if replacer, declared := v.registryOf().replacer(lowerRule); declared {
 		return replacer(message, attribute, lowerRule, parameters, v)
 	}
 	if replacer, held := replacers[lowerRule]; held {
@@ -452,7 +492,7 @@ func (v *Validator) getPrimaryAttribute(attribute string) string {
 // getAttributeFromTranslations returns the field name the validation.attributes
 // lines carry, and empty when they carry none.
 func (v *Validator) getAttributeFromTranslations(name string) string {
-	attributes, isGroup := v.translator().Get("validation.attributes", nil, "").(map[string]any)
+	attributes, isGroup := v.translator().Get("validation.attributes", nil, v.locale).(map[string]any)
 	if !isGroup {
 		return ""
 	}
@@ -565,7 +605,7 @@ func (v *Validator) GetDisplayableValue(attribute string, value any) string {
 
 	key := "validation.values." + attribute + "." + stringOf(value)
 
-	if sentence := line(v.translator().Get(key, nil, ""), key); sentence != key {
+	if sentence := line(v.translator().Get(key, nil, v.locale), key); sentence != key {
 		return sentence
 	}
 
