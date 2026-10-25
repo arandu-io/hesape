@@ -331,6 +331,18 @@
 		items[to].focus();
 	});
 
+	/* htmx keeps a snapshot of the page as a string before it leaves it, and a
+	 * panel placed with style.left is `style="left: …"` in that string -- which
+	 * the policy refuses when the snapshot is parsed again. The menus are shut
+	 * and the placement taken off before the page is saved. */
+	document.addEventListener('htmx:beforeHistorySave', function () {
+		each(document, 'details[data-menu]', function (menu) {
+			menu.open = false;
+			var panel = menuPanel(menu);
+			if (panel) panel.removeAttribute('style');
+		});
+	});
+
 	/* A menu follows its button, and the page under it can move: scrolling or
 	 * resizing closes it, which is what a popover that is not tied to its
 	 * button does. Scrolling inside the panel is not a move. */
@@ -532,13 +544,20 @@
 	/* The address bar says what the server says is on screen. The form
 	 * serialises its fields as they are -- an empty search, the size even when
 	 * it is the default -- and the server's canonical address leaves those out.
-	 * Replacing the entry htmx just pushed keeps one entry per step. */
+	 * Replacing the entry htmx just pushed keeps one entry per step. Only an
+	 * entry htmx pushed is replaced: a control that forgot to ask for a push
+	 * must not have its missing history written over the page's own. */
+	document.addEventListener('htmx:pushedIntoHistory', function () {
+		Object.keys(tableCarried).forEach(function (id) { tableCarried[id].pushed = true; });
+	});
+
 	document.addEventListener('htmx:afterSettle', function () {
 		Object.keys(tableCarried).forEach(function (id) {
 			var root = document.getElementById(id);
+			var pushed = tableCarried[id].pushed;
 			delete tableCarried[id];
 			delete tableSwapping[id];
-			if (!root || !window.history || !history.replaceState) return;
+			if (!pushed || !root || !window.history || !history.replaceState) return;
 			var canonical = root.getAttribute('data-url');
 			if (!canonical) return;
 			var now = location.pathname + location.search;
