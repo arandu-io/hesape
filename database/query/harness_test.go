@@ -147,7 +147,9 @@ func (g *fakeGrammar) CompileSelect(q *query.Builder) string {
 	sql := "select " + g.Columnize(columns) + " from " + g.WrapTable(q.GetFrom())
 	sql += g.compileJoins(q)
 	sql += g.compileWheres(q)
-
+	if len(q.Groups) > 0 {
+		sql += " group by " + g.Columnize(q.Groups)
+	}
 	if len(q.Orders) > 0 {
 		parts := make([]string, 0, len(q.Orders))
 		for _, order := range q.Orders {
