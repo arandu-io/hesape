@@ -88,7 +88,7 @@ func TestEachBuilderRendersItsRuleString(t *testing.T) {
 func TestEveryBuilderRendersSomethingTheCompilerAccepts(t *testing.T) {
 	// The point of a builder is that it cannot misspell a rule. This is what
 	// proves it: each chain goes through the same boot check a typed one does.
-	chains := map[string]string{
+	chains := Rules{
 		"role":    NewIn("admin", "editor").String(),
 		"banned":  NewNotIn("root").String(),
 		"price":   NewNumeric().Min(0).Max(1000).String(),

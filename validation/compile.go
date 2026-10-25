@@ -19,20 +19,27 @@ import (
 // Rules is the rule set of one request, keyed by the name of the form input --
 // the same name components.FieldProps.Name carries.
 //
-// A field's rules are one string, and the whole set is written in one place:
+// A field's rules are written as one string with the rules between pipes, or as
+// a list, and the whole set is written in one place:
 //
 //	var Register = validation.MustCompile(validation.Rules{
 //		"name":     "required|max:255",
-//		"email":    "required|email",
+//		"email":    []any{"required", "email", validation.NewUnique("users")},
 //		"password": "required|min:12|confirmed",
 //	})
 //
-// What a string costs is that a typo in "requried" is not a compiler error.
-// What Compile buys back is that it is a BOOT error, naming the field, the rule
-// and the file -- so a rule set that boots is a rule set whose names are all
-// real, whose regular expressions compile, whose numeric arguments are numbers
-// and whose cross-field references name fields that exist.
-type Rules map[string]string
+// The two forms mean the same thing. The list is the one that can hold a rule
+// that is not text -- a Rule, a ValidationRule, a function, a builder -- and the
+// one whose elements are never split at a pipe. See [Closure] for what a rule
+// written as a function receives, and the notes on declaration at the top of
+// declare.go for what an element may be.
+//
+// What text costs is that a typo in "requried" is not a compiler error. What
+// Compile buys back is that it is a BOOT error, naming the field, the rule and
+// the file -- so a rule set that boots is a rule set whose names are all real,
+// whose regular expressions compile, whose numeric arguments are numbers and
+// whose cross-field references name fields that exist.
+type Rules map[string]any
 
 // Messages overrides the sentence one rule puts on one field, keyed
 // "field.rule":
@@ -51,6 +58,14 @@ type Option func(*settings)
 
 type settings struct {
 	messages Messages
+	registry *Registry
+}
+
+// WithRegistry compiles a rule set against the rules a registry declares as well
+// as the catalogue, which is how a rule set names a rule a module added. The
+// Factory does it for the sets it compiles.
+func WithRegistry(r *Registry) Option {
+	return func(s *settings) { s.registry = r }
 }
 
 // WithMessageOverrides replaces the default sentence for the named field and
@@ -161,8 +176,11 @@ func compile(r Rules, file string, line int, opts []Option) (*Set, error) {
 		messages: cfg.messages,
 		file:     file,
 		line:     line,
+		registry: cfg.registry,
+		source:   r,
+		opts:     opts,
 	}
-	c := &compiler{set: s, file: file, line: line}
+	c := &compiler{set: s, file: file, line: line, registry: cfg.registry}
 
 	// Fields in sorted order and rules in written order, so the failures come
 	// out the same way on every run and a golden file does not churn.
@@ -194,10 +212,11 @@ func compile(r Rules, file string, line int, opts []Option) (*Set, error) {
 }
 
 type compiler struct {
-	set  *Set
-	file string
-	line int
-	errs CompileErrors
+	set      *Set
+	file     string
+	line     int
+	errs     CompileErrors
+	registry *Registry
 }
 
 func (c *compiler) fail(f *field, ruleName, format string, args ...any) {
@@ -210,56 +229,118 @@ func (c *compiler) fail(f *field, ruleName, format string, args ...any) {
 	})
 }
 
-// parse turns one chain into rules, reporting the failures that are visible
-// from the text alone: an unknown or refused name, a name that is not lowercase,
-// a wrong number of arguments, a malformed list, a rule written twice.
-func (c *compiler) parse(name, chain string) *field {
+// parse turns what was written against one field into rules, reporting the
+// failures that are visible from the declaration alone: an unknown or refused
+// name, a name that is not lowercase, a wrong number of arguments, a malformed
+// list, a rule written twice, a value that is not a rule at all.
+func (c *compiler) parse(name string, decl any) *field {
 	f := &field{name: name}
 	if strings.TrimSpace(name) == "" {
 		c.fail(f, "", "a rule set cannot key a chain on an empty name")
 		return f
 	}
-	if strings.TrimSpace(chain) == "" {
+
+	items, err := declaredRules(decl)
+	if err != nil {
+		c.fail(f, "", "%s", err)
+		return f
+	}
+	if len(items) == 0 {
 		c.fail(f, "", "has no rules -- remove the entry, or give it one")
 		return f
 	}
 
 	seen := make(map[string]bool)
-	for _, segment := range splitChain(chain) {
-		ruleName, rest, hasArgs := strings.Cut(segment, ":")
-		ruleName = strings.TrimSpace(ruleName)
-
-		sp, ok := specs[ruleName]
-		if !ok {
-			c.reject(f, ruleName)
+	for _, item := range items {
+		if item.object != nil {
+			c.addObject(f, item.object)
 			continue
 		}
-		if seen[ruleName] {
-			c.fail(f, ruleName, "rule %q is written twice -- the second says nothing the first does not", ruleName)
-			continue
-		}
-		seen[ruleName] = true
-
-		args, err := parseArgs(ruleName, rest, hasArgs)
-		if err != nil {
-			c.fail(f, ruleName, "rule %q has a malformed argument list: %s", ruleName, err)
-			continue
-		}
-		if hasArgs && sp.maxArgs == 0 {
-			c.fail(f, ruleName, "rule %q takes no argument, got %q", ruleName, rest)
-			continue
-		}
-		if len(args) < sp.minArgs {
-			c.fail(f, ruleName, "rule %q needs %s, got %d", ruleName, str.PluralN(sp.minArgs, "argument"), len(args))
-			continue
-		}
-		if sp.maxArgs > 0 && len(args) > sp.maxArgs {
-			c.fail(f, ruleName, "rule %q takes at most %s, got %d", ruleName, str.PluralN(sp.maxArgs, "argument"), len(args))
-			continue
-		}
-		f.rules = append(f.rules, &rule{name: ruleName, args: args, spec: sp})
+		c.addText(f, item.text, seen)
 	}
 	return f
+}
+
+// addText adds a rule written as text: a name, and the arguments after a colon.
+func (c *compiler) addText(f *field, segment string, seen map[string]bool) {
+	if r, ok := c.textRule(f, segment, seen); ok {
+		f.rules = append(f.rules, r)
+	}
+}
+
+// textRule reads one rule written as text, reporting what is wrong with it.
+func (c *compiler) textRule(f *field, segment string, seen map[string]bool) (*rule, bool) {
+	ruleName, rest, hasArgs := strings.Cut(segment, ":")
+	ruleName = strings.TrimSpace(ruleName)
+
+	sp, ok := c.lookup(ruleName)
+	if !ok {
+		c.reject(f, ruleName)
+		return nil, false
+	}
+	if seen[ruleName] {
+		c.fail(f, ruleName, "rule %q is written twice -- the second says nothing the first does not", ruleName)
+		return nil, false
+	}
+	seen[ruleName] = true
+
+	args, err := parseArgs(ruleName, rest, hasArgs)
+	if err != nil {
+		c.fail(f, ruleName, "rule %q has a malformed argument list: %s", ruleName, err)
+		return nil, false
+	}
+	if hasArgs && sp.maxArgs == 0 {
+		c.fail(f, ruleName, "rule %q takes no argument, got %q", ruleName, rest)
+		return nil, false
+	}
+	if len(args) < sp.minArgs {
+		c.fail(f, ruleName, "rule %q needs %s, got %d", ruleName, str.PluralN(sp.minArgs, "argument"), len(args))
+		return nil, false
+	}
+	if sp.maxArgs > 0 && len(args) > sp.maxArgs {
+		c.fail(f, ruleName, "rule %q takes at most %s, got %d", ruleName, str.PluralN(sp.maxArgs, "argument"), len(args))
+		return nil, false
+	}
+	return &rule{name: ruleName, args: args, spec: sp}, true
+}
+
+// lookup finds a rule by name: the catalogue, and then the rules a registry adds.
+func (c *compiler) lookup(name string) (*spec, bool) {
+	if sp, ok := specs[name]; ok {
+		return sp, true
+	}
+	if c.registry != nil {
+		return c.registry.spec(name)
+	}
+	return nil, false
+}
+
+// objectSpec is the part of a spec a rule object has: it is implicit when it
+// says so, and its sentence is the one it gives when it fails.
+func objectSpec(implicit bool) *spec {
+	return &spec{
+		implicit: implicit,
+		message:  func(*field, *rule) string { return "is not valid" },
+	}
+}
+
+// addObject adds a rule that is an object to the field.
+func (c *compiler) addObject(f *field, object any) {
+	switch o := object.(type) {
+	case *ConditionalRules:
+		c.addConditional(f, o)
+		return
+	case *NestedRules:
+		c.addNested(f, o)
+		return
+	}
+
+	built, err := newObjectRule(object)
+	if err != nil {
+		c.fail(f, "", "%s", err)
+		return
+	}
+	f.rules = append(f.rules, &rule{name: built.name, spec: objectSpec(built.implicit), object: built})
 }
 
 // reject answers a name that is not in the catalogue: a rule this package
@@ -270,13 +351,18 @@ func (c *compiler) reject(f *field, name string) {
 		c.fail(f, name, "rule %q %s", name, because)
 		return
 	}
+	if strings.Contains(name, "|") {
+		c.fail(f, name, "rule %q holds a pipe, and a list holds one rule per element -- split it into "+
+			"elements, or write the rules as one string", name)
+		return
+	}
 	if lower := strings.ToLower(name); lower != name {
-		if _, known := specs[lower]; known {
+		if _, known := c.lookup(lower); known {
 			c.fail(f, name, "rule %q is not spelled that way -- rules are lowercase: %q", name, lower)
 			return
 		}
 	}
-	if near := suggest(name); near != "" {
+	if near := c.suggest(name); near != "" {
 		c.fail(f, name, "unknown rule %q -- did you mean %s?", name, near)
 		return
 	}
@@ -287,11 +373,16 @@ func (c *compiler) reject(f *field, name string) {
 // `max:100` on it mean a hundred kilobytes.
 var fileRules = []string{"file", "image", "mimes", "mimetypes", "extensions", "dimensions"}
 
-// flags reads the properties of a field that its own rules decide: whether a
-// size is measured in characters, in kilobytes or by value, whether the field
-// is optional or nullable, where it stops, and what layout its dates are
+// flags reads the properties of a field that its own rules decide.
+func (c *compiler) flags(f *field) { computeFlags(f) }
+
+// computeFlags reads the properties of a field that its own rules decide:
+// whether a size is measured in characters, in kilobytes or by value, whether the
+// field is optional or nullable, where it stops, and what layout its dates are
 // written in.
-func (c *compiler) flags(f *field) {
+func computeFlags(f *field) {
+	f.bail, f.sometimes, f.nullable, f.numeric, f.file, f.hasImplicit, f.layout =
+		false, false, false, false, false, false, ""
 	for _, r := range f.rules {
 		switch {
 		case r.name == "bail":
@@ -319,40 +410,52 @@ func (c *compiler) flags(f *field) {
 
 func (c *compiler) checkField(f *field) {
 	for _, r := range f.rules {
-		for _, i := range r.spec.refs {
-			if i >= len(r.args) {
-				continue
+		c.checkRule(f, r)
+		if r.dynamic != nil {
+			for _, branch := range slices.Concat(r.dynamic.then, r.dynamic.otherwise) {
+				c.checkRule(f, branch)
 			}
-			if _, declared := c.set.byName[r.args[i]]; declared {
-				continue
-			}
-			if strings.Contains(r.args[i], "*") {
-				// A path with a wildcard names a field of every member of a list,
-				// and the members are the request's to send: there is no
-				// declared name to compare it with at boot.
-				continue
-			}
-			if _, isNumber := number(r.args[i]); isNumber && comparisons[r.name] {
-				// gt:10 is a literal bound: the parameter is a number and no
-				// field of that name is declared, which is the fork the rule
-				// itself makes. Not a failure.
-				continue
-			}
-			// The check that pays for itself: `confirmed` against a field name
-			// that does not exist is the most common silent pass there is. The
-			// rule compares against the empty string for ever and nothing
-			// anywhere says so.
-			c.fail(f, r.name, "rule %q points at %q, which this rule set does not declare",
-				r.name, r.args[i])
-		}
-		if r.spec.check == nil {
-			continue
-		}
-		if err := r.spec.check(&checkCtx{set: c.set, f: f, r: r}); err != nil {
-			c.fail(f, r.name, "%s", err)
 		}
 	}
 	c.checkCombinations(f)
+}
+
+// checkRule runs the checks that need the whole set: that a cross-field
+// reference names a field it declares, and the check the rule carries for its
+// own arguments.
+func (c *compiler) checkRule(f *field, r *rule) {
+	for _, i := range r.spec.refs {
+		if i >= len(r.args) {
+			continue
+		}
+		if _, declared := c.set.byName[r.args[i]]; declared {
+			continue
+		}
+		if strings.Contains(r.args[i], "*") {
+			// A path with a wildcard names a field of every member of a list,
+			// and the members are the request's to send: there is no declared
+			// name to compare it with at boot.
+			continue
+		}
+		if _, isNumber := number(r.args[i]); isNumber && comparisons[r.name] {
+			// gt:10 is a literal bound: the parameter is a number and no field
+			// of that name is declared, which is the fork the rule itself makes.
+			// Not a failure.
+			continue
+		}
+		// The check that pays for itself: `confirmed` against a field name that
+		// does not exist is the most common silent pass there is. The rule
+		// compares against the empty string for ever and nothing anywhere says
+		// so.
+		c.fail(f, r.name, "rule %q points at %q, which this rule set does not declare",
+			r.name, r.args[i])
+	}
+	if r.spec.check == nil {
+		return
+	}
+	if err := r.spec.check(&checkCtx{set: c.set, f: f, r: r}); err != nil {
+		c.fail(f, r.name, "%s", err)
+	}
 }
 
 // comparisons are the four rules whose argument is a field name and could be
@@ -812,14 +915,18 @@ func checkMoment(c *checkCtx) error {
 // "regex" would be offered for the same mistake. Edit distance answers the
 // question actually being asked -- "requried" is two edits from "required" and
 // nothing else is close.
-func suggest(name string) string {
+func (c *compiler) suggest(name string) string {
 	if name == "" {
 		return ""
 	}
 	limit := min(3, max(1, len(name)/2))
 	best := limit + 1
 	var near []string
-	for candidate := range specs {
+	candidates := slices.Collect(maps.Keys(specs))
+	if c.registry != nil {
+		candidates = append(candidates, c.registry.Names()...)
+	}
+	for _, candidate := range candidates {
 		d := distance(name, candidate)
 		switch {
 		case d < best:

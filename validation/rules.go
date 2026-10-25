@@ -54,6 +54,10 @@ type spec struct {
 	// eval answers whether the value passes. It never allocates a message.
 	eval evaluator
 
+	// lines is the sentence the rule says in each locale, for a rule a module
+	// declared; a rule of the catalogue says its sentence in the language files.
+	lines map[string]string
+
 	// message is the sentence a failure puts on the field. It is written to
 	// read after a humanised field name and to be drawn without one -- see
 	// Page.ErrorSummary and components.Field.

@@ -59,6 +59,8 @@ type Validator struct {
 	// trans is the catalogue. A nil one leaves the short sentences the compiled
 	// rule set carries: see getMessage.
 	trans                       Translator
+	locale                      string
+	registry                    *Registry
 	customMessages              map[string]any
 	fallbackMessages            map[string]any
 	customAttributes            map[string]string
@@ -108,6 +110,19 @@ func WithPresence(g auth.Grant, p PresenceVerifier) ValidatorOption {
 	return func(v *Validator) { v.grant, v.presence = g, p }
 }
 
+// WithRegistryOf gives the Validator the registry of the rules a module declared,
+// which is where it finds how such a rule fills the placeholders of its sentence.
+// A Validator over a set compiled against a registry finds it without this.
+func WithRegistryOf(r *Registry) ValidatorOption {
+	return func(v *Validator) { v.registry = r }
+}
+
+// WithLocale sets the locale the Validator asks its translator for: the locale of
+// the request. Without it the translator answers in its own.
+func WithLocale(locale string) ValidatorOption {
+	return func(v *Validator) { v.locale = locale }
+}
+
 // WithCurrentPassword gives `current_password` its checker.
 func WithCurrentPassword(c CurrentPasswordChecker) ValidatorOption {
 	return func(v *Validator) { v.passwords = c }
@@ -147,12 +162,16 @@ func Make(data Data, rules *Set, opts ...ValidatorOption) *Validator {
 // A set with no wildcard in it is kept as it is, pointer and all: it is shared
 // by every request, and a set nobody has to expand must not be copied per
 // request either.
-func (v *Validator) explodeRules(rules *Set) {
-	v.initialRules = rules
+func (v *Validator) explodeRules(declared *Set) {
+	v.initialRules = declared
 	v.implicitAttributes = map[string][]string{}
 
+	// The conditions are answered for this request first, so that the rules a
+	// field is left with are the ones its wildcards are expanded with.
+	rules := declared.settle(v.data)
+
 	if !slices.ContainsFunc(rules.fields, func(f *field) bool { return strings.Contains(f.name, "*") }) {
-		v.set = rules
+		v.set = v.settleNested(rules)
 		return
 	}
 
@@ -181,7 +200,8 @@ func (v *Validator) explodeRules(rules *Set) {
 			v.implicitAttributes[f.name] = append(v.implicitAttributes[f.name], key)
 		}
 	}
-	v.set = expanded
+	expanded.registry, expanded.source = rules.registry, rules.source
+	v.set = v.settleNested(expanded)
 }
 
 // dependentRules are the rules whose parameters name OTHER FIELDS rather than
@@ -298,6 +318,11 @@ func (v *Validator) validateAttribute(f *field, r *rule) {
 	}
 
 	if !v.isValidatable(f, r, value) {
+		return
+	}
+
+	if r.object != nil {
+		v.runObject(f, r, value)
 		return
 	}
 
@@ -447,7 +472,35 @@ func (v *Validator) ShouldStopValidating(attribute string) bool {
 			return true
 		}
 	}
+	for _, r := range f.rules {
+		if r.object != nil && r.spec.implicit && slices.Contains(v.failed[attribute], r.name) {
+			return true
+		}
+	}
 	return false
+}
+
+// runObject asks a rule that is an object whether the value passes, and puts
+// what it says on the attribute.
+func (v *Validator) runObject(f *field, r *rule, value any) {
+	messages := r.object.run(v, f.name, value)
+	if len(messages) == 0 {
+		return
+	}
+	if v.messages == nil {
+		v.messages = Errors{}
+	}
+	custom, overridden := v.set.messages[f.name+"."+r.name]
+	if !overridden && f.primary != "" {
+		custom, overridden = v.set.messages[f.primary+"."+r.name]
+	}
+	if overridden {
+		messages = []string{custom}
+	}
+	for _, message := range messages {
+		v.messages.Add(f.name, v.MakeReplacements(message, f.name, "", nil))
+	}
+	v.failed[f.name] = append(v.failed[f.name], r.name)
 }
 
 // AddFailure records that one rule refused one attribute.

@@ -149,6 +149,9 @@ func (r *ClosureValidationRule) Message() []string { return r.messages }
 // given as its fourth argument.
 func (r *ClosureValidationRule) SetValidator(validator *Validator) { r.validator = validator }
 
+// Fresh returns a rule over the same callback that holds no run.
+func (r *ClosureValidationRule) Fresh() Rule { return NewClosureValidationRule(r.Callback) }
+
 // ---------------------------------------------------------------------------
 // A ValidationRule read as a Rule.
 // ---------------------------------------------------------------------------
@@ -217,3 +220,6 @@ func (r *InvokableValidationRule) SetData(data Data) { r.data = data }
 
 // SetValidator hands the wrapper the validator running it.
 func (r *InvokableValidationRule) SetValidator(validator *Validator) { r.validator = validator }
+
+// Fresh returns a wrapper over the same rule that holds no run.
+func (r *InvokableValidationRule) Fresh() Rule { return NewInvokableValidationRule(r.invokable) }

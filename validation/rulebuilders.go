@@ -958,6 +958,13 @@ func (p *Password) SetValidator(validator *Validator) { p.validator = validator 
 // SetData hands the rule the data being validated.
 func (p *Password) SetData(data Data) { p.data = data }
 
+// Fresh returns a copy of the policy that holds no run.
+func (p *Password) Fresh() Rule {
+	c := *p
+	c.validator, c.data, c.messages = nil, nil, nil
+	return &c
+}
+
 // Passes reports whether the value satisfies the policy, and Message says what
 // failed when it does not.
 //
@@ -1140,6 +1147,23 @@ func NewEnum(cases ...string) *Enum { return &Enum{cases: cases} }
 // function, the one place that knows the declaration order.
 func EnumOf[E enum.Enum](values ...E) *Enum { return &Enum{cases: enum.Names(values...)} }
 
+// EnumFrom returns an Enum over the cases of a generated enum type, given the
+// function the generator wrote to list them.
+//
+//	validation.EnumFrom(enums.InvoiceStatusValues)
+//
+// The type is the single source of the cases: nothing is written beside it, and
+// a case added to the type is a case the rule accepts. The list is read once,
+// when the rule is built.
+func EnumFrom[E enum.Enum](values func() []E) *Enum { return EnumOf(values()...) }
+
+// Fresh returns a copy of the rule that holds no run.
+func (r *Enum) Fresh() Rule {
+	c := *r
+	c.validator = nil
+	return &c
+}
+
 // Only narrows the cases to these, and nothing else passes.
 func (r *Enum) Only(values ...string) *Enum {
 	r.only = values
@@ -1250,6 +1274,13 @@ func (r *Can) Message() []string {
 // and the translator come from.
 func (r *Can) SetValidator(validator *Validator) { r.validator = validator }
 
+// Fresh returns a copy of the rule that holds no run.
+func (r *Can) Fresh() Rule {
+	c := *r
+	c.validator = nil
+	return &c
+}
+
 // AnyOf is the rule that the value passes when it passes any one of the given
 // rule sets. Build one with NewAnyOf.
 type AnyOf struct {
@@ -1290,6 +1321,13 @@ func (r *AnyOf) Message() []string {
 // and the translator come from.
 func (r *AnyOf) SetValidator(validator *Validator) { r.validator = validator }
 
+// Fresh returns a copy of the rule that holds no run.
+func (r *AnyOf) Fresh() Rule {
+	c := *r
+	c.validator = nil
+	return &c
+}
+
 // translatedOr reads the line out of the translator, falling back to the English
 // sentence when there is no translator or no line under the key.
 func translatedOr(v *Validator, key, fallback string) string {
@@ -1317,20 +1355,20 @@ func containsString(list []string, value string) bool {
 
 // When returns the rules an attribute gets when a condition holds, and the ones
 // it gets when it does not.
-func When(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
+func When(condition func(Data) bool, rules any, defaultRules ...any) *ConditionalRules {
 	return NewConditionalRules(condition, rules, defaultRules...)
 }
 
 // Unless is When with the condition turned around.
-func Unless(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
+func Unless(condition func(Data) bool, rules any, defaultRules ...any) *ConditionalRules {
 	return NewConditionalRules(func(data Data) bool {
 		return condition == nil || !condition(data)
 	}, rules, defaultRules...)
 }
 
 // ForEach returns rules for one member of an array, decided by looking at that
-// member.
-func ForEach(callback func(value any, attribute string, data Data) Rules) *NestedRules {
+// member. See [NewNestedRules] for what the callback answers.
+func ForEach(callback func(value any, attribute string, data Data) any) *NestedRules {
 	return NewNestedRules(callback)
 }
 

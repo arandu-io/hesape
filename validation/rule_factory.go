@@ -38,11 +38,11 @@ func (RuleFactory) Numeric() *Numeric { return NewNumeric() }
 // Dimensions builds a `dimensions` rule.
 func (RuleFactory) Dimensions() *Dimensions { return NewDimensions() }
 
-// Enum builds an `enum` rule.
+// Enum builds an `enum` rule over cases written as text.
 //
-// Go has no enum type to read the cases off, so they are given: a Go program
-// spells an enum as a named string type with a list of values, and that list is
-// what this takes.
+// A generated enum type lists its own cases, and EnumFrom reads them off it:
+// prefer that wherever the type exists, because a list written beside a type is
+// a second copy that disagrees with it the first time a case is added.
 func (RuleFactory) Enum(cases ...string) *Enum { return NewEnum(cases...) }
 
 // Exists builds an `exists` rule.

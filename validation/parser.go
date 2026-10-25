@@ -68,19 +68,36 @@ func (p *ValidationRuleParser) Explode(rules Rules) *ExplodedRules {
 	exploded := &ExplodedRules{Rules: map[string][]string{}}
 
 	for _, attribute := range slices.Sorted(maps.Keys(rules)) {
+		written := chainsOf(rules[attribute])
 		if !strings.Contains(attribute, "*") {
-			p.mergeInto(exploded, attribute, splitChain(rules[attribute]))
+			p.mergeInto(exploded, attribute, written)
 			continue
 		}
 		for _, key := range p.explodeWildcardRules(attribute) {
 			p.ImplicitAttributes[attribute] = append(p.ImplicitAttributes[attribute], key)
-			p.mergeInto(exploded, key, splitChain(rules[attribute]))
+			p.mergeInto(exploded, key, written)
 		}
 	}
 
 	exploded.ImplicitAttributes = p.ImplicitAttributes
 
 	return exploded
+}
+
+// chainsOf reads the rules written as text out of what was written against a
+// field. A rule that is an object has no text, and is not in the result.
+func chainsOf(decl any) []string {
+	items, err := declaredRules(decl)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, item := range items {
+		if item.object == nil {
+			out = append(out, item.text)
+		}
+	}
+	return out
 }
 
 func (p *ValidationRuleParser) mergeInto(exploded *ExplodedRules, attribute string, rules []string) {
@@ -111,18 +128,18 @@ func (p *ValidationRuleParser) explodeWildcardRules(attribute string) []string {
 	return keys
 }
 
-// MergeRules adds more rules to an attribute that may already have some.
-func (p *ValidationRuleParser) MergeRules(results Rules, attribute, rules string) Rules {
+// MergeRules adds more rules to an attribute that may already have some. The
+// result is a list, so a rule that is an object survives the merge.
+func (p *ValidationRuleParser) MergeRules(results Rules, attribute string, rules any) Rules {
 	if results == nil {
 		results = Rules{}
 	}
-	if existing, held := results[attribute]; held && existing != "" && rules != "" {
-		results[attribute] = existing + "|" + rules
+	existing, _ := declaredRules(results[attribute])
+	added, _ := declaredRules(rules)
+	if len(existing)+len(added) == 0 {
 		return results
 	}
-	if rules != "" {
-		results[attribute] = rules
-	}
+	results[attribute] = writtenAs(append(existing, added...))
 	return results
 }
 
@@ -155,93 +172,6 @@ func normalizeRule(rule string) string {
 		return "boolean"
 	}
 	return rule
-}
-
-// FilterConditionalRules replaces every ConditionalRules in the set with the
-// rules its condition chose.
-func FilterConditionalRules(rules map[string]any, data Data) Rules {
-	out := Rules{}
-
-	for attribute, written := range rules {
-		switch typed := written.(type) {
-		case string:
-			out[attribute] = typed
-		case *ConditionalRules:
-			if typed.Passes(data) {
-				out[attribute] = strings.Join(typed.Rules(data), "|")
-				continue
-			}
-			out[attribute] = strings.Join(typed.DefaultRules(data), "|")
-		case []string:
-			out[attribute] = strings.Join(typed, "|")
-		}
-	}
-
-	return out
-}
-
-// ---------------------------------------------------------------------------
-// Rules chosen by a condition.
-// ---------------------------------------------------------------------------
-
-// ConditionalRules is the rules an attribute gets when a condition holds, and
-// the ones it gets when it does not.
-type ConditionalRules struct {
-	// condition is asked of the whole request. A caller holding a bool wraps it
-	// in a func that ignores its argument.
-	condition func(Data) bool
-
-	rules        []string
-	defaultRules []string
-}
-
-// NewConditionalRules returns rules chosen by the condition: rules when it
-// holds, and defaultRules when it does not.
-func NewConditionalRules(condition func(Data) bool, rules string, defaultRules ...string) *ConditionalRules {
-	c := &ConditionalRules{condition: condition, rules: splitChain(rules)}
-	if len(defaultRules) > 0 && defaultRules[0] != "" {
-		c.defaultRules = splitChain(defaultRules[0])
-	}
-	return c
-}
-
-// Passes reports whether the condition holds for this request. A nil condition
-// does not hold.
-func (c *ConditionalRules) Passes(data Data) bool {
-	if c.condition == nil {
-		return false
-	}
-	return c.condition(data)
-}
-
-// Rules returns the rules used when the condition holds.
-func (c *ConditionalRules) Rules(data Data) []string { return c.rules }
-
-// DefaultRules returns the rules used when the condition does not hold.
-func (c *ConditionalRules) DefaultRules(data Data) []string { return c.defaultRules }
-
-// ---------------------------------------------------------------------------
-// Rules decided per member of an array.
-// ---------------------------------------------------------------------------
-
-// NestedRules is the rules for one member of an array, decided by looking at
-// that member. Build one with NewNestedRules.
-type NestedRules struct {
-	callback func(value any, attribute string, data Data) Rules
-}
-
-// NewNestedRules returns rules the callback decides, member by member.
-func NewNestedRules(callback func(value any, attribute string, data Data) Rules) *NestedRules {
-	return &NestedRules{callback: callback}
-}
-
-// Compile asks the callback what this member's rules are, and expands them. A
-// nil callback compiles to nothing.
-func (n *NestedRules) Compile(attribute string, value any, data Data) *ExplodedRules {
-	if n.callback == nil {
-		return &ExplodedRules{Rules: map[string][]string{}, ImplicitAttributes: map[string][]string{}}
-	}
-	return NewValidationRuleParser(data).Explode(n.callback(value, attribute, data))
 }
 
 // ---------------------------------------------------------------------------

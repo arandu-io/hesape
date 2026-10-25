@@ -19,6 +19,15 @@ type Set struct {
 	messages Messages
 	file     string
 	line     int
+
+	// registry is the registry the set was compiled against. A run reads the
+	// replacers of the rules it declares from it.
+	registry *Registry
+
+	// source is the rules the set was compiled from, kept so that the set can be
+	// compiled again against another registry.
+	source Rules
+	opts   []Option
 }
 
 // field is one input and the rules written against it, in the order written.
@@ -59,6 +68,14 @@ type rule struct {
 	name string
 	args []string
 	spec *spec
+
+	// object is set for a rule that is not a name in the catalogue: a Rule, a
+	// ValidationRule or a function. Its spec holds only what the compiler asks of
+	// every rule.
+	object *objectRule
+
+	// dynamic is set for a rule decided by looking at the request.
+	dynamic *dynamicRule
 
 	// re is the compiled pattern of regex/not_regex, and nums the parsed
 	// numeric arguments. Both are filled at boot, so a request parses nothing.

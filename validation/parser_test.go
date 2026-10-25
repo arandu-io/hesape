@@ -129,8 +129,8 @@ func TestFilterConditionalRulesPicksTheBranchTheConditionChose(t *testing.T) {
 }
 
 func TestForEachCompilesTheRulesOneMemberNeeds(t *testing.T) {
-	nested := ForEach(func(value any, attribute string, data Data) Rules {
-		return Rules{attribute: "required|numeric"}
+	nested := ForEach(func(value any, attribute string, data Data) any {
+		return "required|numeric"
 	})
 
 	exploded := nested.Compile("items.0.price", "10", Data{})
