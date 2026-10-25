@@ -68,14 +68,25 @@ import (
 // Which representation is Context.WantsJSON's answer, which is also the
 // exception handler's default rule for a failure that never reached an action.
 //
+// The Factory the application validates through, when it is given with
+// WithValidator, is put on the request the same way: Bind and Request.Validate
+// read it from there, with the locale of the request.
+//
 // The flash is put on the request before the action runs, so an action whose
 // form worked says so with Context.With and redirects: the sentence travels in
 // the same cookie, under the same key, as the messages of a form that did not.
-func NewAdapter(render Renderer, urls URLGenerator, flash *session.Flash) func(func(*Context) error) stdhttp.Handler {
+func NewAdapter(render Renderer, urls URLGenerator, flash *session.Flash, options ...AdapterOption) func(func(*Context) error) stdhttp.Handler {
+	var settings adapterSettings
+	for _, option := range options {
+		option(&settings)
+	}
 	return func(action func(*Context) error) stdhttp.Handler {
 		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, req *stdhttp.Request) {
 			if flash != nil {
 				req = req.WithContext(WithFlash(req.Context(), flash))
+			}
+			if settings.validation != nil {
+				req = req.WithContext(WithValidation(req.Context(), settings.validation))
 			}
 			ctx := NewContext(w, req, render, urls)
 			err := action(ctx)

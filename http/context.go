@@ -10,6 +10,7 @@ import (
 	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/log"
 	"github.com/arandu-io/hesape/toon"
+	"github.com/arandu-io/hesape/validation"
 )
 
 // Context is what a controller action receives.
@@ -34,6 +35,9 @@ type Context struct {
 	// input is the Request that Input and Bind read through, made on first use
 	// so that a JSON body is decoded once and both read the same map.
 	input *Request
+
+	// validated is what the rules of a bound request let through.
+	validated validation.Input
 
 	// messages is what With has flashed on this response so far, kept so a
 	// second call adds to the first instead of replacing it. A pointer, so

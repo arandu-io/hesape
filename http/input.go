@@ -678,7 +678,18 @@ func (r *Request) Validate(rules *validation.Set, opts ...validation.ValidatorOp
 	if r.tooLarge != nil {
 		return validation.Input{}, r.tooLarge
 	}
-	return validation.Make(data, rules, opts...).Validate()
+	return r.validator(data, rules, opts).Validate()
+}
+
+// validator builds the Validator for a run over this request: through the
+// application's Factory when it wired one or a translator, with the locale of the
+// request, and otherwise as a bare Validator, which says the short sentences.
+func (r *Request) validator(data validation.Data, rules *validation.Set, opts []validation.ValidatorOption) *validation.Validator {
+	ctx := r.request.Context()
+	if !configured(ctx) {
+		return validation.Make(data, rules, opts...)
+	}
+	return factoryFor(ctx).Make(data, rules, append(validationOptions(ctx), opts...)...)
 }
 
 // ValidateWithBag is Validate with the failures named, so that two forms on
@@ -688,7 +699,7 @@ func (r *Request) ValidateWithBag(bag string, rules *validation.Set, opts ...val
 	if r.tooLarge != nil {
 		return validation.Input{}, r.tooLarge
 	}
-	return validation.Make(data, rules, opts...).ValidateWithBag(bag)
+	return r.validator(data, rules, opts).ValidateWithBag(bag)
 }
 
 // validationData builds the validation.Data from the request's input. Public

@@ -214,6 +214,14 @@ func snakeName(name string) string {
 	return b.String()
 }
 
+// prototype returns an instance of the rule that can be looked at but not run.
+func (o *objectRule) prototype() Rule {
+	if o.fresh != nil {
+		return o.fresh()
+	}
+	return o.shared
+}
+
 // run asks the object whether the value passes, and returns the sentences it
 // says when it does not. A nil result is a pass.
 func (o *objectRule) run(v *Validator, attribute string, value any) []string {

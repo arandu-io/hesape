@@ -1226,6 +1226,17 @@ func (r *Enum) isDesirable(value string) bool {
 	return true
 }
 
+// allowed returns the cases the rule admits after Only and Except narrowed them.
+func (r *Enum) allowed() []string {
+	var out []string
+	for _, c := range r.cases {
+		if r.isDesirable(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // Message returns the sentence for a value outside the cases.
 func (r *Enum) Message() []string {
 	return []string{translatedOr(r.validator, "validation.enum", "The selected :attribute is invalid.")}

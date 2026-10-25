@@ -139,6 +139,15 @@ var (
 // would be read as ninety nanoseconds), and a body that could not be parsed.
 // It returns rather than panics, like every other failure a handler returns.
 //
+// # Rules
+//
+// A request type that has a Rules method -- validation.RequestRules -- has them
+// run first, over the raw input, in the language of the request: see the notes
+// at the top of validation.go. A failure is returned as validation.Errors,
+// nothing is converted, and Context.Validated holds the fields that passed when
+// nothing failed. The rules cannot ask the database, because the controller has
+// no Grant: a uniqueness check belongs to Validate, which the service calls.
+//
 // A body cut off by the limit the server put on it binds nothing: the error is
 // a *exceptions.PostTooLargeException, which answers 413, rather than a struct
 // filled from whatever part of the body arrived.
@@ -165,12 +174,19 @@ func (c *Context) Bind(dst any) error {
 	if input.tooLarge != nil {
 		return input.tooLarge
 	}
+	// The rules the request declares run over the raw input, before anything is
+	// converted: a value the rules refuse is never turned into a field.
+	if declaring, ok := dst.(validation.RequestRules); ok {
+		if err := c.runRules(input, declaring); err != nil {
+			return err
+		}
+	}
 	errs := validation.Errors{}
 	if err := bindStruct(target.Elem(), form, errs); err != nil {
 		return err
 	}
 	if errs.Any() {
-		return errs
+		return c.localizeConversion(errs, requestAttributes(dst))
 	}
 	return nil
 }
