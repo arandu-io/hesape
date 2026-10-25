@@ -735,6 +735,10 @@ func validateMapKey(key reflect.Value) error {
 	return nil
 }
 
+// replacementCharacter is U+FFFD as UTF-8, what encoding/json writes in place
+// of an invalid byte from Go 1.27.
+var replacementCharacter = []byte("\uFFFD")
+
 func validateJSONStrings(encoded []byte) (bool, error) {
 	if !utf8.Valid(encoded) {
 		return false, fmt.Errorf("toon: JSON normalization produced invalid UTF-8")
@@ -746,6 +750,14 @@ func validateJSONStrings(encoded []byte) (bool, error) {
 		}
 		i++
 		for i < len(encoded) && encoded[i] != '"' {
+			// encoding/json replaces invalid UTF-8 with U+FFFD, written as
+			// the escape \ufffd before Go 1.27 and as the character itself
+			// from it. Both send the input to be checked.
+			if bytes.HasPrefix(encoded[i:], replacementCharacter) {
+				replacedInvalidUTF8 = true
+				i += len(replacementCharacter)
+				continue
+			}
 			if encoded[i] != '\\' {
 				i++
 				continue
