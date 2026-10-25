@@ -6,6 +6,23 @@ on:
   pull_request:
 
 jobs:
+  # The newest Go release, beside the 1.26 line the check job pins. An
+  # application is built with whatever Go its machine has -- Homebrew's stable
+  # is a minor ahead -- and encoding/json changed under toon between the two
+  # without a line of this repository changing.
+  newest-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          check-latest: true
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test -race -count=1 ./...
+
   check:
     runs-on: ubuntu-latest
     steps:
