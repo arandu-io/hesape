@@ -176,49 +176,395 @@
 
 	/* ---- table ---------------------------------------------------------------
 	 *
-	 * The three things about a table only the browser can do: keep the count
-	 * of chosen rows in step, switch a column off, and move a cell at a time
-	 * when the table is a grid.
+	 * The data table is a region the server draws. Searching, ordering, the
+	 * facets, the page and the page size are addresses: the search is a form,
+	 * the headers and the steps are links, and htmx swaps what the server
+	 * answers with. This is what the browser does that an address cannot.
 	 *
-	 * Searching, ordering and paging are not among them, and that is the whole
-	 * design. Each is an address: the header is a link, the search is a form,
-	 * and htmx swaps what the server answers with. A copy of that written here
-	 * would be a second way to order a table -- one that orders only the rows
-	 * that were fetched, so page two of a list sorted by name holds whatever
-	 * the server thought page two was.
+	 *   - menus: the columns menu, a facet's popover, a header's menu and a
+	 *     row's menu are <details> the markup draws, opened here so the panel
+	 *     can be placed beside its button, outside the table's own clipping;
+	 *   - the search: one request, a short while after typing stops, and none
+	 *     when Enter is pressed after it;
+	 *   - the selection: the keys ticked, kept across a search, a new order, a
+	 *     facet and a page, because the rows are swapped and the keys are not;
+	 *   - the swap itself: an open menu stays open, the address bar says the
+	 *     canonical address of what is on screen, and the focus stays in the
+	 *     search box;
+	 *   - a complete list: when the page holds every row, the server says so
+	 *     (data-complete) and the browser orders, searches, filters and pages
+	 *     the rows in hand. That is the only case where ordering rows here is
+	 *     right, and it is the only case this does it.
 	 *
-	 * It was written once and taken out again. What it cost to keep correct
-	 * -- a memo per row, a collator, a debounce, a cache thrown away on every
-	 * sort and every hidden column -- is the tell: that is a table engine, and
-	 * this framework already has one on the other side of the request.
+	 * No class is added by a script. Anything a script shows or hides is
+	 * already in the markup, with its classes, and is switched with `hidden`,
+	 * because a class written here is a class the stylesheet was never compiled
+	 * with.
 	 *
-	 * The sentence for the count comes from the server, in the same field the
-	 * server rendered it from. Nothing here composes English.
+	 * Every sentence comes from the server, with its placeholders. Nothing here
+	 * composes English.
 	 */
+	var tableSelections = {};
+	var tableSwapping = {};
+	var tableCarried = {};
+	var tableTimers = {};
+
+	function tableRootOf(node) {
+		return node && node.closest ? node.closest('[data-kyse-behavior="table"]') : null;
+	}
+
+	/* The props are read through the registry's own context, so they are the
+	 * same object mounted receives, and available to the swap hooks below
+	 * before the new region has been mounted. */
+	function tableProps(root) {
+		return context(root).props || {};
+	}
+
+	function tableSay(root, name, slots) {
+		var sentence = tableProps(root)[name] || '';
+		for (var key in slots) {
+			if (Object.prototype.hasOwnProperty.call(slots, key)) {
+				sentence = sentence.split('{' + key + '}').join(slots[key]);
+			}
+		}
+		return sentence;
+	}
+
+	/* ---- menus ---------------------------------------------------------- */
+
+	function menuPanel(menu) {
+		return menu.querySelector(':scope > [data-menu-panel]');
+	}
+
+	/* The panel is fixed, so the table's own overflow cannot cut it, and it is
+	 * placed from the button's rectangle: under it, aligned to the side the
+	 * markup says, turned over when there is no room below, and kept inside the
+	 * window. Assigning a property of style is the CSSOM; the policy refuses a
+	 * style attribute, not this. */
+	function placeMenu(menu) {
+		var panel = menuPanel(menu);
+		var button = menu.querySelector(':scope > summary');
+		if (!panel || !button) return;
+		var at = button.getBoundingClientRect();
+		var width = panel.offsetWidth;
+		var height = panel.offsetHeight;
+		var wide = document.documentElement.clientWidth;
+		var tall = window.innerHeight;
+		var rtl = getComputedStyle(button).direction === 'rtl';
+		var right = (panel.getAttribute('data-align') === 'end') !== rtl;
+		var left = right ? at.right - width : at.left;
+		left = Math.max(8, Math.min(left, wide - width - 8));
+		var top = at.bottom + 4;
+		var flipped = top + height > tall - 8 && at.top - 4 - height >= 8;
+		if (flipped) top = at.top - 4 - height;
+		panel.style.left = left + 'px';
+		panel.style.top = top + 'px';
+		panel.setAttribute('data-side', flipped ? 'top' : 'bottom');
+	}
+
+	function openMenu(menu) {
+		each(document, 'details[data-menu][open]', function (other) {
+			if (other !== menu) other.open = false;
+		});
+		menu.open = true;
+		placeMenu(menu);
+	}
+
+	function closeMenus(except) {
+		each(document, 'details[data-menu][open]', function (menu) {
+			if (menu !== except && !(except && menu.contains(except))) menu.open = false;
+		});
+	}
+
+	function menuItems(menu) {
+		var panel = menuPanel(menu);
+		if (!panel) return [];
+		return Array.prototype.filter.call(
+			panel.querySelectorAll('a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled])'),
+			function (item) { return !item.closest('[hidden]') && item.getAttribute('aria-disabled') !== 'true'; }
+		);
+	}
+
+	document.addEventListener('click', function (event) {
+		var from = origin(event);
+		if (!from) return;
+		var button = from.closest('details[data-menu] > summary');
+		if (button) {
+			event.preventDefault();
+			var menu = button.parentElement;
+			if (menu.open) menu.open = false;
+			else openMenu(menu);
+			return;
+		}
+		var inside = from.closest('details[data-menu]');
+		closeMenus(inside);
+		/* A menu of things to do closes once one is chosen; a menu of choices
+		 * that stay chosen -- the columns, a facet -- stays where it is. */
+		if (inside && inside.hasAttribute('data-closes') && from.closest('[role="menuitem"]')) inside.open = false;
+	}, true);
+
+	document.addEventListener('keydown', function (event) {
+		var from = origin(event);
+		if (!from) return;
+		var menu = from.closest('details[data-menu]');
+		if (event.key === 'Escape') {
+			var open = menu && menu.open ? menu : document.querySelector('details[data-menu][open]');
+			if (!open) return;
+			open.open = false;
+			var back = open.querySelector(':scope > summary');
+			if (back) back.focus();
+			return;
+		}
+		if (!menu || !menu.open) return;
+		if (event.key === 'Enter' && from.matches('[data-part="facet-search"]')) {
+			event.preventDefault();
+			return;
+		}
+		if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+		var items = menuItems(menu);
+		if (!items.length) return;
+		event.preventDefault();
+		var at = items.indexOf(document.activeElement);
+		var to = event.key === 'ArrowDown'
+			? (at + 1) % items.length
+			: (at <= 0 ? items.length - 1 : at - 1);
+		items[to].focus();
+	});
+
+	/* A menu follows its button, and the page under it can move: scrolling or
+	 * resizing closes it, which is what a popover that is not tied to its
+	 * button does. Scrolling inside the panel is not a move. */
+	window.addEventListener('scroll', function (event) {
+		var from = event.target;
+		if (from && from.nodeType === 1 && from.closest && from.closest('[data-menu-panel]')) return;
+		closeMenus(null);
+	}, true);
+	window.addEventListener('resize', function () { closeMenus(null); });
+
+	/* ---- a facet's own search ------------------------------------------ */
+
+	document.addEventListener('input', function (event) {
+		var from = origin(event);
+		if (!from || !from.matches('[data-part="facet-search"]')) return;
+		var panel = from.closest('[data-menu-panel]');
+		if (!panel) return;
+		var needle = (from.value || '').trim().toLowerCase();
+		var shown = 0;
+		each(panel, '[data-facet-item]', function (item) {
+			var text = (item.getAttribute('data-text') || item.textContent || '').toLowerCase();
+			var match = !needle || text.indexOf(needle) >= 0;
+			item.hidden = !match;
+			if (match) shown++;
+		});
+		each(panel, '[data-facet-empty]', function (line) { line.hidden = shown > 0; });
+	});
+
+	/* ---- one request from the search box -------------------------------- *
+	 *
+	 * The form is the one owner of the state, and a request is its submit. The
+	 * box asks for one a moment after typing stops, unless what is in it is what
+	 * the server drew. Enter submits at once and cancels the wait, so the two
+	 * never both go out. A change event from the box is not a request: it is
+	 * the same text Enter or the wait is about to send, and the form would
+	 * otherwise send it a second time.
+	 */
+	document.addEventListener('change', function (event) {
+		var from = origin(event);
+		if (from && from.matches('[data-part="search"], [data-part="facet-search"]')) event.stopPropagation();
+	}, true);
+
+	document.addEventListener('input', function (event) {
+		var from = origin(event);
+		if (!from || !from.matches('[data-part="search"]')) return;
+		var root = tableRootOf(from);
+		if (!root || root.getAttribute('data-complete') === 'true') return;
+		var form = from.form;
+		if (!form) return;
+		window.clearTimeout(tableTimers[root.id]);
+		tableTimers[root.id] = window.setTimeout(function () {
+			if (!from.isConnected || from.value === from.defaultValue) return;
+			if (form.requestSubmit) form.requestSubmit();
+			else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+		}, 300);
+	});
+
+	document.addEventListener('submit', function (event) {
+		var root = tableRootOf(event.target);
+		if (!root) return;
+		window.clearTimeout(tableTimers[root.id]);
+		if (root.getAttribute('data-complete') === 'true') event.preventDefault();
+	}, true);
+
+	/* ---- the selection -------------------------------------------------- *
+	 *
+	 * The rows are swapped and the keys are not. The keys ticked are kept per
+	 * table, the boxes on the page are drawn from them, and the keys that are
+	 * not on this page ride in the bulk form as hidden fields, so one press
+	 * posts the whole selection. The count is said against the server's total.
+	 */
+	function selectionOf(root) {
+		var held = tableSelections[root.id];
+		if (!held) held = tableSelections[root.id] = { keys: {}, seeded: false };
+		return held;
+	}
+
+	function boxesOf(root) {
+		return Array.prototype.slice.call(root.querySelectorAll('[data-part="select"]'));
+	}
+
+	function visibleBoxes(root) {
+		return boxesOf(root).filter(function (box) {
+			var row = box.closest('tr');
+			return row && !row.hidden;
+		});
+	}
+
+	function syncSelection(root) {
+		if (!root.id) return;
+		var held = selectionOf(root);
+		var boxes = boxesOf(root);
+		if (!held.seeded) {
+			boxes.forEach(function (box) { if (box.checked) held.keys[box.value] = true; });
+			held.seeded = true;
+		}
+		var onPage = {};
+		boxes.forEach(function (box) {
+			onPage[box.value] = true;
+			box.checked = !!held.keys[box.value];
+			var row = box.closest('tr');
+			if (row) {
+				if (box.checked) row.setAttribute('data-state', 'selected');
+				else row.removeAttribute('data-state');
+			}
+		});
+
+		var total = Object.keys(held.keys).length;
+		var props = tableProps(root);
+		var bulk = root.querySelector('[data-part="bulk"]');
+		if (bulk) {
+			Array.prototype.slice.call(bulk.querySelectorAll('input[data-bulk-key]')).forEach(function (one) { one.remove(); });
+			Object.keys(held.keys).forEach(function (key) {
+				if (onPage[key]) return;
+				var hidden = document.createElement('input');
+				hidden.type = 'hidden';
+				hidden.name = props.selectName || '';
+				hidden.value = key;
+				hidden.setAttribute('data-bulk-key', '');
+				bulk.appendChild(hidden);
+			});
+			bulk.hidden = total === 0;
+		}
+
+		var line = root.querySelector('[data-part="count"]');
+		if (line && props.selectName) {
+			var known = root.hasAttribute('data-total');
+			var template = known
+				? (line.getAttribute('data-selected-template') || props.selected || '{n} of {total} row(s) selected.')
+				: (props.selectedCount || '{n} row(s) selected.');
+			line.textContent = template
+				.split('{n}').join(String(total))
+				.split('{total}').join(root.getAttribute('data-total') || '0');
+		}
+
+		var master = root.querySelector('[data-select-all]');
+		if (master) {
+			var page = visibleBoxes(root);
+			var ticked = page.filter(function (box) { return box.checked; }).length;
+			master.checked = page.length > 0 && ticked === page.length;
+			/* Indeterminate is a property and not an attribute: there is no
+			 * markup for "some", which is why the server cannot draw this state
+			 * and this line exists. */
+			master.indeterminate = ticked > 0 && ticked < page.length;
+		}
+	}
+
+	/* ---- the swap ------------------------------------------------------- *
+	 *
+	 * The region is replaced whole. Before it goes, what the reader had open
+	 * and where the cursor was are taken down; as soon as the new region is in,
+	 * they are put back, before the next frame, so a menu that stays open
+	 * while its boxes are ticked never closes at all.
+	 */
+	document.addEventListener('htmx:beforeSwap', function (event) {
+		var target = event.detail && event.detail.target;
+		var root = tableRootOf(target);
+		if (!root || !root.id) return;
+		tableSwapping[root.id] = true;
+		var open = [];
+		each(root, 'details[data-menu][open]', function (menu) { if (menu.id) open.push(menu.id); });
+		var carried = { menus: open, focus: null };
+		var active = document.activeElement;
+		if (active && active !== document.body && root.contains(active) && active.id) {
+			carried.focus = {
+				id: active.id,
+				start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+				end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+			};
+		}
+		tableCarried[root.id] = carried;
+	});
+
+	document.addEventListener('htmx:afterSwap', function () {
+		Object.keys(tableCarried).forEach(function (id) {
+			var root = document.getElementById(id);
+			var carried = tableCarried[id];
+			if (!root || !carried) return;
+			syncSelection(root);
+			carried.menus.forEach(function (one) {
+				var menu = document.getElementById(one);
+				if (menu && root.contains(menu)) {
+					menu.open = true;
+					placeMenu(menu);
+				}
+			});
+			if (carried.focus) {
+				var field = document.getElementById(carried.focus.id);
+				if (field && root.contains(field) && document.activeElement !== field) {
+					field.focus();
+					if (carried.focus.start !== null && field.setSelectionRange) {
+						try { field.setSelectionRange(carried.focus.start, carried.focus.end); } catch (e) { /* not a text field */ }
+					}
+				}
+			}
+		});
+	});
+
+	/* The address bar says what the server says is on screen. The form
+	 * serialises its fields as they are -- an empty search, the size even when
+	 * it is the default -- and the server's canonical address leaves those out.
+	 * Replacing the entry htmx just pushed keeps one entry per step. */
+	document.addEventListener('htmx:afterSettle', function () {
+		Object.keys(tableCarried).forEach(function (id) {
+			var root = document.getElementById(id);
+			delete tableCarried[id];
+			delete tableSwapping[id];
+			if (!root || !window.history || !history.replaceState) return;
+			var canonical = root.getAttribute('data-url');
+			if (!canonical) return;
+			var now = location.pathname + location.search;
+			if (canonical !== now && canonical.charAt(0) === '/') {
+				try { history.replaceState(history.state, '', canonical + location.hash); } catch (e) { /* the entry stays as pushed */ }
+			}
+		});
+	});
+
 	arandu.ui.define('table', {
 		mounted: function (ctx) {
 			var root = ctx.element;
 			var props = ctx.props || {};
+			var complete = root.getAttribute('data-complete') === 'true';
+			ctx.state = { page: 1 };
 
 			/* ---- working a complete list in the browser --------------------
 			 *
 			 * Only when the page holds every row, which the server states with
 			 * data-complete. Ordering a page of a longer list orders only what
-			 * was sent, and filtering it hides matches that never arrived --
-			 * both read as a table in the wrong order to everyone except
-			 * whoever wrote it. When it is not complete none of this runs: the
-			 * header is a link, the search is a form, and the server answers.
+			 * was sent, and filtering it hides matches that never arrived. When
+			 * it is not complete none of this runs.
 			 *
-			 * The rows are moved, never rebuilt. Redrawing a body from strings
-			 * loses every data attribute, every checked box, the focus and
-			 * anything htmx bound to a row -- and turns text back into markup
-			 * on the way. Moving a <tr> that is already in the document keeps
-			 * all of it.
-			 *
-			 * Every sentence comes from the server, with its placeholders.
-			 * Nothing here composes English.
+			 * The rows are moved, never rebuilt: a <tr> that is already in the
+			 * document keeps every attribute, checked box and bound handler.
 			 */
-			var complete = root.getAttribute('data-complete') === 'true';
 			var body = function () { return root.querySelector('tbody'); };
 			var allRows = function () {
 				var tbody = body();
@@ -227,20 +573,11 @@
 					return !row.hasAttribute('data-empty-row');
 				});
 			};
+			var size = Number(props.pageSize) || 0;
+			var page = 1;
 
-			var say = function (name, slots) {
-				var sentence = props[name] || '';
-				for (var key in slots) {
-					if (Object.prototype.hasOwnProperty.call(slots, key)) {
-						sentence = sentence.split('{' + key + '}').join(slots[key]);
-					}
-				}
-				return sentence;
-			};
-
-			/* One collator, made once. localeCompare builds one per call, and
-			 * a sort is n log n calls -- measured over fifty thousand rows,
-			 * eighty-eight milliseconds against fourteen. */
+			/* One collator, made once. localeCompare builds one per call, and a
+			 * sort is n log n calls. */
 			var collator = null;
 			var compare = function (x, y) {
 				if (!collator) {
@@ -251,10 +588,8 @@
 				return collator.compare(x, y);
 			};
 
-			/* The text a row is searched by, built once and kept on the row.
-			 * It was built per row per keystroke; memoised it is four to eight
-			 * times faster, and the gap widens with the table. It is dropped
-			 * whenever a column is hidden, because a hidden column is not
+			/* The text a row is searched by, built once and kept on the row,
+			 * and dropped whenever a column is hidden: a hidden column is not
 			 * searched. */
 			var haystack = function (row) {
 				if (row.__hay === undefined) {
@@ -271,13 +606,10 @@
 				allRows().forEach(function (row) { row.__hay = undefined; });
 			};
 
-			var size = Number(props.pageSize) || 0;
-			var page = 1;
-
 			/* comparable is what a cell sorts by: the value the server handed
-			 * over, or the text it draws. The two are different strings --
-			 * "1.240,00" sorts before "860,00" as text and after it as money
-			 * -- which is why the server is asked for the comparable form. */
+			 * over, or the text it draws. "1.240,00" sorts before "860,00" as
+			 * text and after it as money, which is why the server is asked for
+			 * the comparable form. */
 			var comparable = function (row, at) {
 				var cell = row.cells[at];
 				if (!cell) return '';
@@ -285,140 +617,80 @@
 				return raw === null ? (cell.textContent || '').trim() : raw;
 			};
 
-			/* Decorate, sort, undecorate: the key is read once per row instead
-			 * of twice per comparison, and the column is numeric or it is not
-			 * -- deciding per comparison lets one stray cell order the others
-			 * by a rule that does not apply to them. */
 			var order = function (at, dir) {
 				var tbody = body();
 				if (!tbody) return;
 				var rows = allRows();
 				var sign = dir === 'desc' ? -1 : 1;
-
 				var keyed = new Array(rows.length);
 				var numeric = false;
 				var seenValue = false;
 				for (var i = 0; i < rows.length; i++) {
 					var raw = comparable(rows[i], at);
 					var num = raw === '' ? NaN : Number(raw);
-					/* Empty cells do not decide the kind of the column. One
-					 * blank would otherwise send a column of money to the
-					 * collator, where 1.5 sorts before 1.25 and -5 before -10. */
+					/* An empty cell does not decide the kind of the column. */
 					if (raw !== '') {
 						if (!seenValue) { numeric = true; seenValue = true; }
 						if (isNaN(num)) numeric = false;
 					}
 					keyed[i] = { row: rows[i], raw: raw, num: num, blank: raw === '' };
 				}
-				/* Blanks go to one end and stay there whichever way the column
-				 * is sorted: a row with nothing in the column is not the
-				 * smallest value, it is the absence of one. */
 				var by = numeric
 					? function (a, b) { return (a.num - b.num) * sign; }
 					: function (a, b) { return compare(a.raw, b.raw) * sign; };
+				/* Blanks stay at one end whichever way the column is sorted: a
+				 * row with nothing in the column is the absence of a value. */
 				keyed.sort(function (a, b) {
 					if (a.blank !== b.blank) return a.blank ? 1 : -1;
 					if (a.blank) return 0;
 					return by(a, b);
 				});
-
-				/* Through a fragment: appending each row to the live table is a
-				 * layout per row, and the fragment makes it one. */
 				var moved = document.createDocumentFragment();
 				for (var m = 0; m < keyed.length; m++) moved.appendChild(keyed[m].row);
 				tbody.appendChild(moved);
 			};
 
-			/* A search that matched nothing is not an empty table: the table
-			 * has rows, and none of them is the answer. */
-			var nothing = function (missing, columns) {
-				var tbody = body();
-				if (!tbody) return;
-				var line = tbody.querySelector('[data-empty-row]');
-				if (!missing) {
-					if (line) line.remove();
-					return;
-				}
-				if (line) return;
-				var row = tbody.insertRow();
-				row.setAttribute('data-empty-row', '');
-				var cell = row.insertCell();
-				cell.colSpan = columns;
-				cell.className = 'data-table-nothing';
-				cell.textContent = props.noResult || 'Nothing matched';
-			};
-
-			var showing = function (from, to, total) {
-				var line = root.querySelector('[data-part="showing"]');
-				if (!line) return;
-				line.textContent = say('showing', { from: from, to: to, total: total });
-			};
-
-			/* The pager moves its window over the markup the server drew.
-			 *
-			 * Rebuilding it was the first thing tried and it is wrong: the
-			 * <nav> loses its accessible name, the <a> become <button> and
-			 * stop being addresses, every data-part and caller class goes, and
-			 * the focus lands on <body> after every click. Moving the window
-			 * keeps all of it -- the entries were already correct, they were
-			 * pointing at the wrong numbers.
-			 */
+			/* The pager keeps its markup and the browser moves the state of it:
+			 * which steps are live, and where the reader is. */
 			var pager = function (pages) {
 				var nav = root.querySelector('[data-part="pagination"]');
 				if (!nav) return;
 				nav.hidden = pages < 2;
-				if (pages < 2) return;
-
-				var numbered = Array.prototype.filter.call(
-					nav.querySelectorAll('[data-part="link"]'),
-					function (link) { return link.hasAttribute('data-page'); }
-				);
-				/* The window the server drew is as wide as it is; sliding it
-				 * means renumbering the entries in place, not making more. */
-				var width = numbered.length;
-				var first = Math.max(1, Math.min(page - Math.floor(width / 2), pages - width + 1));
-
-				numbered.forEach(function (link, at) {
-					var n = first + at;
-					var shown = n >= 1 && n <= pages;
-					link.closest('li').hidden = !shown;
-					if (!shown) return;
-					link.textContent = String(n);
-					link.setAttribute('data-page', String(n));
-					link.setAttribute('aria-label', say('page', { n: n }));
-					if (n === page) link.setAttribute('aria-current', 'page');
-					else link.removeAttribute('aria-current');
-				});
-
-				/* A step at the end of the list is disabled rather than
-				 * removed, so the two buttons hold their places as the reader
-				 * moves -- and a pager drawn as a list hides the entry instead. */
-				var end = function (part, to, live) {
-					var link = nav.querySelector('[data-part="' + part + '"]');
-					if (!link) return;
-					var item = link.closest('li');
-					if (item) item.hidden = !live;
-					link.setAttribute('data-page', String(to));
-					if (live) {
-						link.removeAttribute('aria-disabled');
-						link.removeAttribute('tabindex');
+				var live = { first: page > 1, previous: page > 1, next: page < pages, last: page < pages };
+				each(nav, '[data-step]', function (step) {
+					var on = live[step.getAttribute('data-step')];
+					if (on) {
+						step.removeAttribute('aria-disabled');
+						step.removeAttribute('tabindex');
 					} else {
-						link.setAttribute('aria-disabled', 'true');
-						link.setAttribute('tabindex', '-1');
+						step.setAttribute('aria-disabled', 'true');
+						step.setAttribute('tabindex', '-1');
 					}
-				};
-				end('previous', Math.max(1, page - 1), page > 1);
-				end('next', Math.min(pages, page + 1), page < pages);
-
-				var where = nav.querySelector('[data-part="page-of"]');
-				if (where) {
-					where.textContent = (nav.getAttribute('data-page-of-template') || props.pageOf || '{n} / {total}')
+				});
+				each(root, '[data-part="page-of"]', function (where) {
+					where.textContent = (where.getAttribute('data-page-of-template') || props.pageOf || '{n} / {total}')
 						.split('{n}').join(String(page))
 						.split('{total}').join(String(pages));
-				}
+				});
+			};
 
-				var gap = nav.querySelector('[data-part="ellipsis"]');
-				if (gap && gap.closest('li')) gap.closest('li').hidden = first + width - 1 >= pages;
+			var facetSummary = function (facet) {
+				var chosen = [];
+				each(facet, '[data-part="filter"]:checked', function (box) { chosen.push(box.value); });
+				var line = facet.querySelector('[data-part="facet-chosen"]');
+				if (!line) return;
+				var summary = facet.querySelector('summary');
+				var rule = summary && summary.querySelector('[role="separator"]');
+				line.hidden = chosen.length === 0;
+				if (rule) rule.hidden = chosen.length === 0;
+				each(line, '[data-facet-count]', function (one) { one.textContent = String(chosen.length); });
+				each(line, '[data-facet-many]', function (one) {
+					one.hidden = chosen.length <= 2;
+					one.textContent = (props.facetSelected || '{n} selected').split('{n}').join(String(chosen.length));
+				});
+				each(line, '[data-facet-badge]', function (one) {
+					one.hidden = chosen.length > 2 || chosen.indexOf(one.getAttribute('data-facet-badge')) < 0;
+				});
 			};
 
 			var show = function () {
@@ -426,13 +698,12 @@
 				var box = root.querySelector('[data-part="search"]');
 				if (box) query = (box.value || '').trim().toLowerCase();
 
-				/* The facets ticked, by key. A row passes a facet when its own
-				 * value for it is one of those ticked, and a facet with none
-				 * ticked lets every row through -- as the server's own query
-				 * does with a parameter that is absent. */
+				/* A row passes a facet when its own value for it is one of
+				 * those ticked, and a facet with none ticked lets every row
+				 * through. */
 				var facets = {};
-				each(root, '[data-part="filter"]:checked', function (box) {
-					(facets[box.name] = facets[box.name] || []).push(box.value);
+				each(root, '[data-part="filter"]:checked', function (one) {
+					(facets[one.name] = facets[one.name] || []).push(one.value);
 				});
 				var passes = function (row) {
 					for (var key in facets) {
@@ -462,108 +733,95 @@
 					seen++;
 				}
 
-				release();
-
-				var head = root.querySelector('thead tr');
-				nothing(matched === 0, head ? head.cells.length : 1);
-				showing(matched === 0 ? 0 : from + 1, Math.min(from + (size || matched), matched), matched);
-				pager(pages);
-				count();
-			};
-
-			/* Only the rows on screen.
-			 *
-			 * A filtered-away row keeps its checkbox in the document, keeps its
-			 * form attribute, and is still submitted -- so a header checkbox
-			 * that ticked every box in the DOM would archive two hundred
-			 * invoices from a table showing three. The count would say so, and
-			 * nobody would read it in time.
-			 *
-			 * The server marks the same rows hidden for the same reason, and
-			 * disables their boxes, so the hole is closed on both paths. */
-			var boxes = function () {
-				return Array.prototype.filter.call(
-					root.querySelectorAll('[data-part="select"]'),
-					function (box) {
-						var row = box.closest('tr');
-						return row && !row.hidden;
-					}
-				);
-			};
-
-			/* A row leaving the window takes its selection with it. Keeping it
-			 * checked is a value the form would still send from a row nobody
-			 * can see. */
-			var release = function () {
-				Array.prototype.forEach.call(
-					root.querySelectorAll('[data-part="select"]'),
-					function (box) {
-						var row = box.closest('tr');
-						if (!row) return;
-						box.disabled = !!row.hidden;
-						if (row.hidden) box.checked = false;
-					}
-				);
-			};
-
-			var count = function () {
-				var line = root.querySelector('[data-part="count"]');
-				if (!line) return;
-				var all = boxes();
-				var chosen = all.filter(function (box) { return box.checked; }).length;
-				/* The template is the server's, written onto the element it
-				 * renders into -- so the count is said in the language the page
-				 * is served in and this file carries no sentence. */
-				var template = line.getAttribute('data-selected-template') ||
-					props.selected || '{n} of {total} rows selected';
-				line.textContent = template
-					.split('{n}').join(String(chosen))
-					.split('{total}').join(String(all.length));
-
-				all.forEach(function (box) {
-					var row = box.closest('tr');
-					if (!row) return;
-					/* Written only where it differs: rewriting the attribute on
-					 * every row on every keystroke is a mutation record per row
-					 * for a value that did not change. */
-					var now = box.checked ? 'true' : 'false';
-					if (row.getAttribute('aria-selected') !== now) {
-						row.setAttribute('aria-selected', now);
-					}
-				});
-
-				var master = root.querySelector('[data-select-all]');
-				if (master) {
-					master.checked = all.length > 0 && chosen === all.length;
-					/* Indeterminate is a property and not an attribute: there is
-					 * no markup for "some", which is why the server cannot draw
-					 * this state and this line exists. */
-					master.indeterminate = chosen > 0 && chosen < all.length;
+				each(root, '[data-empty-row]', function (line) { line.hidden = matched !== 0; });
+				root.setAttribute('data-total', String(matched));
+				if (!props.selectName) {
+					var count = root.querySelector('[data-part="count"]');
+					if (count) count.textContent = (props.rows || '{total} row(s).').split('{total}').join(String(matched));
 				}
+				pager(pages);
+				syncSelection(root);
+			};
+
+			/* A sortable header says which of its three states it is in. */
+			var nameHeads = function () {
+				each(root, 'th[aria-sort]', function (head) {
+					var state = head.getAttribute('aria-sort');
+					var line = state === 'ascending' ? 'ascending' : state === 'descending' ? 'descending' : 'unsorted';
+					var control = head.querySelector('[data-part="sort"], summary');
+					var label = '';
+					if (control) {
+						var shown = control.querySelector(':scope > span:not([data-sort-icon])');
+						label = ((shown || control).textContent || '').replace(/\s+/g, ' ').trim();
+						control.setAttribute('aria-label', tableSay(root, line, { column: label }));
+					}
+					var which = state === 'ascending' ? 'asc' : state === 'descending' ? 'desc' : 'none';
+					each(head, '[data-sort-icon]', function (icon) {
+						icon.hidden = icon.getAttribute('data-sort-icon') !== which;
+					});
+				});
+			};
+
+			var sortBy = function (head, dir) {
+				var at = Array.prototype.indexOf.call(head.parentElement.children, head);
+				each(root, 'th[aria-sort]', function (one) { one.setAttribute('aria-sort', 'none'); });
+				head.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
+				nameHeads();
+				order(at, dir);
+				/* Reordering goes back to the first page, as the server does,
+				 * or the same gesture would have two answers depending on where
+				 * the rows are worked. */
+				page = 1;
+				show();
+			};
+
+			var hideColumn = function (key, on) {
+				each(root, '[data-column="' + key + '"]', function (cell) { cell.hidden = !on; });
+				each(root, '[data-column-toggle="' + key + '"]', function (item) {
+					item.setAttribute('aria-checked', on ? 'true' : 'false');
+					each(item, '[data-indicator]', function (check) { check.hidden = !on; });
+				});
+				/* The address bar keeps the choice, so a reload comes back the
+				 * way it was left. */
+				var param = root.getAttribute('data-hide-param') || 'hide';
+				try {
+					var url = new URL(location.href);
+					var hidden = url.searchParams.getAll(param).filter(function (one) { return one !== key; });
+					if (!on) hidden.push(key);
+					url.searchParams.delete(param);
+					hidden.sort().forEach(function (one) { url.searchParams.append(param, one); });
+					history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+				} catch (e) { /* an address bar that will not be written stays as it is */ }
+				forget();
+				show();
 			};
 
 			ctx.change = function (event) {
 				var master = event.target.closest('[data-select-all]');
 				if (master) {
-					boxes().forEach(function (box) { box.checked = master.checked; });
-					count();
+					var held = selectionOf(root);
+					visibleBoxes(root).forEach(function (box) {
+						if (master.checked) held.keys[box.value] = true;
+						else delete held.keys[box.value];
+					});
+					syncSelection(root);
 					return;
 				}
-				if (event.target.closest('[data-part="select"]')) { count(); return; }
-
-				var toggle = event.target.closest('[data-column-toggle]');
-				if (!toggle) return;
-				var key = toggle.getAttribute('data-column-toggle');
-				/* hidden rather than a class: a cell removed from the layout is
-				 * also removed from the table's own column count, which is what
-				 * keeps a screen reader reading the right header for the right
-				 * cell. */
-				each(root, '[data-column="' + key + '"]', function (cell) {
-					cell.hidden = !toggle.checked;
-				});
-				/* A hidden column is not searched, so what every row is
-				 * searched by has just changed. */
-				if (complete) { forget(); show(); }
+				var box = event.target.closest('[data-part="select"]');
+				if (box) {
+					var keys = selectionOf(root).keys;
+					if (box.checked) keys[box.value] = true;
+					else delete keys[box.value];
+					syncSelection(root);
+					return;
+				}
+				if (!complete) return;
+				var filter = event.target.closest('[data-part="filter"]');
+				if (filter) {
+					facetSummary(filter.closest('[data-part="facet"]'));
+					page = 1;
+					show();
+				}
 			};
 
 			ctx.key = function (event) {
@@ -590,8 +848,7 @@
 				};
 
 				/* Read once, at the gesture: in a right-to-left document the
-				 * arrow that points right moves towards the earlier column,
-				 * and a grid that ignores that is a grid that moves backwards. */
+				 * arrow that points right moves towards the earlier column. */
 				var rtl = getComputedStyle(root).direction === 'rtl';
 				var forward = rtl ? -1 : 1;
 
@@ -606,8 +863,7 @@
 			};
 
 			/* A navigable table needs one cell reachable by tab, and the server
-			 * cannot know which -- it is wherever the person left off. The
-			 * first is where they start. */
+			 * cannot know which -- it is wherever the person left off. */
 			if (root.getAttribute('data-navigable') === 'true') {
 				each(root, 'td, th', function (cell) { cell.setAttribute('tabindex', '-1'); });
 				var first = root.querySelector('th, td');
@@ -618,40 +874,79 @@
 			root.addEventListener('keydown', ctx.key);
 
 			if (complete) {
-				/* Every sortable header says which of the three states it is
-				 * in. A header that only draws an arrow is a header a screen
-				 * reader reads as a link. */
-				var name = function (head) {
-					var link = head.querySelector('[data-part="sort"]');
-					if (!link) return;
-					var state = head.getAttribute('aria-sort');
-					var line = state === 'ascending' ? 'ascending'
-						: state === 'descending' ? 'descending' : 'unsorted';
-					link.setAttribute('aria-label',
-						say(line, { column: (link.textContent || '').trim() }));
-				};
-				each(root, 'th[aria-sort]', name);
+				/* The links stay links. Taking the click in the capture phase,
+				 * before htmx's own handler on the link and before the browser
+				 * follows it, is what makes this an enhancement: with no script
+				 * the same address loads the same page from the server. */
+				ctx.click = function (event) {
+					var from = origin(event);
+					if (!from) return;
+					var take = function () { event.preventDefault(); event.stopPropagation(); };
 
-				/* The header stays a link. Taking the click before the browser
-				 * follows it is what makes this an enhancement: with no script
-				 * the same address loads the same order from the server. */
-				ctx.sort = function (event) {
-					var link = event.target.closest('[data-part="sort"]');
-					if (!link) return;
-					event.preventDefault();
-					var head = link.closest('th');
-					var at = Array.prototype.indexOf.call(head.parentElement.children, head);
-					var dir = head.getAttribute('aria-sort') === 'ascending' ? 'desc' : 'asc';
-					each(root, 'th[aria-sort]', function (one) { one.setAttribute('aria-sort', 'none'); });
-					head.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
-					each(root, 'th[aria-sort]', name);
-					order(at, dir);
-					/* Reordering resets the page, as the server's own SortURL
-					 * does -- otherwise the same gesture has two answers
-					 * depending on where the rows are worked. */
-					page = 1;
-					show();
+					var link = from.closest('[data-part="sort"]');
+					if (link) {
+						take();
+						var head = link.closest('th');
+						sortBy(head, head.getAttribute('aria-sort') === 'ascending' ? 'desc' : 'asc');
+						return;
+					}
+					var item = from.closest('[data-sort-key][data-dir]');
+					if (item) {
+						take();
+						sortBy(item.closest('th'), item.getAttribute('data-dir'));
+						closeMenus(null);
+						return;
+					}
+					var chosen = from.closest('[data-size]');
+					if (chosen) {
+						take();
+						size = Number(chosen.getAttribute('data-size')) || 0;
+						each(root, '[data-size]', function (item) {
+							var on = item === chosen;
+							item.setAttribute('aria-checked', on ? 'true' : 'false');
+							each(item, '[data-indicator]', function (check) { check.hidden = !on; });
+						});
+						each(root, '[data-size-value]', function (value) { value.textContent = String(size); });
+						page = 1;
+						show();
+						return;
+					}
+					var step = from.closest('[data-step]');
+					if (step) {
+						take();
+						if (step.getAttribute('aria-disabled') === 'true') return;
+						var pages = size > 0 ? Math.max(1, Math.ceil(Number(root.getAttribute('data-total') || 0) / size)) : 1;
+						var to = step.getAttribute('data-step');
+						page = to === 'first' ? 1 : to === 'last' ? pages : to === 'next' ? page + 1 : page - 1;
+						show();
+						return;
+					}
+					var toggle = from.closest('[data-column-toggle]');
+					if (toggle) {
+						take();
+						hideColumn(toggle.getAttribute('data-column-toggle'), toggle.getAttribute('aria-checked') !== 'true');
+						return;
+					}
+					var hide = from.closest('[data-column-hide]');
+					if (hide) {
+						take();
+						hideColumn(hide.getAttribute('data-column-hide'), false);
+						closeMenus(null);
+						return;
+					}
+					if (from.closest('[data-part="reset"], [data-facet-clear-link]')) {
+						take();
+						var scope = from.closest('[data-facet-clear-link]') ? from.closest('[data-part="facet"]') : root;
+						if (scope === root) {
+							each(root, '[data-part="search"]', function (box) { box.value = ''; });
+						}
+						each(scope, '[data-part="filter"]', function (box) { box.checked = false; });
+						each(root, '[data-part="facet"]', facetSummary);
+						page = 1;
+						show();
+					}
 				};
+				root.addEventListener('click', ctx.click, true);
 
 				/* Debounced for the same reason the server search is: a word
 				 * typed at speed is one answer and not eight. Shorter, because
@@ -662,86 +957,33 @@
 					window.clearTimeout(pending);
 					pending = window.setTimeout(function () { page = 1; show(); }, 80);
 				};
-
-				ctx.turn = function (event) {
-					var link = event.target.closest('[data-part="pagination"] [data-page]');
-					if (!link) return;
-					event.preventDefault();
-					page = Number(link.getAttribute('data-page')) || 1;
-					show();
-					/* The entry moved under the pointer; the focus follows the
-					 * number rather than the position, so a keyboard does not
-					 * land on whatever now occupies that slot. */
-					var again = root.querySelector('[data-part="pagination"] [data-page="' + page + '"]');
-					if (again) again.focus();
-				};
-
-				ctx.resize = function (event) {
-					var chooser = event.target.closest('[data-page-size]');
-					if (chooser) {
-						size = Number(chooser.value) || 0;
-						page = 1;
-						show();
-						return;
-					}
-					var box = event.target.closest('[data-part="filter"]');
-					if (!box) return;
-					chosen(box.closest('[data-part="facet"]'));
-					page = 1;
-					show();
-				};
-
-				/* The facet's button says what is ticked, as the server drew it:
-				 * the labels while there are two at most, the count past that. */
-				var chosen = function (facet) {
-					if (!facet) return;
-					var labels = [];
-					each(facet, '[data-part="filter"]:checked', function (box) {
-						var label = box.closest('label');
-						labels.push(((label && label.textContent) || box.value).trim());
-					});
-					var summary = facet.querySelector('summary');
-					var line = facet.querySelector('[data-part="facet-chosen"]');
-					if (!line && summary) {
-						line = document.createElement('span');
-						line.setAttribute('data-part', 'facet-chosen');
-						line.className = 'data-table-facet-chosen';
-						summary.appendChild(line);
-					}
-					if (!line) return;
-					line.hidden = labels.length === 0;
-					while (line.firstChild) line.removeChild(line.firstChild);
-					(labels.length > 2 ? [String(labels.length)] : labels).forEach(function (text) {
-						var badge = document.createElement('span');
-						badge.className = 'badge';
-						badge.setAttribute('data-variant', 'secondary');
-						badge.textContent = text;
-						line.appendChild(badge);
-					});
-				};
-
-				root.addEventListener('click', ctx.sort);
-				root.addEventListener('click', ctx.turn);
 				root.addEventListener('input', ctx.filter);
-				root.addEventListener('change', ctx.resize);
-				ctx.refresh = function () { forget(); show(); };
-				show();
-			}
 
-			count();
+				ctx.refresh = function () { forget(); show(); };
+				nameHeads();
+				each(root, '[data-part="facet"]', facetSummary);
+				show();
+			} else {
+				syncSelection(root);
+			}
 		},
 		updated: function (ctx) {
 			/* The body may be entirely different rows now. What each was
 			 * searched by is the first thing that is no longer true. */
 			if (ctx.refresh) ctx.refresh();
+			else syncSelection(ctx.element);
 		},
 		destroyed: function (ctx) {
-			ctx.element.removeEventListener('change', ctx.change);
-			ctx.element.removeEventListener('keydown', ctx.key);
-			if (ctx.sort) ctx.element.removeEventListener('click', ctx.sort);
-			if (ctx.turn) ctx.element.removeEventListener('click', ctx.turn);
-			if (ctx.filter) ctx.element.removeEventListener('input', ctx.filter);
-			if (ctx.resize) ctx.element.removeEventListener('change', ctx.resize);
+			var root = ctx.element;
+			root.removeEventListener('change', ctx.change);
+			root.removeEventListener('keydown', ctx.key);
+			if (ctx.click) root.removeEventListener('click', ctx.click, true);
+			if (ctx.filter) root.removeEventListener('input', ctx.filter);
+			window.clearTimeout(tableTimers[root.id]);
+			/* The selection belongs to the list and not to its markup. It
+			 * survives the region being swapped for the same region; it ends
+			 * when the page leaves the list. */
+			if (root.id && !tableSwapping[root.id]) delete tableSelections[root.id];
 		},
 	});
 
