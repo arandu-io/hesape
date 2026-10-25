@@ -51,7 +51,7 @@ func (v *Validator) Safe(keys ...string) (*support.ValidatedInput, error) {
 		return nil, v.exceptionFor()
 	}
 
-	input := support.NewValidatedInput(v.Validated().data)
+	input := support.NewValidatedInput(v.Validated().Tree())
 	if len(keys) == 0 {
 		return input, nil
 	}

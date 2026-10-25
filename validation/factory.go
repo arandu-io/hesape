@@ -92,6 +92,9 @@ func (f *Factory) resolve(data Data, rules *Set, opts []ValidatorOption) *Valida
 	}
 
 	base := []ValidatorOption{WithTranslator(f.translator)}
+	if !f.excludeUnvalidatedArrayKeys {
+		base = append(base, WithUnvalidatedArrayKeys())
+	}
 	if len(f.customMessages) > 0 {
 		base = append(base, WithCustomMessages(f.customMessages))
 	}

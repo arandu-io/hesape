@@ -69,6 +69,10 @@ type Validator struct {
 	implicitAttributes          map[string][]string
 	implicitAttributesFormatter func(string) string
 
+	// includeUnvalidatedArrayKeys keeps an array whole in Validated even when the
+	// rules declare some of its members.
+	includeUnvalidatedArrayKeys bool
+
 	// distinctCache holds what `distinct` compares each wildcard against, so a
 	// run walks the request once per wildcard and not once per member.
 	distinctCache map[string]map[string]any
@@ -115,6 +119,13 @@ func WithPresence(g auth.Grant, p PresenceVerifier) ValidatorOption {
 // A Validator over a set compiled against a registry finds it without this.
 func WithRegistryOf(r *Registry) ValidatorOption {
 	return func(v *Validator) { v.registry = r }
+}
+
+// WithUnvalidatedArrayKeys makes Validated return an array whole even when the
+// rules declare only some of its members. Without it the array is left out and
+// the members that were declared are returned in its place.
+func WithUnvalidatedArrayKeys() ValidatorOption {
+	return func(v *Validator) { v.includeUnvalidatedArrayKeys = true }
 }
 
 // WithLocale sets the locale the Validator asks its translator for: the locale of
@@ -639,9 +650,15 @@ func (v *Validator) Failed() map[string][]string {
 }
 
 // Validated returns the values that were declared, sent and not rejected. It is
-// the only way to read a submitted value out of a validated
-// request, so a field nobody wrote a rule for cannot reach a repository through
-// here.
+// the only way to read a submitted value out of a validated request, so a field
+// nobody wrote a rule for cannot reach a repository through here.
+//
+// What comes back is nested the way the names declare it: items.*.name gives an
+// items list of objects that hold a name and nothing else the request sent. See
+// [Input.Tree]. An array whose members the rules declare one by one is not
+// returned whole, because the whole of it holds the members nobody validated;
+// WithUnvalidatedArrayKeys, or Factory.IncludeUnvalidatedArrayKeys, return it
+// whole.
 func (v *Validator) Validated() Input {
 	if v.messages == nil {
 		v.Passes()
@@ -651,11 +668,34 @@ func (v *Validator) Validated() Input {
 		if v.messages.Has(f.name) || v.ShouldBeExcluded(f.name) {
 			continue
 		}
+		if v.holdsUnvalidatedKeys(f) {
+			continue
+		}
 		if value, sent := lookup(v.data, f.name); sent {
 			out[f.name] = value
 		}
 	}
-	return Input{data: out}
+	return newInput(out)
+}
+
+// holdsUnvalidatedKeys reports whether a field is an array whose members the
+// rule set declares one by one. The array as it was sent also holds the members
+// no rule named, so it is left out: what is returned is the members that passed,
+// under the names they were declared with.
+func (v *Validator) holdsUnvalidatedKeys(f *field) bool {
+	if v.includeUnvalidatedArrayKeys || (f.rule("array") == nil && f.rule("list") == nil) {
+		return false
+	}
+	if value, sent := lookup(v.data, f.name); !sent || value == nil {
+		return false
+	}
+	prefix := f.name + "."
+	for _, other := range v.set.fields {
+		if strings.HasPrefix(other.name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Valid returns the data of every attribute that has no message.

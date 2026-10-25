@@ -1,9 +1,12 @@
 package validation
 
 import (
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -163,18 +166,48 @@ func (s *Set) message(f *field, r *rule) string {
 // Input is what passed the rules. It is the only way to read a submitted value
 // out of a validated request: a field the set does not declare is not in here,
 // so a value nobody wrote a rule for cannot reach a repository by accident.
+//
+// It is read by the name a rule declared it under, dotted for a nested one --
+// "address.city", "items.0.name" -- or all at once as a tree with Tree.
 type Input struct {
+	// data is what passed, one entry per declared name, flat.
 	data Data
+	// tree is the same values nested the way their names declare.
+	tree Data
+}
+
+// newInput wraps the values that passed.
+func newInput(flat Data) Input {
+	return Input{data: flat, tree: buildTree(flat)}
+}
+
+// value reads a field: by the exact name it was declared under, and then by
+// walking the tree, so "tags" finds the list that "tags.*" declared.
+func (in Input) value(field string) (any, bool) {
+	if v, ok := lookup(in.data, field); ok {
+		return v, true
+	}
+	return lookup(in.tree, field)
 }
 
 // Has reports whether the field was sent and passed.
-func (in Input) Has(field string) bool { return in.data.Has(field) }
+func (in Input) Has(field string) bool {
+	_, ok := in.value(field)
+	return ok
+}
+
+// Get returns the value of the field in the shape it was sent, and nil when it
+// was not sent. A nested field is a Data and a list is a []any.
+func (in Input) Get(field string) any {
+	v, _ := in.value(field)
+	return v
+}
 
 // String returns the value, or empty when the field was not sent. A field sent
 // more than once is a list, and this is its first value -- what url.Values.Get
 // answers.
 func (in Input) String(field string) string {
-	value := in.data.Get(field)
+	value := in.Get(field)
 	if list, ok := asList(value); ok {
 		if len(list) == 0 {
 			return ""
@@ -187,7 +220,7 @@ func (in Input) String(field string) string {
 // Strings returns every value of a field, which is what a multi-select sends. A
 // field sent once is a list of one.
 func (in Input) Strings(field string) []string {
-	value, sent := lookup(in.data, field)
+	value, sent := in.value(field)
 	if !sent {
 		return nil
 	}
@@ -236,16 +269,121 @@ func (in Input) Time(field, layout string) time.Time {
 }
 
 // File returns the upload that passed, and false when the field holds none.
-func (in Input) File(field string) (File, bool) { return asFile(in.data.Get(field)) }
+func (in Input) File(field string) (File, bool) { return asFile(in.Get(field)) }
 
-// Data returns a copy of everything that passed, in the shape the rules read
-// it. It is a copy so that a caller cannot reach back into the request's own
+// Tree returns everything that passed, nested the way the names declare it: the
+// rules of items.*.name give {"items": [{"name": ...}]}, and the rules of
+// address.city give {"address": {"city": ...}}. A level whose keys are 0, 1, 2...
+// is a list.
+//
+// It holds the fields that were declared and passed and nothing else the request
+// sent. It is a copy, so that a caller cannot reach back into the request's own
 // values through it.
+func (in Input) Tree() Data {
+	copied, _ := deepClone(in.tree).(Data)
+	if copied == nil {
+		return Data{}
+	}
+	return copied
+}
+
+// Data returns a copy of everything that passed, flat: one entry per declared
+// name, with a nested field under its dotted name. Tree is the nested one.
 func (in Input) Data() Data { return in.data.Clone() }
 
 // Values returns a copy of everything that passed, as a submitted form, for a
-// caller that hands the whole thing on.
-func (in Input) Values() url.Values { return in.data.Values() }
+// caller that hands the whole thing on. A nested value is written under its
+// dotted name, and a list of plain values is the several values of one name.
+func (in Input) Values() url.Values {
+	out := url.Values{}
+	for name, value := range in.tree {
+		valuesInto(out, name, value)
+	}
+	return out
+}
+
+// valuesInto writes a value as a form would have sent it. An upload has no
+// spelling in url.Values and is left out.
+func valuesInto(out url.Values, name string, value any) {
+	switch v := value.(type) {
+	case nil:
+		out[name] = []string{""}
+	case File:
+	case []any:
+		plain := true
+		for _, item := range v {
+			if isArray(item) {
+				plain = false
+			}
+			if _, isFile := item.(File); isFile {
+				plain = false
+			}
+		}
+		if plain {
+			list := make([]string, len(v))
+			for i, item := range v {
+				list[i] = stringOf(item)
+			}
+			out[name] = list
+			return
+		}
+		for i, item := range v {
+			valuesInto(out, name+"."+itoa(i), item)
+		}
+	case Data:
+		for key, item := range v {
+			valuesInto(out, name+"."+key, item)
+		}
+	case map[string]any:
+		for key, item := range v {
+			valuesInto(out, name+"."+key, item)
+		}
+	default:
+		out[name] = []string{stringOf(v)}
+	}
+}
+
+// buildTree nests the dotted names of the values that passed.
+func buildTree(flat Data) Data {
+	tree := Data{}
+	for _, name := range slices.Sorted(maps.Keys(flat)) {
+		next, _ := dataSet(tree, strings.Split(name, "."), deepClone(flat[name])).(Data)
+		tree = next
+	}
+	return listsOf(tree).(Data)
+}
+
+// listsOf turns every level whose keys are 0, 1, 2... into a list.
+func listsOf(node any) any {
+	switch n := node.(type) {
+	case Data:
+		converted := make(Data, len(n))
+		for key, item := range n {
+			converted[key] = listsOf(item)
+		}
+		if len(converted) > 0 {
+			list := make([]any, len(converted))
+			for key, item := range converted {
+				i, err := strconv.Atoi(key)
+				if err != nil || i < 0 || i >= len(list) || strconv.Itoa(i) != key {
+					return converted
+				}
+				list[i] = item
+			}
+			return list
+		}
+		return converted
+	case map[string]any:
+		return listsOf(Data(n))
+	case []any:
+		out := make([]any, len(n))
+		for i, item := range n {
+			out[i] = listsOf(item)
+		}
+		return out
+	}
+	return node
+}
 
 // anyAffix reports whether the value carries any of the affixes, with the given
 // match -- the shape starts_with, ends_with and their two refusals share.
