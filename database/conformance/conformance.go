@@ -118,6 +118,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("a model write that duplicates a key is a unique violation", func(t *testing.T) {
 		testModelUniqueViolation(t, db)
 	})
+	t.Run("a listing narrows, orders and counts inside the tenant", func(t *testing.T) {
+		testAListingNarrowsOrdersAndCountsInsideTheTenant(t, db)
+	})
 	t.Run("the presence count is scoped to the tenant", func(t *testing.T) {
 		testThePresenceCount(t, db)
 	})

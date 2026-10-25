@@ -27,6 +27,48 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.86.0 — a listing is declared once, read from the request and applied by the query builder
+
+Nothing that compiled stops compiling and nothing that ran changes what it
+does. This release adds the server side of a table that searches, sorts,
+filters, pages and hides columns through the query string. A service that reads
+`q`, `sort` and `page` by hand, and passes the sort it was given to `OrderBy`,
+can move to it; one that does not keeps working.
+
+| Before | After |
+|---|---|
+| `q := r.URL.Query().Get("q")`, `sort := ...Get("sort")`, `OrderBy(sort)` | `listing, err := pagination.NewListing(pagination.ListingSpec{...})` once, then `state := listing.ParseURL(r.URL)` |
+| `Where("title", "like", "%"+q+"%")` | `models.Notes(db).Base().ApplyListing(state)`: case-insensitive "contains" over the declared columns, wildcards escaped |
+| `Paginate(ctx, g, perPage, page, opts)` and a count per filter written by hand | `rows, result, err := models.Notes(db).Base().Listing(ctx, g, state, "/notes")` |
+
+The pieces:
+
+- **`pagination.ListingSpec`** declares what may be searched, sorted, filtered,
+  paged and hidden, and `pagination.NewListing` checks it and returns the
+  `*Listing`. `Listing.Parse(url.Values)` and `ParseURL(*url.URL)` return a
+  `ListingState` that holds only what the spec declared: a sort key, a facet
+  value, a page size or a hidden column that is not declared falls back to the
+  default, and a request never fails because of one.
+- **`ListingState`** is a value. `ToggleSort`, `WithSort`, `WithSearch`,
+  `ToggleFacet`, `WithFacet`, `ClearFilters`, `WithPage`, `WithPageSize` and
+  `ToggleHidden` return the state a click leads to, with the rules of the
+  table: a change of the search, a facet or the sort goes back to page 1, and a
+  change of the page size keeps the first row on screen. `Values`, `Encode`,
+  `URL` and `PageOptions` write it back as one canonical query string that
+  leaves the defaults out.
+- **`query.Builder.ApplyListing`**, **`ApplyListingFilters`**,
+  **`FacetCountQuery`** and **`Listing`**, and **`model.Builder.ApplyListing`**
+  and **`Listing`**, apply a state to a query and run it. `Listing` returns the
+  rows of the page and a `*pagination.ListingResult`: the state (its page
+  brought back to the last page when it was past it), the page with its total
+  and the count of every facet value, each count made with every filter but the
+  facet's own. Every statement it issues carries the tenant of the Grant.
+- The search columns must hold text, and a facet column holds short text
+  compared with equality. The conformance suite gains a listing test, so each
+  connector module runs it against its server once it requires this release.
+
+---
+
 ## v0.85.0 — Go 1.26.10 is the floor, and toon refuses invalid UTF-8 on Go 1.27
 
 Every module of this repository declares `go 1.26.10`. Go 1.26.10 and 1.27.3
