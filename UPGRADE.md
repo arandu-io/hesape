@@ -27,6 +27,23 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.85.0 — Go 1.26.10 is the floor, and toon refuses invalid UTF-8 on Go 1.27
+
+Every module of this repository declares `go 1.26.10`. Go 1.26.10 and 1.27.3
+carry the fixes for the standard library vulnerabilities an application built
+on this repository reaches -- among them CVE-2026-111943 (crypto/x509 trusts
+the compromised intermediates), CVE-2026-78663 (HTTP/2 server flow control
+refunded twice), CVE-2026-56866 (HTTP/1 client desynchronised after a rejected
+CONNECT) and the html/template, net/textproto and crypto/tls fixes of 1.26.9.
+A build with `GOTOOLCHAIN=auto` (the default) downloads 1.26.10 when the local
+Go is older; one with `GOTOOLCHAIN=local` and an older Go stops with "go.mod
+requires go >= 1.26.10", which is the point. Pin a Docker build image at
+`golang:1.26.10` or newer.
+
+`toon.Marshal` refused a string with invalid UTF-8 only when encoding/json
+wrote the replacement as the escape `\ufffd`; Go 1.27 writes the character
+itself, and the refusal stopped happening. It now recognises both.
+
 ## v0.84.0 — ui.js folds the sidebar, and collected lines name their request
 
 Nothing that compiled stops compiling. Two things change what they do.

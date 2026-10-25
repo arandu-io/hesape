@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/queue/connectors/redis
 
-go 1.26.0
+go 1.26.10
 
 // Its own module, so a project that queues over its own database does not carry
 // a RESP client in its go.sum, its build and its vulnerability surface. In Go

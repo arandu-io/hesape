@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/filesystem/s3
 
-go 1.26.0
+go 1.26.10
 
 // Its own module, and not because the SDK is heavy -- there is no SDK. The root
 // module of hesape declares one dependency in total and its CI reproves any

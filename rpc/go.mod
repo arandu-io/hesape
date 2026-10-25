@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/rpc
 
-go 1.26.0
+go 1.26.10
 
 require (
 	connectrpc.com/connect v1.21.0

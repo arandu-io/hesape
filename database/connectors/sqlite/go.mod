@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/database/connectors/sqlite
 
-go 1.26.0
+go 1.26.10
 
 // Its own module, so a project on Postgres does not carry SQLite -- and the
 // reverse, which is the case that mattered: the skeleton used to carry pgx into

@@ -2,7 +2,7 @@
 // image driver do not carry these codecs or their dependency graph.
 module github.com/arandu-io/hesape/image/drivers/raster
 
-go 1.26.4
+go 1.26.10
 
 require (
 	github.com/arandu-io/hesape v0.84.2

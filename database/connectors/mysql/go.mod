@@ -1,6 +1,6 @@
 module github.com/arandu-io/hesape/database/connectors/mysql
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/arandu-io/hesape v0.84.2
