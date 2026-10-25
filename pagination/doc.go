@@ -1,6 +1,7 @@
 // Package pagination turns a page of rows into the values a pager renders from.
 //
-// It holds three pages, one per question a list page can answer:
+// It holds three pages, one per question a list page can answer, and the state
+// of a listing that asks them:
 //
 //   - [LengthAwarePage], from [NewLengthAwarePage]: knows the total, so it can
 //     say "page 3 of 47" and print numbered links. It costs one COUNT query.
@@ -29,6 +30,28 @@
 // and the application key, and every dependency runs the other way: the
 // repository knows about pagination, pagination knows nothing about
 // repositories.
+//
+// # A listing is declared
+//
+// A table on screen is more than a page: it has a search box, a sort, filters
+// with a count per value, a page size and columns the reader hides, and all of
+// it lives in the query string. [ListingSpec] declares what a listing allows --
+// the searchable columns, the sorts as public keys mapped to columns, the
+// facets and the values each lists, the page sizes, the hideable columns, the
+// names of the parameters -- and [NewListing] checks it. [Listing.Parse] reads a
+// request's query into a [ListingState], and the state holds only what the spec
+// declared: a sort, a facet value, a page size or a column the spec does not
+// know falls back to the default, and nothing in the request is ever an
+// identifier.
+//
+// The state is a value. Its methods return the state a click leads to --
+// [ListingState.ToggleSort], [ListingState.ToggleFacet],
+// [ListingState.WithPageSize], [ListingState.ToggleHidden] -- applying the rules
+// of the table, and [ListingState.Values] writes it back as one canonical query
+// string, so a link built from a state never gathers a parameter. The query
+// builder applies the state to a query and runs it under a Grant, which is where
+// the rows, the total and the facet counts come from; this package only holds
+// the vocabulary, and runs nothing.
 //
 // # The cursor is signed
 //
