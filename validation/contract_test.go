@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arandu-io/hesape/translation"
 	"github.com/arandu-io/hesape/validation"
 )
 
@@ -488,4 +489,143 @@ func TestContractTheRulesIlluminateHasAreAllInTheCatalogue(t *testing.T) {
 	if len(chains) < 100 {
 		t.Errorf("the contract lists %d rules; Illuminate has more", len(chains))
 	}
+}
+
+// TestContractTheConditionalPresenceRules covers required_*, present_*,
+// prohibited_*, missing_* and exclude_*: the rule, the data, and the fields that
+// are expected to fail.
+func TestContractTheConditionalPresenceRules(t *testing.T) {
+	cases := []struct {
+		name  string
+		rules validation.Rules
+		data  validation.Data
+		fails []string
+	}{
+		{"required_with: a sibling present", validation.Rules{"f": "required_with:a,b"}, validation.Data{"a": "x", "f": ""}, []string{"f"}},
+		{"required_with: no sibling present", validation.Rules{"f": "required_with:a,b"}, validation.Data{"f": ""}, nil},
+		{"required_with_all: only one of two", validation.Rules{"f": "required_with_all:a,b"}, validation.Data{"a": "x", "f": ""}, nil},
+		{"required_with_all: both", validation.Rules{"f": "required_with_all:a,b"}, validation.Data{"a": "x", "b": "y", "f": ""}, []string{"f"}},
+		{"required_without: one missing", validation.Rules{"f": "required_without:a,b"}, validation.Data{"a": "x", "f": ""}, []string{"f"}},
+		{"required_without: none missing", validation.Rules{"f": "required_without:a,b"}, validation.Data{"a": "x", "b": "y", "f": ""}, nil},
+		{"required_without_all: all missing", validation.Rules{"f": "required_without_all:a,b"}, validation.Data{"f": ""}, []string{"f"}},
+		{"required_without_all: one present", validation.Rules{"f": "required_without_all:a,b"}, validation.Data{"a": "x", "f": ""}, nil},
+		{"required_if matches", validation.Rules{"f": "required_if:a,x,y"}, validation.Data{"a": "y", "f": ""}, []string{"f"}},
+		{"required_if_accepted", validation.Rules{"f": "required_if_accepted:a"}, validation.Data{"a": "on", "f": ""}, []string{"f"}},
+		{"required_if_declined", validation.Rules{"f": "required_if_declined:a"}, validation.Data{"a": "off", "f": ""}, []string{"f"}},
+		{"accepted_if", validation.Rules{"f": "accepted_if:a,x"}, validation.Data{"a": "x", "f": "no"}, []string{"f"}},
+		{"declined_if", validation.Rules{"f": "declined_if:a,x"}, validation.Data{"a": "x", "f": "yes"}, []string{"f"}},
+		{"present_if: absent", validation.Rules{"f": "present_if:a,x"}, validation.Data{"a": "x"}, []string{"f"}},
+		{"present_if: sent empty", validation.Rules{"f": "present_if:a,x"}, validation.Data{"a": "x", "f": ""}, nil},
+		{"present_unless", validation.Rules{"f": "present_unless:a,x"}, validation.Data{"a": "z"}, []string{"f"}},
+		{"present_with", validation.Rules{"f": "present_with:a"}, validation.Data{"a": "z"}, []string{"f"}},
+		{"present_with_all", validation.Rules{"f": "present_with_all:a,b"}, validation.Data{"a": "z", "b": "y"}, []string{"f"}},
+		{"prohibited_if", validation.Rules{"f": "prohibited_if:a,x"}, validation.Data{"a": "x", "f": "v"}, []string{"f"}},
+		{"prohibited_unless", validation.Rules{"f": "prohibited_unless:a,x"}, validation.Data{"a": "z", "f": "v"}, []string{"f"}},
+		{"prohibited_if_accepted", validation.Rules{"f": "prohibited_if_accepted:a"}, validation.Data{"a": "yes", "f": "v"}, []string{"f"}},
+		{"prohibited_if_declined", validation.Rules{"f": "prohibited_if_declined:a"}, validation.Data{"a": "no", "f": "v"}, []string{"f"}},
+		{"prohibits", validation.Rules{"f": "prohibits:a"}, validation.Data{"a": "x", "f": "v"}, []string{"f"}},
+		{"missing", validation.Rules{"f": "missing"}, validation.Data{"f": ""}, []string{"f"}},
+		{"missing_if", validation.Rules{"f": "missing_if:a,x"}, validation.Data{"a": "x", "f": "v"}, []string{"f"}},
+		{"missing_unless", validation.Rules{"f": "missing_unless:a,x"}, validation.Data{"a": "z", "f": "v"}, []string{"f"}},
+		{"missing_with", validation.Rules{"f": "missing_with:a"}, validation.Data{"a": "z", "f": "v"}, []string{"f"}},
+		{"missing_with_all", validation.Rules{"f": "missing_with_all:a,b"}, validation.Data{"a": "z", "b": "y", "f": "v"}, []string{"f"}},
+		{"sometimes: absent is not asked", validation.Rules{"f": "sometimes|required"}, validation.Data{}, nil},
+		{"sometimes: sent empty is asked", validation.Rules{"f": "sometimes|required"}, validation.Data{"f": ""}, []string{"f"}},
+		{"bail stops at the first", validation.Rules{"f": "bail|integer|min:5"}, validation.Data{"f": "x"}, []string{"f"}},
+		{"nested sibling by wildcard", validation.Rules{"items.*.a": "sometimes", "items.*.b": "required_with:items.*.a"},
+			validation.Data{"items": list(keyed("a", "x", "b", ""), keyed("a", "", "b", ""))}, []string{"items.0.b"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			errs := runSet(mustCompile(t, withSiblings(c.rules)), c.data)
+			got := errs.Keys()
+			if len(got) != len(c.fails) || (len(got) > 0 && got[0] != c.fails[0]) {
+				t.Errorf("failed = %v, want %v (%v)", got, c.fails, errs)
+			}
+		})
+	}
+
+	// The exclude rules take the field out of the result without a message.
+	set := mustCompile(t, validation.Rules{"kind": "required", "a": "exclude_if:kind,x|string", "b": "exclude_unless:kind,x|string",
+		"c": "exclude_with:kind|string", "d": "exclude_without:zzz|string", "e": "exclude|string", "zzz": "sometimes"})
+	v := validation.Make(validation.Data{"kind": "x", "a": "1", "b": "2", "c": "3", "d": "4", "e": "5"}, set)
+	in, err := v.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]bool{"a": false, "b": true, "c": false, "d": false, "e": false} {
+		if in.Has(field) != want {
+			t.Errorf("Has(%s) = %v, want %v", field, in.Has(field), want)
+		}
+	}
+}
+
+// withSiblings declares the fields a case's rules point at, so that the set
+// compiles: a rule that names a field this set does not declare is a boot error.
+func withSiblings(rules validation.Rules) validation.Rules {
+	out := validation.Rules{"a": "sometimes", "b": "sometimes", "zzz": "sometimes"}
+	for k, v := range rules {
+		out[k] = v
+	}
+	return out
+}
+
+// TestContractTheErrorBagAndTheValidatedResult covers failed(), the bag and the
+// result of a failed run.
+func TestContractTheErrorBagAndTheValidatedResult(t *testing.T) {
+	set := mustCompile(t, validation.Rules{"a": "required|min:3", "b": "required"})
+	v := validation.Make(validation.Data{"a": "x", "b": "ok", "c": "undeclared"}, set)
+	if v.Passes() {
+		t.Fatal("passed")
+	}
+	if got := v.Failed()["a"]; len(got) != 1 || got[0] != "min" {
+		t.Errorf("Failed()[a] = %v", got)
+	}
+	if v.Errors().Has("b") || !v.Errors().Has("a") {
+		t.Errorf("errors = %v", v.Errors())
+	}
+	if !v.Validated().Has("b") || v.Validated().Has("a") || v.Validated().Has("c") {
+		t.Errorf("Validated() holds %v", v.Validated().Data())
+	}
+
+	_, err := v.ValidateWithBag("signup")
+	var invalid *validation.ValidationException
+	if !errorsAs(err, &invalid) || invalid.GetErrorBag() != "signup" || invalid.GetStatus() != 422 {
+		t.Errorf("ValidateWithBag = %v", err)
+	}
+}
+
+func errorsAs(err error, target **validation.ValidationException) bool {
+	e, ok := err.(*validation.ValidationException)
+	if ok {
+		*target = e
+	}
+	return ok
+}
+
+// TestContractCustomAttributesAndMessages.
+func TestContractCustomAttributesAndMessages(t *testing.T) {
+	set := mustCompile(t, validation.Rules{"first_name": "required|min:3", "items.*.sku": "required"})
+	v := validation.Make(validation.Data{"first_name": "", "items": list(keyed("sku", ""))}, set,
+		validation.WithTranslator(englishForTests{}),
+		validation.WithCustomAttributes(map[string]string{"first_name": "nome", "items.*.sku": "código"}),
+		validation.WithCustomMessages(map[string]any{"first_name.required": "Diga o :attribute!"}),
+	)
+	errs := v.Errors()
+	if errs.First("first_name") != "Diga o nome!" {
+		t.Errorf("first_name = %q", errs.First("first_name"))
+	}
+	if errs.First("items.0.sku") != "The código field is required." {
+		t.Errorf("items.0.sku = %q", errs.First("items.0.sku"))
+	}
+}
+
+// englishForTests answers the bundled English sentences.
+type englishForTests struct{}
+
+func (englishForTests) Get(key string, replace map[string]any, locale string) any {
+	return validation.FromTranslation(translation.New(nil, "en", "en")).Get(key, replace, locale)
+}
+func (englishForTests) Choice(key string, number int, replace map[string]any, locale string) string {
+	return key
 }

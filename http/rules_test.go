@@ -244,6 +244,9 @@ func TestRulesRunBeforeTheConversionAndBeforeValidate(t *testing.T) {
 	if got := problem.Errors["age"]; len(got) == 0 || !strings.Contains(got[0], "inteiro") {
 		t.Errorf("errors[age] = %v, want the sentence of the integer rule first", got)
 	}
+	if len(problem.Errors["cpf"]) == 0 {
+		t.Errorf("the rules did not speak about cpf: %v -- the conversion answered first", problem.Errors)
+	}
 	for _, step := range order {
 		if step == "validate" {
 			t.Errorf("Validate ran although the rules failed: %v", order)

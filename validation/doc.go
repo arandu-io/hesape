@@ -13,6 +13,20 @@
 //		return err
 //	}
 //
+// The same field takes its rules as a list, which can hold what a string cannot --
+// a Rule, a ValidationRule, a function, a builder, the cases of a Go enum type -- and
+// whose elements are never split at a pipe:
+//
+//	"cpf":    []any{"required", "cpf"},
+//	"status": []any{validation.EnumFrom(enums.InvoiceStatusValues)},
+//	"code":   []any{"regex:^(A|B)[0-9]+$", func(attribute string, value any, fail func(string)) { ... }},
+//
+// A request type declares its rules itself with a Rules method, and the
+// framework runs them in Bind (see RequestRules), in the language of the request
+// (see FromTranslation) and with the rules of the modules the application
+// installed (see Factory.Use). Validated returns what passed nested the way the
+// names declare it, and Set.JSONSchema reads the same declaration as a schema.
+//
 // A rule set is compiled ONCE, in a package-level variable, and every rule
 // string is parsed and checked there: an unknown rule, a missing or unparseable
 // argument, a pattern that does not compile, a cross-field reference naming a
@@ -29,13 +43,15 @@
 //	compile.go       the boot-time compile; parser.go is the per-request half
 //	rules.go         the catalogue: arity, check and message of every rule
 //
-// # Four things worth knowing before writing a rule string
+// # Five things worth knowing before writing a rule string
 //
 //   - date_format takes a GO layout -- date_format:2006-01-02, never
 //     date_format:Y-m-d. It is a layout in the host language, and it is checked
 //     at boot.
 //   - regex takes a GO pattern: RE2, without delimiters, without backreferences
 //     and without lookaround. It is compiled at boot.
+//   - `timezone` admits the canonical regions and UTC, and timezone:all_with_bc
+//     the legacy names such as US/Eastern.
 //   - `unique` and `exists` take an auth Grant and a PresenceVerifier, given
 //     with WithPresence, and fail closed without one. A read is authorized like
 //     any other: "the validator only counts rows" is how a count of rows becomes
