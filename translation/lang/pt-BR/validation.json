@@ -65,6 +65,7 @@
   "in_array": "O campo :attribute deve existir em :other.",
   "in_array_keys": "O campo :attribute deve conter pelo menos uma das seguintes chaves: :values.",
   "integer": "O campo :attribute deve ser um número inteiro.",
+  "invalid": "O campo :attribute é inválido.",
   "ip": "O campo :attribute deve ser um endereço IP válido.",
   "ipv4": "O campo :attribute deve ser um endereço IPv4 válido.",
   "ipv6": "O campo :attribute deve ser um endereço IPv6 válido.",

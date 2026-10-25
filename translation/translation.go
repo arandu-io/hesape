@@ -427,6 +427,35 @@ func (t *Translator) set(namespace, group, locale, item, value string) {
 	t.loaded[namespace][group][locale][item] = value
 }
 
+// Lines returns every line of one group, for the locale asked for and the locales
+// that follow it, the nearest locale having the last word. The items are dotted:
+// "min.string" is the item "string" of the "min" line group of a validation
+// file.
+//
+// It is how a reader that needs a whole group -- the custom messages and the
+// attribute names of validation, which are looked up by pattern and not by key --
+// reads it. A "namespace::group" names a module's catalogue. A nil Translator
+// has no lines.
+func (t *Translator) Lines(locale, group string) Lines {
+	if t == nil {
+		return nil
+	}
+	namespace := AppNamespace
+	if i := strings.Index(group, "::"); i >= 0 {
+		namespace, group = group[:i], group[i+2:]
+	}
+
+	out := make(Lines)
+	locales := t.localeArray(locale)
+	for i := len(locales) - 1; i >= 0; i-- {
+		t.Load(namespace, group, locales[i])
+		t.mu.RLock()
+		maps.Copy(out, t.loaded[namespace][group][locales[i]])
+		t.mu.RUnlock()
+	}
+	return out
+}
+
 // Load answers Translator::load(): it asks the loader for one group of one
 // locale and keeps what comes back.
 //
