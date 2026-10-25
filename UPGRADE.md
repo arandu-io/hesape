@@ -27,6 +27,60 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.88.0 — a request declares its rules, validation speaks the language of the request and a module installs its own rules
+
+Three things stop compiling, and several rules change what they answer. Read the
+two tables; the rest of the release is additions.
+
+**What stops compiling**
+
+| Before | After |
+|---|---|
+| `validation.Rules` is `map[string]string`; a `map[string]string` variable is passed where `Rules` is wanted, or a value is ranged over as text | `Rules` is `map[string]any`: a value is a pipe string, a `[]string`, or a `[]any` list that can hold a `Rule`, a `ValidationRule`, a function, a builder. Copy the entries into a `Rules`, and read them with a type switch |
+| `validation.When(cond, "required", "nullable")` is the only form; `NewConditionalRules(cond, rules string, defaults ...string)` | The rules are `any` (either form, objects too) in both branches. A call that passes strings keeps compiling; a function value typed `func(...) string` does not |
+| `validation.ForEach(func(value any, attribute string, data Data) Rules { return Rules{"items.0.price": "required"} })` | The callback returns `any`, and a `Rules` it returns is keyed **relative to the member**: `Rules{"price": "required"}`. A string or a list is the rules of the member itself |
+| `parser.MergeRules(rules, attribute, "max:255")` takes and keeps a string; `FilterConditionalRules(map[string]any, data)` | `MergeRules` takes `any` and returns a string while every rule is text, and a list when one is an object; `FilterConditionalRules` takes `Rules` |
+
+**What changes what it answers**
+
+| Before | After |
+|---|---|
+| `Validated()` returns every declared name flat, an `array` field whole with the members nobody validated, and `Input.Values()` drops a nested value | `Input.Tree()` is the nested result (`items.*.name` is `{"items": [{"name": ...}]}`); an array whose members are declared one by one is not returned whole; `Input.Get` reads either shape and `Strings("tags")` still finds the list; `Values()` writes a nested value under its dotted name. `Factory.IncludeUnvalidatedArrayKeys()` or `WithUnvalidatedArrayKeys()` restores the old array |
+| `required_if:subscribed,1` holds when the other field is the JSON boolean `true` | The other field is compared the way Illuminate does: a boolean is compared by type, so write `required_if:subscribed,true`; a field with the `boolean` rule reads `true`/`false` from the text, and numeric texts are one number (`"01"` equals `1`) |
+| `distinct` on `items.*.id` compares nothing, because each member is a scalar | Each member is compared with the same field of the others; `distinct` on a field that holds a list still compares the members of the list |
+| `gt`, `gte`, `lt`, `lte` compare `"20"` and `"100"` by length unless the field says `numeric` | A numeric value is compared as a number on these four rules, and their sentence says so |
+| `timezone` admits every name the platform loads, `US/Eastern` and `GMT` included | `timezone` admits the canonical regions and `UTC`; `timezone:all_with_bc` admits the legacy names, and `timezone:europe` narrows to a region |
+| `starts_with`, `ends_with` and their two refusals pass an array; `lowercase` and `uppercase` pass any value | They refuse a value that is not text (a number is read as its text by the first four) |
+| `request.Validate(rules)` says "is required" | With a translator or a Factory on the request context (`WithValidation`, `NewAdapter(..., WithValidator(f))`, or `translation.WithTranslator`) it says `O campo name é obrigatório.` in the locale of the request. With neither, nothing changes |
+| The pt-BR sentences for `in`, `not_in`, `enum`, `exists`, `unique` and `uploaded` name the field with an article (`O :attribute selecionado`) | They say `O valor selecionado para o campo :attribute é inválido.` Override a line with `validation.<rule>` in your language file |
+| `ctx.Bind(&req)` converts only | A `req` with a `Rules() validation.Rules` method has the rules run first, over the raw input; a type that already had a method of that name now has it called |
+
+**What is new**
+
+- `array_keys`, `in_array_keys`, `doesnt_contain`, `base64` and `encoding` are rules, no longer refused names. `integer:strict`,
+  `numeric:strict`, `boolean:strict`, `uuid:4` (1 to 8, `nil`, `max`) and `timezone:<region>` are read.
+- `validation.FromTranslation(tr)` makes a `*translation.Translator` usable as a `validation.Translator`; `validation.WithLocale`
+  sets the locale of a run. `translation.Translator.Lines(locale, group)` reads a whole group.
+- `Rules` accepts a list per field, `validation.EnumFrom(enums.InvoiceStatusValues)` reads the cases off the generated enum
+  type, and a closure is `func(attribute string, value any, fail func(message string))`.
+- `Factory.Use(provider)` installs the rules of a module, declared with `RuleDef` in a `Registry`: the check, the parameters, the
+  sentence in each locale and the function that fills its placeholders. `Factory.Compile`, `Factory.Check(sets...)` and
+  `Factory.CheckRequests(requests...)` are the boot checks; they fail naming the type, the field, the rule and the file.
+- `validation.RequestRules`, `RequestMessages` and `RequestAttributes`; `Factory.ForRequest` compiles a type once.
+  `Context.Validated()` returns what the rules let through, and `Set.JSONSchema()` reads the same declaration as a schema.
+
+**Deprecated, not removed.** `validation.Extend`, `ExtendImplicit`, `ExtendDependent` and the Factory methods of the same
+names register into a table every rule set in the process is compiled against, and the only place that table can be filled
+before a package-level set is compiled is the `init` of an imported package. A module that does that (arandu-br v0.4.1 does)
+keeps working. Move it to a `Provider` and install it where the application is wired:
+
+```go
+factory := validation.NewFactory(validation.FromTranslation(tr)).Use(br.Rules())
+```
+
+A set that names a rule the module declares and is compiled before `Use` runs is compiled with `validation.WithModuleRules()`
+and checked with `factory.Check(sets...)`; a request type needs neither, because its rules are compiled on first use.
+
 ## v0.87.0 — ui.js drives the data table: menus, search, selection and the swap
 
 `ui.js` takes over the behavior kyse v0.45.0's DataTable needs, and **kyse v0.45.0 requires it**: an application that
