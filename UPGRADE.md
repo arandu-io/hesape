@@ -27,6 +27,24 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.87.0 — ui.js drives the data table: menus, search, selection and the swap
+
+`ui.js` takes over the behavior kyse v0.45.0's DataTable needs, and **kyse v0.45.0 requires it**: an application that
+upgrades kyse must upgrade hesape first, and one that upgrades hesape and keeps an older kyse loses the Columns menu,
+because `data-column-toggle` is now a link and not a checkbox. No Go API changes.
+
+- **Menus** are `<details>` elements positioned by the script, closed by Escape and by a click outside; a row's menu keeps
+  the row highlighted while it is open.
+- **Search** sends one request, on a pause in typing or on Enter, and never both.
+- **Selection** survives a filter, a sort and a page change: the script keeps the selected keys per table and marks them
+  again after each swap; the header checkbox shows the page's state.
+- **The swap** keeps the focus and text of the search box, an open menu and the table's sideways scroll, and the history
+  entry it leaves is the canonical address of the state, without duplicated parameters.
+- **A complete list** (everything in the page) takes the click before htmx, so a boosted layout no longer sends a sort or a
+  page to the server.
+
+An application that embeds its own bundle rebuilds it with `aru view:build`.
+
 ## v0.86.0 — a listing is declared once, read from the request and applied by the query builder
 
 Nothing that compiled stops compiling and nothing that ran changes what it
