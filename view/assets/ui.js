@@ -492,8 +492,9 @@
 
 	/* ---- the swap ------------------------------------------------------- *
 	 *
-	 * The region is replaced whole. Before it goes, what the reader had open
-	 * and where the cursor was are taken down; as soon as the new region is in,
+	 * The region is replaced whole. Before it goes, what the reader had open,
+	 * where the cursor was and how far the table was scrolled sideways are taken
+	 * down; as soon as the new region is in,
 	 * they are put back, before the next frame, so a menu that stays open
 	 * while its boxes are ticked never closes at all.
 	 */
@@ -504,7 +505,9 @@
 		tableSwapping[root.id] = true;
 		var open = [];
 		each(root, 'details[data-menu][open]', function (menu) { if (menu.id) open.push(menu.id); });
-		var carried = { menus: open, focus: null };
+		var scroller = root.querySelector('[data-part="table"]');
+		scroller = scroller && scroller.parentElement;
+		var carried = { menus: open, focus: null, scroll: scroller ? scroller.scrollLeft : 0 };
 		var active = document.activeElement;
 		if (active && active !== document.body && root.contains(active) && active.id) {
 			carried.focus = {
@@ -522,6 +525,9 @@
 			var carried = tableCarried[id];
 			if (!root || !carried) return;
 			syncSelection(root);
+			var scroller = root.querySelector('[data-part="table"]');
+			scroller = scroller && scroller.parentElement;
+			if (scroller && carried.scroll) scroller.scrollLeft = carried.scroll;
 			carried.menus.forEach(function (one) {
 				var menu = document.getElementById(one);
 				if (menu && root.contains(menu)) {
