@@ -1,7 +1,7 @@
 {
   "accepted": "O campo :attribute deve ser aceito.",
   "accepted_if": "O campo :attribute deve ser aceito quando :other for :value.",
-  "active_url": "O campo :attribute deve ser uma URL válida.",
+  "active_url": "O campo :attribute deve ser uma URL ativa.",
   "after": "O campo :attribute deve ser uma data posterior a :date.",
   "after_or_equal": "O campo :attribute deve ser uma data posterior ou igual a :date.",
   "alpha": "O campo :attribute deve conter apenas letras.",
@@ -9,7 +9,9 @@
   "alpha_num": "O campo :attribute deve conter apenas letras e números.",
   "any_of": "O campo :attribute é inválido.",
   "array": "O campo :attribute deve ser uma lista.",
+  "array_keys": "O campo :attribute só pode conter as seguintes chaves: :values.",
   "ascii": "O campo :attribute deve conter apenas caracteres alfanuméricos e símbolos de um byte.",
+  "base64": "O campo :attribute deve ser um texto Base64 válido.",
   "before": "O campo :attribute deve ser uma data anterior a :date.",
   "before_or_equal": "O campo :attribute deve ser uma data anterior ou igual a :date.",
   "between": {
@@ -34,12 +36,14 @@
   "digits_between": "O campo :attribute deve ter entre :min e :max dígitos.",
   "dimensions": "O campo :attribute tem dimensões de imagem inválidas.",
   "distinct": "O campo :attribute tem um valor repetido.",
+  "doesnt_contain": "O campo :attribute não pode conter nenhum dos seguintes valores: :values.",
   "doesnt_end_with": "O campo :attribute não pode terminar com um destes: :values.",
   "doesnt_start_with": "O campo :attribute não pode começar com um destes: :values.",
   "email": "O campo :attribute deve ser um endereço de e-mail válido.",
+  "encoding": "O campo :attribute deve estar codificado em :encoding.",
   "ends_with": "O campo :attribute deve terminar com um destes: :values.",
-  "enum": "O :attribute selecionado é inválido.",
-  "exists": "O :attribute selecionado é inválido.",
+  "enum": "O valor selecionado para o campo :attribute é inválido.",
+  "exists": "O valor selecionado para o campo :attribute é inválido.",
   "extensions": "O campo :attribute deve ter uma destas extensões: :values.",
   "file": "O campo :attribute deve ser um arquivo.",
   "filled": "O campo :attribute deve ter um valor.",
@@ -57,8 +61,9 @@
   },
   "hex_color": "O campo :attribute deve ser uma cor hexadecimal válida.",
   "image": "O campo :attribute deve ser uma imagem.",
-  "in": "O :attribute selecionado é inválido.",
+  "in": "O valor selecionado para o campo :attribute é inválido.",
   "in_array": "O campo :attribute deve existir em :other.",
+  "in_array_keys": "O campo :attribute deve conter pelo menos uma das seguintes chaves: :values.",
   "integer": "O campo :attribute deve ser um número inteiro.",
   "ip": "O campo :attribute deve ser um endereço IP válido.",
   "ipv4": "O campo :attribute deve ser um endereço IPv4 válido.",
@@ -91,7 +96,7 @@
   "min": {
     "array": "O campo :attribute deve ter pelo menos :min itens.",
     "file": "O campo :attribute deve ter pelo menos :min quilobytes.",
-    "numeric": "O campo :attribute deve ser pelo menos :min.",
+    "numeric": "O campo :attribute deve ser no mínimo :min.",
     "string": "O campo :attribute deve ter pelo menos :min caracteres."
   },
   "min_digits": "O campo :attribute deve ter pelo menos :min dígitos.",
@@ -101,7 +106,7 @@
   "missing_with": "O campo :attribute deve estar ausente quando :values estiver presente.",
   "missing_with_all": "O campo :attribute deve estar ausente quando :values estiverem presentes.",
   "multiple_of": "O campo :attribute deve ser múltiplo de :value.",
-  "not_in": "O :attribute selecionado é inválido.",
+  "not_in": "O valor selecionado para o campo :attribute é inválido.",
   "not_regex": "O formato do campo :attribute é inválido.",
   "numeric": "O campo :attribute deve ser um número.",
   "password": {
@@ -109,7 +114,7 @@
     "mixed": "O campo :attribute deve conter pelo menos uma letra maiúscula e uma minúscula.",
     "numbers": "O campo :attribute deve conter pelo menos um número.",
     "symbols": "O campo :attribute deve conter pelo menos um símbolo.",
-    "uncompromised": "O :attribute informado apareceu em um vazamento de dados. Escolha outro :attribute."
+    "uncompromised": "O valor informado para o campo :attribute apareceu em um vazamento de dados. Escolha outro valor."
   },
   "present": "O campo :attribute deve estar presente.",
   "present_if": "O campo :attribute deve estar presente quando :other for :value.",
@@ -143,10 +148,10 @@
   "starts_with": "O campo :attribute deve começar com um destes: :values.",
   "string": "O campo :attribute deve ser um texto.",
   "timezone": "O campo :attribute deve ser um fuso horário válido.",
-  "unique": "Este :attribute já está em uso.",
-  "uploaded": "Falha ao enviar o :attribute.",
+  "ulid": "O campo :attribute deve ser um ULID válido.",
+  "unique": "O valor informado para o campo :attribute já está em uso.",
+  "uploaded": "Falha ao enviar o campo :attribute.",
   "uppercase": "O campo :attribute deve estar em maiúsculas.",
   "url": "O campo :attribute deve ser uma URL válida.",
-  "ulid": "O campo :attribute deve ser um ULID válido.",
   "uuid": "O campo :attribute deve ser um UUID válido."
 }

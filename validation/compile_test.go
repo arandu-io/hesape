@@ -258,7 +258,7 @@ func TestEveryDocumentedRuleIsShipped(t *testing.T) {
 // refusal list is an alias somebody remembers wrong, and "unknown rule" reads
 // as an omission.
 func TestASecondSpellingOfARuleIsRedirectedRatherThanUnknown(t *testing.T) {
-	for _, rule := range []string{"int", "bool", "notregex", "array_keys", "base64", "same_as"} {
+	for _, rule := range []string{"int", "bool", "notregex", "same_as", "unique_with", "filled_if"} {
 		failures := refuse(t, validation.Rules{"f": rule})
 		if strings.Contains(failures[0].Msg, "unknown rule") {
 			t.Errorf("%q is refused as unknown rather than with a redirection", rule)

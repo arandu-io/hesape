@@ -198,7 +198,7 @@ func (v *Validator) getMessage(attribute, rule string) string {
 
 		keys := []string{customKey}
 		if slices.Contains(sizeRules, lowerRule) {
-			keys = []string{customKey + "." + v.getAttributeType(attribute), customKey}
+			keys = []string{customKey + "." + v.attributeTypeFor(attribute, lowerRule), customKey}
 		}
 
 		// Then a custom defined validation message for the attribute and rule.
@@ -242,7 +242,7 @@ func (v *Validator) getInlineMessage(attribute, rule string) (string, bool) {
 		return "", false
 	}
 	if group, isGroup := asGroup(entry); isGroup && slices.Contains(sizeRules, rule) {
-		sentence, held := group[v.getAttributeType(attribute)]
+		sentence, held := group[v.attributeTypeFor(attribute, rule)]
 		return sentence, held
 	}
 	sentence, isSentence := entry.(string)
@@ -335,9 +335,22 @@ func (v *Validator) getWildcardCustomMessages(messages map[string]any, search, d
 // There are four types of size validation. The attribute may be a number, a
 // file, a list or a string, so the line is read out of the group its type names.
 func (v *Validator) getSizeMessage(attribute, rule string) string {
-	key := "validation." + str.Snake(rule, "_") + "." + v.getAttributeType(attribute)
+	key := "validation." + str.Snake(rule, "_") + "." + v.attributeTypeFor(attribute, rule)
 
 	return line(v.translator().Get(key, nil, ""), key)
+}
+
+// attributeTypeFor is getAttributeType for the sentence one rule says. The four
+// comparisons measure a number as a number whatever else the field declares, so
+// their sentence does too.
+func (v *Validator) attributeTypeFor(attribute, rule string) string {
+	switch rule {
+	case "gt", "gte", "lt", "lte":
+		if _, isNumber := numericText(v.GetValue(attribute)); isNumber {
+			return "numeric"
+		}
+	}
+	return v.getAttributeType(attribute)
 }
 
 // getAttributeType names what an attribute's size measures: numeric, file, array

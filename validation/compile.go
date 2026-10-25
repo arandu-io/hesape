@@ -326,6 +326,12 @@ func (c *compiler) checkField(f *field) {
 			if _, declared := c.set.byName[r.args[i]]; declared {
 				continue
 			}
+			if strings.Contains(r.args[i], "*") {
+				// A path with a wildcard names a field of every member of a list,
+				// and the members are the request's to send: there is no
+				// declared name to compare it with at boot.
+				continue
+			}
 			if _, isNumber := number(r.args[i]); isNumber && comparisons[r.name] {
 				// gt:10 is a literal bound: the parameter is a number and no
 				// field of that name is declared, which is the fork the rule
@@ -622,6 +628,45 @@ func checkEmailValidations(c *checkCtx) error {
 				"stored, in the service", c.r.name, a)
 		}
 		return fmt.Errorf("rule %q takes %s, got %q", c.r.name, quoteAll(emailValidations), a)
+	}
+	return nil
+}
+
+// checkStrict refuses an argument that is not the one `integer`, `numeric` and
+// `boolean` read.
+func checkStrict(c *checkCtx) error {
+	for _, a := range c.r.args {
+		if a != "strict" {
+			return fmt.Errorf("rule %q takes only %q as an argument, got %q", c.r.name, "strict", a)
+		}
+	}
+	return nil
+}
+
+// checkUuid refuses a version `uuid` cannot test for.
+func checkUuid(c *checkCtx) error {
+	if len(c.r.args) == 0 {
+		return nil
+	}
+	if _, ok := uuidVersion(c.r.args[0]); !ok {
+		return fmt.Errorf("rule %q takes a version from 1 to 8, %q or %q, got %q",
+			c.r.name, "nil", "max", c.r.args[0])
+	}
+	return nil
+}
+
+// checkTimezone refuses a zone group `timezone` does not know.
+func checkTimezone(c *checkCtx) error {
+	if len(c.r.args) == 0 {
+		return nil
+	}
+	group := strings.ToLower(c.r.args[0])
+	if group == "per_country" {
+		return fmt.Errorf("rule %q cannot narrow by country: the zone-to-country table is a data set "+
+			"this package does not carry. Name the region, as in timezone:europe", c.r.name)
+	}
+	if _, known := timezoneGroups[group]; !known {
+		return fmt.Errorf("rule %q takes %s, got %q", c.r.name, quoteAll(timezoneGroupNames()), c.r.args[0])
 	}
 	return nil
 }

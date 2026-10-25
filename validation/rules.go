@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -423,14 +424,14 @@ var specs = map[string]*spec{
 	// Type.
 	// ---------------------------------------------------------------------
 	"numeric": {
-		sizeIsValue: true,
-		eval:        (*Validator).ValidateNumeric,
-		message:     func(f *field, r *rule) string { return "must be a number" },
+		maxArgs: 1, check: checkStrict, sizeIsValue: true,
+		eval:    (*Validator).ValidateNumeric,
+		message: func(f *field, r *rule) string { return "must be a number" },
 	},
 	"integer": {
-		sizeIsValue: true,
-		eval:        (*Validator).ValidateInteger,
-		message:     func(f *field, r *rule) string { return "must be a whole number" },
+		maxArgs: 1, check: checkStrict, sizeIsValue: true,
+		eval:    (*Validator).ValidateInteger,
+		message: func(f *field, r *rule) string { return "must be a whole number" },
 	},
 	"decimal": {
 		minArgs: 1, maxArgs: 2, sizeIsValue: true, check: chain(needWholeNumbers, ascending),
@@ -443,6 +444,7 @@ var specs = map[string]*spec{
 		},
 	},
 	"boolean": {
+		maxArgs: 1, check: checkStrict,
 		eval:    (*Validator).ValidateBoolean,
 		message: func(f *field, r *rule) string { return "must be true or false" },
 	},
@@ -453,6 +455,15 @@ var specs = map[string]*spec{
 	"ascii": {
 		eval:    (*Validator).ValidateAscii,
 		message: func(f *field, r *rule) string { return "must contain only ASCII characters" },
+	},
+	"base64": {
+		eval:    (*Validator).ValidateBase64,
+		message: func(f *field, r *rule) string { return "must be valid Base64" },
+	},
+	"encoding": {
+		minArgs: 1, maxArgs: 1, check: checkEncoding,
+		eval:    (*Validator).ValidateEncoding,
+		message: func(f *field, r *rule) string { return "must be encoded in " + r.args[0] },
 	},
 	"json": {
 		eval:    (*Validator).ValidateJson,
@@ -481,6 +492,25 @@ var specs = map[string]*spec{
 		minArgs: 1, maxArgs: -1,
 		eval:    (*Validator).ValidateContains,
 		message: func(f *field, r *rule) string { return "must contain " + and(r.args) },
+	},
+	"array_keys": {
+		minArgs: 1, maxArgs: -1,
+		eval: (*Validator).ValidateArrayKeys,
+		message: func(f *field, r *rule) string {
+			return "may only contain the keys " + and(r.args)
+		},
+	},
+	"in_array_keys": {
+		minArgs: 1, maxArgs: -1,
+		eval: (*Validator).ValidateInArrayKeys,
+		message: func(f *field, r *rule) string {
+			return "must contain at least one of the keys " + or(r.args)
+		},
+	},
+	"doesnt_contain": {
+		minArgs: 1, maxArgs: -1,
+		eval:    (*Validator).ValidateDoesntContain,
+		message: func(f *field, r *rule) string { return "must not contain " + or(r.args) },
 	},
 	"in_array": {
 		minArgs: 1, maxArgs: 1, refs: []int{0},
@@ -526,6 +556,7 @@ var specs = map[string]*spec{
 		message: func(f *field, r *rule) string { return "must be a date on or before " + moment(r.args[0]) },
 	},
 	"timezone": {
+		maxArgs: 1, check: checkTimezone,
 		eval:    (*Validator).ValidateTimezone,
 		message: func(f *field, r *rule) string { return "is not a valid time zone" },
 	},
@@ -548,7 +579,7 @@ var specs = map[string]*spec{
 		message: func(f *field, r *rule) string { return "is not an active URL" },
 	},
 	"uuid": {
-		maxArgs: 1,
+		maxArgs: 1, check: checkUuid,
 		eval:    (*Validator).ValidateUuid,
 		message: func(f *field, r *rule) string { return "is not a valid UUID" },
 	},
@@ -956,4 +987,77 @@ func joinWith(list []string, conjunction string) string {
 		return list[0]
 	}
 	return strings.Join(list[:len(list)-1], ", ") + " " + conjunction + " " + list[len(list)-1]
+}
+
+// uuidVersion reads the version a `uuid` rule was written with: 0 for "nil", -1
+// for "max", and 1 to 8 for the versions of RFC 9562.
+func uuidVersion(arg string) (int, bool) {
+	switch strings.ToLower(arg) {
+	case "nil", "0":
+		return 0, true
+	case "max":
+		return -1, true
+	}
+	n, ok := whole(arg)
+	return int(n), ok && n >= 1 && n <= 8
+}
+
+// hasUUIDVersion reports whether a well-formed UUID is of the given version. The
+// numbered versions are those of the RFC 4122 variant; the nil and max UUIDs are
+// the two that belong to no version.
+func hasUUIDVersion(s string, version int) bool {
+	switch version {
+	case 0:
+		return strings.Trim(s, "0-") == ""
+	case -1:
+		return strings.EqualFold(strings.ReplaceAll(s, "-", ""), "ffffffffffffffffffffffffffffffff")
+	}
+	variant := s[19]
+	if !strings.ContainsRune("89abAB", rune(variant)) {
+		return false
+	}
+	return int(s[14]-'0') == version
+}
+
+// timezoneRegions are the continents a zone name begins with.
+var timezoneRegions = []string{
+	"africa", "america", "antarctica", "arctic", "asia", "atlantic", "australia",
+	"europe", "indian", "pacific",
+}
+
+// timezoneGroups maps the parameter of `timezone` to the names it admits.
+var timezoneGroups = func() map[string]func(string) bool {
+	groups := map[string]func(string) bool{
+		"all": func(name string) bool {
+			if name == "UTC" {
+				return true
+			}
+			region, _, nested := strings.Cut(name, "/")
+			return nested && slices.Contains(timezoneRegions, strings.ToLower(region)) &&
+				region == titleCase(region)
+		},
+		"all_with_bc": func(string) bool { return true },
+		"utc":         func(name string) bool { return name == "UTC" },
+	}
+	for _, region := range timezoneRegions {
+		prefix := titleCase(region) + "/"
+		groups[region] = func(name string) bool { return strings.HasPrefix(name, prefix) }
+	}
+	return groups
+}()
+
+func timezoneGroupNames() []string {
+	names := make([]string, 0, len(timezoneGroups))
+	for name := range timezoneGroups {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -284,22 +283,91 @@ func sameValue(a, b any) bool {
 	return a == b
 }
 
-// looseContains reports whether the value appears among the parameters, reading
-// nil as "null" and a bool as its name or its digit. It is how every dependent
-// rule compares the other field.
-func looseContains(list []string, v any) bool {
-	if v == nil {
-		return slices.Contains(list, "null") || slices.Contains(list, "NULL")
+// looseEqual is the == of the language Illuminate was written in, narrowed to
+// the shapes a request holds: two numeric texts are equal when they are the same
+// number, a boolean is equal to whatever has the same truth, and anything else is
+// equal when it prints the same. An array equals nothing but itself.
+func looseEqual(a, b any) bool {
+	if isArray(a) || isArray(b) {
+		return sameValue(a, b)
 	}
-	if b, ok := v.(bool); ok {
-		want := "false"
-		if b {
-			want = "true"
+	if a == nil || b == nil {
+		return a == nil && b == nil || (a == nil && !truthy(b)) || (b == nil && !truthy(a))
+	}
+	if x, ok := a.(bool); ok {
+		return x == truthy(b)
+	}
+	if y, ok := b.(bool); ok {
+		return y == truthy(a)
+	}
+	if x, ok := numericText(a); ok {
+		if y, ok := numericText(b); ok {
+			xr, _ := exactText(x)
+			yr, _ := exactText(y)
+			return xr != nil && yr != nil && xr.Cmp(yr) == 0
 		}
-		return slices.Contains(list, want) || (b && slices.Contains(list, "1")) ||
-			(!b && slices.Contains(list, "0"))
 	}
-	return slices.Contains(list, stringOf(v))
+	return stringOf(a) == stringOf(b)
+}
+
+// truthy is the truth of a scalar the way the host language reads it: empty text,
+// "0", zero and false are false.
+func truthy(v any) bool {
+	switch n := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return n
+	case string:
+		return n != "" && n != "0"
+	}
+	if f, ok := numberOf(v); ok {
+		return f != 0
+	}
+	return true
+}
+
+// dependentHolds answers what every _if, _unless and exclude rule asks: does the
+// other field -- the first parameter -- hold one of the values that follow it?
+//
+// The values are written as text, and are read as what the other field is. When
+// that field is a boolean, or declares the boolean rule, "true" and "false" are
+// the booleans, so required_if:subscribed,true holds for a form that sent 1.
+// When it is null, "null" is null. A boolean or a null is compared by type; any
+// other value is compared the loose way.
+func (v *Validator) dependentHolds(parameters []string) bool {
+	if len(parameters) == 0 {
+		return false
+	}
+	other := v.GetValue(parameters[0])
+	_, otherIsBool := other.(bool)
+
+	asBool := otherIsBool || v.HasRule(parameters[0], []string{"boolean"})
+	for _, written := range parameters[1:] {
+		var candidate any = written
+		if asBool {
+			switch written {
+			case "true":
+				candidate = true
+			case "false":
+				candidate = false
+			}
+		}
+		if other == nil && strings.EqualFold(written, "null") {
+			candidate = nil
+		}
+
+		if otherIsBool || other == nil {
+			if other == candidate {
+				return true
+			}
+			continue
+		}
+		if looseEqual(other, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

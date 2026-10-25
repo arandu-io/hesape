@@ -67,6 +67,10 @@ type Validator struct {
 	implicitAttributes          map[string][]string
 	implicitAttributesFormatter func(string) string
 
+	// distinctCache holds what `distinct` compares each wildcard against, so a
+	// run walks the request once per wildcard and not once per member.
+	distinctCache map[string]map[string]any
+
 	// after is the callbacks After registers.
 	after []func()
 
@@ -222,6 +226,7 @@ func (v *Validator) Passes() bool {
 	v.messages = Errors{}
 	v.failed = map[string][]string{}
 	v.excluded = nil
+	v.distinctCache = nil
 
 	for _, f := range v.set.fields {
 		if v.ShouldBeExcluded(f.name) {
@@ -521,6 +526,7 @@ func (v *Validator) GetData() Data { return v.data }
 // the reason Make copies it.
 func (v *Validator) SetData(data Data) *Validator {
 	v.data = data.Clone()
+	v.distinctCache = nil
 	// The wildcards were expanded against the OLD data, and "items.*.price"
 	// means the items this request sent.
 	v.explodeRules(v.initialRules)

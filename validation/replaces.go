@@ -1,7 +1,10 @@
 package validation
 
 import (
+	"slices"
 	"strings"
+
+	"github.com/arandu-io/hesape/str"
 )
 
 // This file fills the :min, :max, :other, :values and :date of each message with
@@ -45,6 +48,10 @@ var replacers = map[string]replacerFunc{
 	"in":                   replaceDisplayableValueList,
 	"not_in":               replaceDisplayableValueList,
 	"required_array_keys":  replaceDisplayableValueList,
+	"in_array_keys":        replaceDisplayableValueList,
+	"doesnt_contain":       replaceDisplayableValueList,
+	"array_keys":           replaceArrayKeys,
+	"encoding":             replaceEncoding,
 	"ends_with":            replaceDisplayableValueList,
 	"doesnt_end_with":      replaceDisplayableValueList,
 	"starts_with":          replaceDisplayableValueList,
@@ -88,8 +95,8 @@ func replaceOtherAndValue(v *Validator, message, attribute, rule string, paramet
 	other := param(parameters, 0)
 	value := v.GetDisplayableValue(other, v.data.Get(other))
 
-	message = strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(other))
-	return strings.ReplaceAll(message, ":value", value)
+	message = keepCase(message, "other", v.GetDisplayableAttribute(other))
+	return keepCase(message, "value", value)
 }
 
 // replaceOtherAndFirstValue is the body missing_unless and present_unless share:
@@ -98,8 +105,8 @@ func replaceOtherAndValue(v *Validator, message, attribute, rule string, paramet
 func replaceOtherAndFirstValue(v *Validator, message, attribute, rule string, parameters []string) string {
 	other := param(parameters, 0)
 
-	message = strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(other))
-	return strings.ReplaceAll(message, ":value", v.GetDisplayableValue(other, param(parameters, 1)))
+	message = keepCase(message, "other", v.GetDisplayableAttribute(other))
+	return keepCase(message, "value", v.GetDisplayableValue(other, param(parameters, 1)))
 }
 
 // replaceOtherAndValues is the body required_unless and prohibited_unless share:
@@ -113,36 +120,36 @@ func replaceOtherAndValues(v *Validator, message, attribute, rule string, parame
 		values[i] = v.GetDisplayableValue(other, value)
 	}
 
-	message = strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(other))
-	return strings.ReplaceAll(message, ":values", strings.Join(values, ", "))
+	message = keepCase(message, "other", v.GetDisplayableAttribute(other))
+	return keepCase(message, "values", strings.Join(values, ", "))
 }
 
 // replaceOther fills :other for the four rules whose only parameter is another
 // field: required_if_accepted, required_if_declined, prohibited_if_accepted and
 // prohibited_if_declined.
 func replaceOther(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
+	return keepCase(message, "other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
 // replaceSame fills :other for `same` and `different`.
 func replaceSame(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
+	return keepCase(message, "other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
 // replaceInArray fills :other with the field `in_array` reads its values from.
 func replaceInArray(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":other", v.GetDisplayableAttribute(param(parameters, 0)))
+	return keepCase(message, "other", v.GetDisplayableAttribute(param(parameters, 0)))
 }
 
 // replaceBetween fills :min and :max for `between` and `digits_between`.
 func replaceBetween(v *Validator, message, attribute, rule string, parameters []string) string {
-	message = strings.ReplaceAll(message, ":min", param(parameters, 0))
-	return strings.ReplaceAll(message, ":max", param(parameters, 1))
+	message = keepCase(message, "min", param(parameters, 0))
+	return keepCase(message, "max", param(parameters, 1))
 }
 
 // replaceDateFormat fills :format with the layout the rule was written with.
 func replaceDateFormat(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":format", param(parameters, 0))
+	return keepCase(message, "format", param(parameters, 0))
 }
 
 // replaceDecimal fills :decimal with one bound, or both joined by a dash.
@@ -151,38 +158,38 @@ func replaceDecimal(v *Validator, message, attribute, rule string, parameters []
 	if len(parameters) > 1 {
 		places = parameters[0] + "-" + parameters[1]
 	}
-	return strings.ReplaceAll(message, ":decimal", places)
+	return keepCase(message, "decimal", places)
 }
 
 // replaceDigits fills :digits with how many the rule asked for.
 func replaceDigits(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":digits", param(parameters, 0))
+	return keepCase(message, "digits", param(parameters, 0))
 }
 
 // replaceSize fills :size with the size the rule asked for.
 func replaceSize(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":size", param(parameters, 0))
+	return keepCase(message, "size", param(parameters, 0))
 }
 
 // replaceMin fills :min for `min` and `min_digits`.
 func replaceMin(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":min", param(parameters, 0))
+	return keepCase(message, "min", param(parameters, 0))
 }
 
 // replaceMax fills :max for `max` and `max_digits`.
 func replaceMax(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":max", param(parameters, 0))
+	return keepCase(message, "max", param(parameters, 0))
 }
 
 // replaceMultipleOf fills :value with the divisor.
 func replaceMultipleOf(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":value", param(parameters, 0))
+	return keepCase(message, "value", param(parameters, 0))
 }
 
 // replaceValueList fills :values with the parameters as written, comma
 // separated. It is what `extensions`, `mimes` and `mimetypes` use.
 func replaceValueList(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":values", strings.Join(parameters, ", "))
+	return keepCase(message, "values", strings.Join(parameters, ", "))
 }
 
 // replaceDisplayableValueList fills :values for the rules whose parameters are
@@ -192,20 +199,20 @@ func replaceDisplayableValueList(v *Validator, message, attribute, rule string, 
 	for i, parameter := range parameters {
 		values[i] = v.GetDisplayableValue(attribute, parameter)
 	}
-	return strings.ReplaceAll(message, ":values", strings.Join(values, ", "))
+	return keepCase(message, "values", strings.Join(values, ", "))
 }
 
 // replaceAttributeList fills :values for the rules whose parameters are FIELD
 // NAMES, so each goes through the attribute names, and the separator is " / "
 // rather than ", ".
 func replaceAttributeList(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":values", strings.Join(v.getAttributeList(parameters), " / "))
+	return keepCase(message, "values", strings.Join(v.getAttributeList(parameters), " / "))
 }
 
 // replaceProhibits spells the same list of field names into :other rather than
 // :values.
 func replaceProhibits(v *Validator, message, attribute, rule string, parameters []string) string {
-	return strings.ReplaceAll(message, ":other", strings.Join(v.getAttributeList(parameters), " / "))
+	return keepCase(message, "other", strings.Join(v.getAttributeList(parameters), " / "))
 }
 
 // replaceComparison fills :value for the four comparisons: the SIZE of the other
@@ -215,10 +222,10 @@ func replaceComparison(v *Validator, message, attribute, rule string, parameters
 
 	value := v.GetValue(other)
 	if value == nil {
-		return strings.ReplaceAll(message, ":value", v.GetDisplayableAttribute(other))
+		return keepCase(message, "value", v.GetDisplayableAttribute(other))
 	}
 	size, _ := v.GetSize(attribute, value)
-	return strings.ReplaceAll(message, ":value", sizeText(size))
+	return keepCase(message, "value", sizeText(size))
 }
 
 // replaceDate fills :date for the five date comparisons: the moment when the
@@ -230,16 +237,16 @@ func replaceDate(v *Validator, message, attribute, rule string, parameters []str
 	moment := param(parameters, 0)
 
 	if _, isDate := parseDate("", moment); !isDate {
-		return strings.ReplaceAll(message, ":date", v.GetDisplayableAttribute(moment))
+		return keepCase(message, "date", v.GetDisplayableAttribute(moment))
 	}
-	return strings.ReplaceAll(message, ":date", v.GetDisplayableValue(attribute, moment))
+	return keepCase(message, "date", v.GetDisplayableValue(attribute, moment))
 }
 
 // replaceDimensions fills one placeholder per named parameter, each spelled by
 // its own name: "min_width=100" fills :min_width.
 func replaceDimensions(v *Validator, message, attribute, rule string, parameters []string) string {
 	for name, value := range v.ParseNamedParameters(parameters) {
-		message = strings.ReplaceAll(message, ":"+name, value)
+		message = keepCase(message, name, value)
 	}
 	return message
 }
@@ -254,4 +261,37 @@ func (v *Validator) ReplaceRequiredIfDeclined(message, attribute, rule string, p
 // exported for the reason ReplaceRequiredIfDeclined is.
 func (v *Validator) ReplaceProhibitedIfDeclined(message, attribute, rule string, parameters []string) string {
 	return replaceOther(v, message, attribute, rule, parameters)
+}
+
+// keepCase fills the three spellings of one placeholder: ":name" with the value,
+// ":Name" with its first letter upper case, and ":NAME" with all of it upper
+// case. A line chooses its own capitalisation by the spelling it writes, which
+// is how one argument serves a sentence that opens with it and one that does
+// not.
+func keepCase(message, name, value string) string {
+	message = strings.ReplaceAll(message, ":"+name, value)
+	message = strings.ReplaceAll(message, ":"+strings.ToUpper(name), strings.ToUpper(value))
+	return strings.ReplaceAll(message, ":"+str.Ucfirst(name), str.Ucfirst(value))
+}
+
+// replaceEncoding fills :encoding with the name the rule was written with.
+func replaceEncoding(v *Validator, message, attribute, rule string, parameters []string) string {
+	return keepCase(message, "encoding", param(parameters, 0))
+}
+
+// replaceArrayKeys fills :values with the keys the rule allows and :unexpected
+// with the keys the value held that it does not.
+func replaceArrayKeys(v *Validator, message, attribute, rule string, parameters []string) string {
+	message = replaceDisplayableValueList(v, message, attribute, rule, parameters)
+
+	var unexpected []string
+	if keys, ok := keysOf(v.GetValue(attribute)); ok {
+		slices.Sort(keys)
+		for _, key := range keys {
+			if !slices.Contains(parameters, key) {
+				unexpected = append(unexpected, v.GetDisplayableValue(attribute, key))
+			}
+		}
+	}
+	return keepCase(message, "unexpected", strings.Join(unexpected, ", "))
 }

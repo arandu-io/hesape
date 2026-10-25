@@ -2,6 +2,8 @@ package validation
 
 import (
 	"context"
+	"encoding/base64"
+	"maps"
 	"math"
 	"math/big"
 	"net/url"
@@ -73,8 +75,7 @@ func (v *Validator) ValidateAcceptedIf(attribute string, value any, parameters [
 	if !v.RequireParameterCount(2, parameters, "accepted_if") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return v.ValidateRequired(attribute, value, nil) && isAccepted(value)
 	}
 	return true
@@ -92,8 +93,7 @@ func (v *Validator) ValidateDeclinedIf(attribute string, value any, parameters [
 	if !v.RequireParameterCount(2, parameters, "declined_if") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return v.ValidateRequired(attribute, value, nil) && isDeclined(value)
 	}
 	return true
@@ -182,6 +182,38 @@ func (v *Validator) ValidateAscii(attribute string, value any, parameters []stri
 	return str.IsASCII(s)
 }
 
+// ValidateBase64 is `base64`: the value is canonical standard Base64 -- padded,
+// in the standard alphabet, and exactly what encoding its own decoding gives
+// back.
+func (v *Validator) ValidateBase64(attribute string, value any, parameters []string) bool {
+	s, ok := asString(value)
+	if !ok || s == "" {
+		return false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	return err == nil && base64.StdEncoding.EncodeToString(decoded) == s
+}
+
+// ValidateEncoding is `encoding`: the bytes of the value are well formed in the
+// named encoding. An upload is read, up to a bound, and judged by its content.
+func (v *Validator) ValidateEncoding(attribute string, value any, parameters []string) bool {
+	if !v.RequireParameterCount(1, parameters, "encoding") {
+		return false
+	}
+	check, known := encodings[strings.ToLower(parameters[0])]
+	if !known {
+		return false
+	}
+	if s, ok := asString(value); ok {
+		return check([]byte(s))
+	}
+	if f, ok := asFile(value); ok && v.IsValidFileInstance(value) {
+		content, readable := readBounded(f)
+		return readable && check(content)
+	}
+	return false
+}
+
 // ValidateBail is `bail`. It is a marker: Set.Validate reads it and stops the
 // field at its first failure.
 func (v *Validator) ValidateBail(attribute string, value any, parameters []string) bool { return true }
@@ -216,38 +248,38 @@ func (v *Validator) matchesAlphabet(value any, parameters []string, unicoded, as
 
 // ValidateLowercase is `lowercase`: the value is already all lower case.
 func (v *Validator) ValidateLowercase(attribute string, value any, parameters []string) bool {
-	s := stringOf(value)
-	return strings.ToLower(s) == s
+	s, ok := asString(value)
+	return ok && strings.ToLower(s) == s
 }
 
 // ValidateUppercase is `uppercase`: the value is already all upper case.
 func (v *Validator) ValidateUppercase(attribute string, value any, parameters []string) bool {
-	s := stringOf(value)
-	return strings.ToUpper(s) == s
+	s, ok := asString(value)
+	return ok && strings.ToUpper(s) == s
 }
 
 // ValidateStartsWith is `starts_with`: the value begins with one of the given
 // prefixes.
 func (v *Validator) ValidateStartsWith(attribute string, value any, parameters []string) bool {
-	return anyAffix(parameters, strings.HasPrefix, stringOf(value))
+	return isStringOrNumber(value) && anyAffix(parameters, strings.HasPrefix, stringOf(value))
 }
 
 // ValidateDoesntStartWith is `doesnt_start_with`: the value begins with none of
 // the given prefixes.
 func (v *Validator) ValidateDoesntStartWith(attribute string, value any, parameters []string) bool {
-	return !anyAffix(parameters, strings.HasPrefix, stringOf(value))
+	return isStringOrNumber(value) && !anyAffix(parameters, strings.HasPrefix, stringOf(value))
 }
 
 // ValidateEndsWith is `ends_with`: the value ends with one of the given
 // suffixes.
 func (v *Validator) ValidateEndsWith(attribute string, value any, parameters []string) bool {
-	return anyAffix(parameters, strings.HasSuffix, stringOf(value))
+	return isStringOrNumber(value) && anyAffix(parameters, strings.HasSuffix, stringOf(value))
 }
 
 // ValidateDoesntEndWith is `doesnt_end_with`: the value ends with none of the
 // given suffixes.
 func (v *Validator) ValidateDoesntEndWith(attribute string, value any, parameters []string) bool {
-	return !anyAffix(parameters, strings.HasSuffix, stringOf(value))
+	return isStringOrNumber(value) && !anyAffix(parameters, strings.HasSuffix, stringOf(value))
 }
 
 // ValidateString is `string`: the value is text.
@@ -293,6 +325,57 @@ func (v *Validator) ValidateArray(attribute string, value any, parameters []stri
 		}
 	}
 	return true
+}
+
+// ValidateArrayKeys is `array_keys`: the value is an array whose keys are all
+// among the given ones. It is `array` with the keys required to be named.
+func (v *Validator) ValidateArrayKeys(attribute string, value any, parameters []string) bool {
+	if !v.RequireParameterCount(1, parameters, "array_keys") {
+		return false
+	}
+	keys, ok := keysOf(value)
+	if !ok {
+		return false
+	}
+	for _, key := range keys {
+		if !slices.Contains(parameters, key) {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateInArrayKeys is `in_array_keys`: the value is an array holding at
+// least one of the given keys.
+func (v *Validator) ValidateInArrayKeys(attribute string, value any, parameters []string) bool {
+	keys, ok := keysOf(value)
+	if !ok || len(parameters) == 0 {
+		return false
+	}
+	for _, parameter := range parameters {
+		if slices.Contains(keys, parameter) {
+			return true
+		}
+	}
+	return false
+}
+
+// keysOf returns the keys of an array in the spelling a rule string writes
+// them: the names of a keyed array, and the positions of a list.
+func keysOf(value any) ([]string, bool) {
+	switch node := value.(type) {
+	case Data:
+		return slices.Collect(maps.Keys(node)), true
+	case map[string]any:
+		return slices.Collect(maps.Keys(node)), true
+	case []any:
+		keys := make([]string, len(node))
+		for i := range node {
+			keys[i] = strconv.Itoa(i)
+		}
+		return keys, true
+	}
+	return nil, false
 }
 
 // ValidateList is `list`: the value is an array with consecutive integer keys. A
@@ -343,39 +426,107 @@ func (v *Validator) ValidateContains(attribute string, value any, parameters []s
 	return true
 }
 
-// ValidateDistinct is `distinct`: no value repeats.
-//
-// There are no wildcards in a rule string, so the rule is asked of the whole
-// list at once rather than once per member. The parameters are `ignore_case`,
-// which compares case-insensitively, and `strict`, which compares types as well
-// as values.
-func (v *Validator) ValidateDistinct(attribute string, value any, parameters []string) bool {
+// ValidateDoesntContain is `doesnt_contain`: the array holds none of the given
+// values. The comparison is strict, as Illuminate's is: a text member equals a
+// text parameter and nothing else does, so the number 1 is not "1".
+func (v *Validator) ValidateDoesntContain(attribute string, value any, parameters []string) bool {
 	list, ok := asList(value)
 	if !ok {
-		return true
+		return false
 	}
-	ignoreCase := slices.Contains(parameters, "ignore_case")
-	strict := slices.Contains(parameters, "strict")
-
-	for i, member := range list {
-		for _, other := range list[i+1:] {
-			switch {
-			case ignoreCase:
-				if strings.EqualFold(stringOf(member), stringOf(other)) {
-					return false
-				}
-			case strict:
-				if sameType(member, other) && sameValue(member, other) {
-					return false
-				}
-			default:
-				if stringOf(member) == stringOf(other) {
-					return false
-				}
+	for _, parameter := range parameters {
+		for _, member := range list {
+			if text, isText := member.(string); isText && text == parameter {
+				return false
 			}
 		}
 	}
 	return true
+}
+
+// ValidateDistinct is `distinct`: no value repeats.
+//
+// Written against a wildcard -- items.*.id -- the value must differ from the
+// same field of every other member, which is what the rule is for: each member is
+// asked once, and the members it is asked against are the ones that matched the
+// same wildcard. Written against a field that holds a list, the members of that
+// list must differ from one another.
+//
+// The parameters are `ignore_case`, which compares text without regard to case,
+// and `strict`, which compares types as well as values.
+func (v *Validator) ValidateDistinct(attribute string, value any, parameters []string) bool {
+	ignoreCase := slices.Contains(parameters, "ignore_case")
+	strict := slices.Contains(parameters, "strict")
+
+	if list, ok := asList(value); ok {
+		for i, member := range list {
+			for _, other := range list[i+1:] {
+				if sameMember(member, other, ignoreCase, strict) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	for key, other := range v.distinctValues(attribute) {
+		if key == attribute {
+			continue
+		}
+		if sameMember(value, other, ignoreCase, strict) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameMember is the comparison `distinct` makes between two values.
+func sameMember(a, b any, ignoreCase, strict bool) bool {
+	if text, isText := a.(string); isText && ignoreCase {
+		return strings.EqualFold(text, stringOf(b))
+	}
+	if strict {
+		return sameType(a, b) && sameValue(a, b)
+	}
+	return looseEqual(a, b)
+}
+
+// distinctValues returns the values `distinct` compares an attribute against,
+// keyed by where they sit: everything the request holds under the wildcard the
+// attribute was expanded from. They are gathered once per wildcard and kept for
+// the run, because asking every member for them would walk the request once per
+// member.
+func (v *Validator) distinctValues(attribute string) map[string]any {
+	primary := v.getPrimaryAttribute(attribute)
+	if cached, held := v.distinctCache[primary]; held {
+		return cached
+	}
+	if v.distinctCache == nil {
+		v.distinctCache = map[string]map[string]any{}
+	}
+	v.distinctCache[primary] = v.matchingValues(primary, true)
+	return v.distinctCache[primary]
+}
+
+// matchingValues flattens the part of the request a path names and keeps the
+// entries whose key the path matches. A star in the path matches one segment, or
+// -- for a pattern in the style of the `Is` helper -- any run of characters.
+func (v *Validator) matchingValues(path string, oneSegment bool) map[string]any {
+	flat := arrDot(ExtractDataFromPath(GetLeadingExplicitAttributePath(path), v.data))
+
+	matches := func(key string) bool { return str.Is([]string{path}, key, false) }
+	if oneSegment {
+		pattern := regexp.MustCompile(`^` + strings.ReplaceAll(regexp.QuoteMeta(path), `\*`, `[^.]+`) + `$`)
+		matches = pattern.MatchString
+	}
+
+	out := map[string]any{}
+	for key, value := range flat {
+		if matches(key) {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 // GetDistinctValues returns the values `distinct` compares: the list held at the
@@ -393,16 +544,22 @@ func (v *Validator) ExtractDistinctValues(attribute string) []any {
 
 // ValidateInArray is `in_array`: the value is one of the values held by the
 // other attribute.
+//
+// The other attribute is a field that holds a list, or a path with a wildcard --
+// in_array:items.*.id -- which names that field of every member.
 func (v *Validator) ValidateInArray(attribute string, value any, parameters []string) bool {
 	if !v.RequireParameterCount(1, parameters, "in_array") {
 		return false
 	}
-	other := v.GetValue(parameters[0])
-	list, ok := asList(other)
-	if !ok {
-		return false
+	var candidates []any
+	if list, ok := asList(v.GetValue(parameters[0])); ok {
+		candidates = list
+	} else {
+		for _, member := range v.matchingValues(parameters[0], false) {
+			candidates = append(candidates, member)
+		}
 	}
-	for _, member := range list {
+	for _, member := range candidates {
 		if sameValue(member, value) || stringOf(member) == stringOf(value) {
 			return true
 		}
@@ -490,28 +647,34 @@ func (v *Validator) ValidateLte(attribute string, value any, parameters []string
 }
 
 // compareToAnother is the body the four comparisons share, in this order: a
-// literal bound when the parameter names no field, a numeric comparison when the
-// field declares numeric, a refusal when the two values are not the same kind of
-// thing, and a comparison of sizes otherwise.
+// literal bound when the parameter names no field and the value is a number, a
+// refusal when the parameter is a number and a field of that name holds a value,
+// a numeric comparison when both values are numbers, a refusal when the two are
+// not the same kind of thing, and a comparison of sizes otherwise.
+//
+// A value that is a number is compared as one on these four rules even when the
+// field declares none of numeric, integer or decimal: a form sends "20" and
+// "100", and by length 20 would be "greater" than 100.
 func (v *Validator) compareToAnother(attribute string, value any, parameters []string, name string, ok func(int) bool) bool {
 	if !v.RequireParameterCount(1, parameters, name) {
 		return false
 	}
 	other := v.GetValue(parameters[0])
 
+	_, valueIsNumber := numericText(value)
+	numeric := valueIsNumber || v.HasRule(attribute, numericRules)
+
 	bound, isBound := exactParameter(parameters[0])
-	if other == nil && isBound {
-		if _, numeric := numberOf(value); numeric {
-			size, okSize := v.GetSize(attribute, value)
-			return okSize && ok(size.Cmp(bound))
-		}
+	if other == nil && valueIsNumber && isBound {
+		size, okSize := v.sizeOf(attribute, value, numeric)
+		return okSize && ok(size.Cmp(bound))
 	}
 	if isBound {
 		// The parameter is a number and a field of that name does hold a value.
 		// Refuse rather than guess which of the two was meant.
 		return false
 	}
-	if v.HasRule(attribute, numericRules) {
+	if numeric {
 		mine, mineOK := exactNumber(value)
 		theirs, theirsOK := exactNumber(other)
 		if mineOK && theirsOK {
@@ -521,8 +684,8 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 	if !sameType(value, other) {
 		return false
 	}
-	mine, mineOK := v.GetSize(attribute, value)
-	theirs, theirsOK := v.GetSize(parameters[0], other)
+	mine, mineOK := v.sizeOf(attribute, value, numeric)
+	theirs, theirsOK := v.sizeOf(attribute, other, numeric)
 	return mineOK && theirsOK && ok(mine.Cmp(theirs))
 }
 
@@ -543,7 +706,13 @@ func (v *Validator) compareToAnother(attribute string, value any, parameters []s
 // value no size at all. Every caller fails the rule on it, which is the closed
 // answer.
 func (v *Validator) GetSize(attribute string, value any) (*big.Rat, bool) {
-	if text, isNumber := numericText(value); isNumber && v.HasRule(attribute, numericRules) {
+	return v.sizeOf(attribute, value, v.HasRule(attribute, numericRules))
+}
+
+// sizeOf is GetSize with the question of whether a number measures as itself
+// already answered.
+func (v *Validator) sizeOf(attribute string, value any, numeric bool) (*big.Rat, bool) {
+	if text, isNumber := numericText(value); isNumber && numeric {
 		if !v.exponentWithinAllowedRange(attribute, text, value) {
 			return nil, false
 		}
@@ -631,44 +800,54 @@ func (v *Validator) ValidateMultipleOf(attribute string, value any, parameters [
 	if !v.RequireParameterCount(1, parameters, "multiple_of") {
 		return false
 	}
-	numerator, ok := numberOf(value)
-	denominator, okDenominator := number(strings.TrimSpace(parameters[0]))
+	numerator, ok := exactNumber(value)
+	denominator, okDenominator := exactParameter(parameters[0])
 	if !ok || !okDenominator {
 		return false
 	}
 	switch {
-	case numerator == 0 && denominator == 0:
+	case numerator.Sign() == 0 && denominator.Sign() == 0:
 		return false
-	case numerator == 0:
+	case numerator.Sign() == 0:
 		return true
-	case denominator == 0:
+	case denominator.Sign() == 0:
 		return false
 	}
-	// Scaled to whole numbers before the remainder, so that 0.3 against 0.1 is
-	// not the 0.09999999999999998 that float arithmetic answers.
-	scale := math.Pow(10, float64(max(decimalsOf(stringOf(value)), decimalsOf(parameters[0]))))
-	return math.Mod(math.Round(numerator*scale), math.Round(denominator*scale)) == 0
-}
-
-func decimalsOf(s string) int {
-	if _, after, found := strings.Cut(s, "."); found {
-		return len(after)
-	}
-	return 0
+	// Exact, so that 0.3 against 0.1 is the multiple it is and not the
+	// 0.09999999999999998 that float arithmetic answers.
+	return new(big.Rat).Quo(numerator, denominator).IsInt()
 }
 
 // ---------------------------------------------------------------------------
 // Types.
 // ---------------------------------------------------------------------------
 
-// ValidateNumeric is `numeric`: the value reads as a number.
+// ValidateNumeric is `numeric`: the value reads as a number. With the parameter
+// "strict" a text value is refused even when it spells one, so only a number a
+// JSON body sent as a number passes.
 func (v *Validator) ValidateNumeric(attribute string, value any, parameters []string) bool {
+	if isStrict(parameters) && isString(value) {
+		return false
+	}
 	_, ok := numberOf(value)
 	return ok
 }
 
-// ValidateInteger is `integer`: the value reads as a whole number.
+// ValidateInteger is `integer`: the value reads as a whole number. With the
+// parameter "strict" only a number that is whole passes, not the text that
+// spells one.
 func (v *Validator) ValidateInteger(attribute string, value any, parameters []string) bool {
+	if isStrict(parameters) {
+		switch n := value.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			return true
+		case float64:
+			return n == math.Trunc(n) && !math.IsInf(n, 0)
+		case float32:
+			return float64(n) == math.Trunc(float64(n)) && !math.IsInf(float64(n), 0)
+		}
+		return false
+	}
 	switch value.(type) {
 	case int, int64:
 		return true
@@ -676,6 +855,9 @@ func (v *Validator) ValidateInteger(attribute string, value any, parameters []st
 	_, ok := whole(strings.TrimSpace(stringOf(value)))
 	return ok
 }
+
+// isStrict reports whether a rule was given the parameter "strict".
+func isStrict(parameters []string) bool { return len(parameters) > 0 && parameters[0] == "strict" }
 
 // ValidateDecimal is `decimal`: the count of digits after the point is the given
 // number, or between the two given numbers.
@@ -703,8 +885,13 @@ func (v *Validator) ValidateDecimal(attribute string, value any, parameters []st
 
 // ValidateBoolean is `boolean`. The comparison is by type as well as by value,
 // so exactly six pass: true, false, 0, 1, "0" and "1". A ticked checkbox sends
-// "on", which is what `accepted` is for.
+// "on", which is what `accepted` is for. With the parameter "strict" only true
+// and false pass.
 func (v *Validator) ValidateBoolean(attribute string, value any, parameters []string) bool {
+	if isStrict(parameters) {
+		_, ok := value.(bool)
+		return ok
+	}
 	switch n := value.(type) {
 	case bool:
 		return true
@@ -718,8 +905,16 @@ func (v *Validator) ValidateBoolean(attribute string, value any, parameters []st
 	return false
 }
 
-// ValidateJson is `json`: the value is text that parses as JSON.
+// ValidateJson is `json`: the value is text that parses as JSON. A number or a
+// boolean a JSON body carried is the text it prints as, and that is JSON.
 func (v *Validator) ValidateJson(attribute string, value any, parameters []string) bool {
+	switch value.(type) {
+	case bool:
+		return true
+	}
+	if _, isNumber := numberOf(value); isNumber && !isString(value) {
+		return true
+	}
 	s, ok := asString(value)
 	return ok && str.IsJSON(s)
 }
@@ -876,7 +1071,9 @@ func (v *Validator) Compare(result, against int, operator string) bool {
 	return false
 }
 
-// ValidateTimezone is `timezone`: the value names a zone the system knows.
+// ValidateTimezone is `timezone`: the value names a zone the system knows. The
+// parameter narrows it to a region -- timezone:europe -- or widens it to the
+// legacy names with all_with_bc; with none it is the canonical regions and UTC.
 func (v *Validator) ValidateTimezone(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	if !ok {
@@ -884,8 +1081,16 @@ func (v *Validator) ValidateTimezone(attribute string, value any, parameters []s
 	}
 	// "Local" is Go's spelling of "whatever this machine is set to", which is
 	// not a zone a form can mean: it would pass on the developer's laptop and
-	// on nothing else.
-	if s == "Local" {
+	// on nothing else. The empty name is UTC to the standard library and
+	// nothing to a form.
+	if s == "Local" || s == "" {
+		return false
+	}
+	group := "all"
+	if len(parameters) > 0 {
+		group = strings.ToLower(parameters[0])
+	}
+	if matches, known := timezoneGroups[group]; !known || !matches(s) {
 		return false
 	}
 	_, err := time.LoadLocation(s)
@@ -925,17 +1130,25 @@ func (v *Validator) ValidateEmail(attribute string, value any, parameters []stri
 	return true
 }
 
-// ValidateUrl is `url`. The parameters are the schemes allowed, and http and
-// https are the default.
+// ValidateUrl is `url`. The parameters are the schemes allowed; with none, the
+// registered schemes are, which is the set Illuminate's rule admits.
 func (v *Validator) ValidateUrl(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
 	return ok && str.IsURL(s, parameters...)
 }
 
-// ValidateUuid is `uuid`: the value is a UUID.
+// ValidateUuid is `uuid`: the value is a UUID. The parameter, when given, names
+// the version it must be -- 1 to 8, "nil" or "max".
 func (v *Validator) ValidateUuid(attribute string, value any, parameters []string) bool {
 	s, ok := asString(value)
-	return ok && str.IsUUID(s)
+	if !ok || !str.IsUUID(s) {
+		return false
+	}
+	if len(parameters) == 0 {
+		return true
+	}
+	version, known := uuidVersion(parameters[0])
+	return known && hasUUIDVersion(s, version)
 }
 
 // ValidateUlid is `ulid`: the value is a ULID.
@@ -1140,8 +1353,7 @@ func (v *Validator) ValidateRequiredIf(attribute string, value any, parameters [
 	if !v.data.Has(parameters[0]) {
 		return true
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
 	}
 	return true
@@ -1153,8 +1365,7 @@ func (v *Validator) ValidateRequiredUnless(attribute string, value any, paramete
 	if !v.RequireParameterCount(2, parameters, "required_unless") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if !looseContains(values, other) {
+	if !v.dependentHolds(parameters) {
 		return v.ValidateRequired(attribute, value, nil)
 	}
 	return true
@@ -1246,8 +1457,7 @@ func (v *Validator) ValidatePresentIf(attribute string, value any, parameters []
 	if !v.RequireParameterCount(2, parameters, "present_if") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return v.ValidatePresent(attribute, value, nil)
 	}
 	return true
@@ -1259,8 +1469,7 @@ func (v *Validator) ValidatePresentUnless(attribute string, value any, parameter
 	if !v.RequireParameterCount(2, parameters, "present_unless") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if !looseContains(values, other) {
+	if !v.dependentHolds(parameters) {
 		return v.ValidatePresent(attribute, value, nil)
 	}
 	return true
@@ -1296,8 +1505,7 @@ func (v *Validator) ValidateMissingIf(attribute string, value any, parameters []
 	if !v.RequireParameterCount(2, parameters, "missing_if") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return v.ValidateMissing(attribute, value, parameters)
 	}
 	return true
@@ -1309,8 +1517,7 @@ func (v *Validator) ValidateMissingUnless(attribute string, value any, parameter
 	if !v.RequireParameterCount(2, parameters, "missing_unless") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if !looseContains(values, other) {
+	if !v.dependentHolds(parameters) {
 		return v.ValidateMissing(attribute, value, parameters)
 	}
 	return true
@@ -1346,8 +1553,7 @@ func (v *Validator) ValidateProhibitedIf(attribute string, value any, parameters
 	if !v.RequireParameterCount(2, parameters, "prohibited_if") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if looseContains(values, other) {
+	if v.dependentHolds(parameters) {
 		return !v.ValidateRequired(attribute, value, nil)
 	}
 	return true
@@ -1383,8 +1589,7 @@ func (v *Validator) ValidateProhibitedUnless(attribute string, value any, parame
 	if !v.RequireParameterCount(2, parameters, "prohibited_unless") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	if !looseContains(values, other) {
+	if !v.dependentHolds(parameters) {
 		return !v.ValidateRequired(attribute, value, nil)
 	}
 	return true
@@ -1422,8 +1627,7 @@ func (v *Validator) ValidateExcludeIf(attribute string, value any, parameters []
 	if !v.data.Has(parameters[0]) {
 		return true
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	return !looseContains(values, other)
+	return !v.dependentHolds(parameters)
 }
 
 // ValidateExcludeUnless is `exclude_unless`: excluded unless the other attribute
@@ -1432,8 +1636,7 @@ func (v *Validator) ValidateExcludeUnless(attribute string, value any, parameter
 	if !v.RequireParameterCount(2, parameters, "exclude_unless") {
 		return false
 	}
-	values, other := v.ParseDependentRuleParameters(parameters)
-	return looseContains(values, other)
+	return v.dependentHolds(parameters)
 }
 
 // ValidateExcludeWith is `exclude_with`: excluded when the named attribute was
