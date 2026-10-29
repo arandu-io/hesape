@@ -1483,8 +1483,17 @@
 						attr(cell, 'aria-disabled', inside && blocked(date) ? 'true' : null);
 						cell.setAttribute('tabindex', '-1');
 					});
-					var title = month.querySelector('[data-part="title"]');
+					/* A row with no day of this month in it is the sixth of a
+					 * month that fits in five. */
+					Array.prototype.forEach.call(month.querySelectorAll('tbody tr'), function (row) {
+						row.hidden = Array.prototype.every.call(row.querySelectorAll('[role="gridcell"]'), function (cell) {
+							return cell.getAttribute('data-outside') === 'true';
+						});
+					});
+					var title = month.querySelector('[data-part="month-title"]');
 					if (title && names.length === 12) title.textContent = names[number] + ' ' + year;
+					var grid = month.querySelector('[data-part="month-grid"]');
+					if (grid && names.length === 12) grid.setAttribute('aria-label', names[number] + ' ' + year);
 				});
 				var previous = part('month-previous');
 				var next = part('month-next');
@@ -1595,6 +1604,10 @@
 				 * another. */
 				var kept = parse(state.from);
 				if (kept) root.setAttribute('data-month', kept.getUTCFullYear() + '-' + pad(kept.getUTCMonth() + 1));
+				else if (!props.month) {
+					var now = new Date();
+					root.setAttribute('data-month', now.getFullYear() + '-' + pad(now.getMonth() + 1));
+				}
 				draw();
 				place();
 				var at = base();
@@ -1773,6 +1786,88 @@
 	document.addEventListener('htmx:beforeHistorySave', function () {
 		each(document, '[data-kyse-behavior="date-range"]', function (one) {
 			if (one.__dateRangeClose) one.__dateRangeClose(false);
+		});
+	});
+
+	/* ---- a date picker's panel -----------------------------------------------
+	 *
+	 * The popover behaviour opens the calendar beside a date field and knows
+	 * nothing about where it is. Left in the flow of its field the panel was cut
+	 * by whatever had an overflow around it -- a dialog, a card -- and ran off
+	 * the edge of a narrow screen. It is `position: fixed`, and it is placed
+	 * here from the group's rectangle the moment it opens: under the field,
+	 * aligned to its end, turned over when there is no room below, kept inside
+	 * the window.
+	 *
+	 * Choosing a day closes it. The calendar writes the day with an event of its
+	 * own making, which is how this tells a choice from the person typing in the
+	 * field: typing leaves the panel as it is.
+	 */
+	function pickerPanel(group) {
+		return group.querySelector(':scope > [data-part="panel"]');
+	}
+
+	function placePicker(group) {
+		var panel = pickerPanel(group);
+		if (!panel) return;
+		if (panel.getAttribute('aria-hidden') !== 'false') {
+			panel.style.removeProperty('left');
+			panel.style.removeProperty('top');
+			panel.style.removeProperty('max-height');
+			return;
+		}
+		var at = group.getBoundingClientRect();
+		var wide = document.documentElement.clientWidth;
+		var tall = window.innerHeight;
+		panel.style.removeProperty('max-height');
+		var width = panel.offsetWidth;
+		var height = panel.offsetHeight;
+		var rtl = getComputedStyle(group).direction === 'rtl';
+		var left = rtl ? at.left : at.right - width;
+		left = Math.max(8, Math.min(left, wide - width - 8));
+		var below = tall - at.bottom - 12;
+		var above = at.top - 12;
+		var flip = height > below && above > below;
+		var room = flip ? above : below;
+		if (height > room) panel.style.maxHeight = Math.max(room, 160) + 'px';
+		panel.style.left = left + 'px';
+		panel.style.top = (flip ? Math.max(8, at.top - 4 - Math.min(height, room)) : at.bottom + 4) + 'px';
+		panel.setAttribute('data-side', flip ? 'top' : 'bottom');
+	}
+
+	function placePickers() {
+		each(document, '.date-picker', placePicker);
+	}
+
+	document.addEventListener('click', function (event) {
+		var from = origin(event);
+		if (from && from.closest('.date-picker > [data-part="open"]')) window.setTimeout(placePickers, 0);
+	}, true);
+
+	document.addEventListener('change', function (event) {
+		var from = origin(event);
+		if (!from || event.isTrusted) return;
+		var group = from.closest('.date-picker');
+		var panel = group && pickerPanel(group);
+		if (!panel || panel.getAttribute('aria-hidden') !== 'false') return;
+		var button = group.querySelector(':scope > [data-part="open"]');
+		panel.setAttribute('aria-hidden', 'true');
+		if (button) button.setAttribute('aria-expanded', 'false');
+		placePicker(group);
+	});
+
+	window.addEventListener('resize', placePickers);
+	window.addEventListener('scroll', function (event) {
+		var from = event.target;
+		if (from && from.nodeType === 1 && from.closest && from.closest('.date-picker-panel')) return;
+		placePickers();
+	}, true);
+
+	/* The same snapshot rule as the menus: no placement in a saved page. */
+	document.addEventListener('htmx:beforeHistorySave', function () {
+		each(document, '.date-picker', function (group) {
+			var panel = pickerPanel(group);
+			if (panel) panel.removeAttribute('style');
 		});
 	});
 

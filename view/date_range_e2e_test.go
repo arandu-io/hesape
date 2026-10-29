@@ -24,7 +24,7 @@ func rangePage(t *testing.T, attrs string) *httptest.Server {
 	t.Helper()
 	var months strings.Builder
 	for index, title := range []string{"setembro 2026", "outubro 2026"} {
-		months.WriteString(`<section data-part="month"><h2 data-part="title">` + title + `</h2><table role="grid"><tbody>`)
+		months.WriteString(`<section data-part="month"><h2 data-part="month-title">` + title + `</h2><table data-part="month-grid" role="grid"><tbody>`)
 		for week := 0; week < 6; week++ {
 			months.WriteString(`<tr>`)
 			for day := 0; day < 7; day++ {
@@ -35,7 +35,7 @@ func rangePage(t *testing.T, attrs string) *httptest.Server {
 		months.WriteString(`</tbody></table></section>`)
 		_ = index
 	}
-	body := fmt.Sprintf(`<div id="r" data-part="root" data-month="2026-09" data-kyse-behavior="date-range" data-kyse-props='{"months":["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"],"firstDay":0,"format":"02/01/2006","placeholder":"Escolher período","pending":"Escolha a data final"%s}'>
+	body := fmt.Sprintf(`<div id="r" data-part="root" data-month="2026-09" data-kyse-behavior="date-range" data-kyse-props='{"months":["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"],"firstDay":0,"format":"02/01/2006","placeholder":"Escolher período","pending":"Escolha a data final","month":"2026-09"%s}'>
 <form id="f"><button type="button" data-part="trigger" id="r-trigger" aria-expanded="false" aria-controls="r-panel"><span data-part="value" data-empty="true">Escolher período</span></button>
 <input type="hidden" data-part="from" name="de" value=""><input type="hidden" data-part="to" name="ate" value="">
 <div data-part="backdrop" hidden></div>
@@ -216,5 +216,56 @@ func TestThePanelStaysInsideTheWindow(t *testing.T) {
 	got := rangeEval(t, page, `(function () { var r = document.getElementById('r-panel').getBoundingClientRect(); return r.left >= 0 && r.right <= document.documentElement.clientWidth && r.top >= 0 && r.bottom <= innerHeight; })()`)
 	if got != "true" {
 		t.Fatal("the panel is outside the window")
+	}
+}
+
+// pickerPage serves a one-day picker the way Kyse draws it -- a group that is a
+// popover, a button, a panel -- inside a box that clips its overflow, which is
+// what a dialog is to it.
+func pickerPage(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc(view.AssetPath, view.Handler)
+	mux.HandleFunc("GET /p.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		fmt.Fprint(w, `body{margin:0}.box{width:360px;height:120px;overflow:auto;margin:20px;border:1px solid #999}
+.date-picker{position:relative;display:flex}.date-picker-panel{position:fixed;width:300px;height:260px;background:#eee;border:1px solid #333}
+[data-popover][aria-hidden=true]{visibility:hidden}[hidden]{display:none!important}`)
+	})
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>P</title><link rel="stylesheet" href="/p.css">
+<script src="%s"></script><script src="%s"></script></head><body><div class="box"><div class="date-picker popover" data-part="group">
+<input id="d" type="date" name="d"><button type="button" data-part="open" aria-expanded="false" aria-controls="p">Abrir</button>
+<div data-part="panel" id="p" class="date-picker-panel" data-popover aria-hidden="true">calendario</div></div></div></body></html>`,
+			view.Asset("basecoat.bundle.js"), view.Asset("ui.js"))
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A day picker's panel is not cut by the box around the field: it is placed from
+// the field, so what is at its centre is the panel, and choosing a day closes it.
+func TestADayPickersPanelIsNotCutByItsContainer(t *testing.T) {
+	srv := pickerPage(t)
+	page := browser.Open(t, rangeDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page.Visit("/")
+	page.Click(browser.CSS("[data-part=open]", "the button that opens the panel"))
+	page.ExpectVisible(browser.CSS("#p", "the panel"))
+	centre := `(function () { var r = document.getElementById('p').getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.bottom - 10) === document.getElementById('p'); })()`
+	page.Evaluate(`new Promise(function (r) { setTimeout(r, 400); })`, nil)
+	if got := rangeEval(t, page, centre); got != "true" {
+		t.Fatal("the panel is cut by the box around the field: something else is under its lower edge")
+	}
+	if got := rangeEval(t, page, `document.getElementById('p').style.left !== ''`); got != "true" {
+		t.Fatal("the panel was not placed from the field")
+	}
+	page.Evaluate(`document.getElementById('d').dispatchEvent(new Event('change', { bubbles: true }))`, nil)
+	if got := rangeEval(t, page, `document.getElementById('p').getAttribute('aria-hidden')`); got != "true" {
+		t.Fatalf("choosing a day left the panel open: aria-hidden=%s", got)
 	}
 }
