@@ -3,7 +3,7 @@ module github.com/arandu-io/hesape/redis
 go 1.26.10
 
 require (
-	github.com/arandu-io/hesape v0.89.1
+	github.com/arandu-io/hesape v0.89.2
 	github.com/redis/go-redis/v9 v9.22.0
 )
 
