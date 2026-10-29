@@ -1347,6 +1347,435 @@
 		},
 	});
 
+	/* ---- date range ----------------------------------------------------------
+	 *
+	 * One field that holds a period. The trigger says it ("15/09/2026 –
+	 * 07/10/2026"), a panel draws two months, and the first day pressed is the
+	 * start and the second is the end. The value lives in two hidden inputs the
+	 * server drew, so the form submits two plain ISO days and works the same
+	 * with a script blocked from running as with it: the picker only writes into
+	 * them.
+	 *
+	 * # The panel is fixed, so nothing cuts it
+	 *
+	 * It is placed from the trigger's rectangle -- under it, from its start edge,
+	 * turned over when there is no room below, kept inside the window -- the way
+	 * the table's menus are, so a dialog's or a card's overflow cannot hide it.
+	 * On a phone it is a sheet at the bottom of the screen and the placement is
+	 * left to the stylesheet. Assigning a property of style is the CSSOM; the
+	 * policy refuses a style attribute, not this.
+	 *
+	 * # The words are not here
+	 *
+	 * Month names, column heads, the first day of the week, the shape of a date
+	 * and every sentence arrive as props, as they do for the calendar. Nothing
+	 * here formats a name or reads a locale.
+	 *
+	 * # What a request is
+	 *
+	 * Choosing the end (or a preset, or Clear) is the change: both inputs are
+	 * written first and one change event is fired after, so a form that asks the
+	 * server on change asks once and never with half a period.
+	 */
+	arandu.ui.define('date-range', {
+		mounted: function (ctx) {
+			var root = ctx.element;
+			var props = ctx.props || {};
+
+			var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+			var iso = function (y, m, d) { return y + '-' + pad(m + 1) + '-' + pad(d); };
+			var part = function (name) { return root.querySelector('[data-part="' + name + '"]'); };
+			var trigger = part('trigger');
+			var panel = part('panel');
+			var backdrop = part('backdrop');
+			var fromField = part('from');
+			var toField = part('to');
+			var status = part('status');
+			if (!trigger || !panel || !fromField || !toField) return;
+
+			var state = {
+				from: fromField.value || '',
+				to: toField.value || '',
+				pending: '',
+				hover: '',
+			};
+			var firstDay = Number(props.firstDay) || 0;
+			var sheet = window.matchMedia ? window.matchMedia('(max-width: 40rem)') : null;
+
+			var parse = function (value) {
+				var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+				return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
+			};
+			var stamp = function (date) { return iso(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()); };
+			var shift = function (value, days) {
+				var date = parse(value);
+				date.setUTCDate(date.getUTCDate() + days);
+				return stamp(date);
+			};
+			var todayISO = function () {
+				var now = new Date();
+				return iso(now.getFullYear(), now.getMonth(), now.getDate());
+			};
+			var blocked = function (date) {
+				if (props.min && date < props.min) return true;
+				return !!(props.max && date > props.max);
+			};
+			var format = function (value) {
+				var date = parse(value);
+				if (!date) return '';
+				return String(props.format || '2006-01-02')
+					.replace('2006', String(date.getUTCFullYear()))
+					.replace('01', pad(date.getUTCMonth() + 1))
+					.replace('02', pad(date.getUTCDate()));
+			};
+
+			var months = function () { return Array.prototype.slice.call(root.querySelectorAll('[data-part="month"]')); };
+			var cells = function (month) { return Array.prototype.slice.call(month.querySelectorAll('[role="gridcell"]')); };
+			var base = function () {
+				var at = (root.getAttribute('data-month') || '').split('-');
+				return { year: Number(at[0]), month: Number(at[1]) - 1 };
+			};
+			var attr = function (element, name, value) {
+				if (value === null) element.removeAttribute(name);
+				else element.setAttribute(name, value);
+			};
+
+			/* The bounds of what is painted: the period being picked while one is
+			 * pending, and the one in the inputs otherwise. */
+			var bounds = function () {
+				if (state.pending) {
+					var other = state.hover || state.pending;
+					return state.pending <= other ? [state.pending, other] : [other, state.pending];
+				}
+				if (state.from && state.to) return [state.from, state.to];
+				return null;
+			};
+
+			/* draw writes numbers, dates and state into the cells the server drew;
+			 * the elements, their classes and their part names are untouched. */
+			var draw = function () {
+				var at = base();
+				var today = todayISO();
+				var span = bounds();
+				var names = props.months || [];
+				months().forEach(function (month, index) {
+					var first = new Date(Date.UTC(at.year, at.month + index, 1));
+					var year = first.getUTCFullYear();
+					var number = first.getUTCMonth();
+					var offset = (first.getUTCDay() - firstDay + 7) % 7;
+					cells(month).forEach(function (cell, position) {
+						var day = new Date(Date.UTC(year, number, 1 - offset + position));
+						var date = stamp(day);
+						var inside = day.getUTCMonth() === number;
+						cell.textContent = inside ? String(day.getUTCDate()) : '';
+						cell.setAttribute('data-date', date);
+						attr(cell, 'data-outside', inside ? null : 'true');
+						attr(cell, 'data-today', inside && date === today ? 'true' : null);
+						var kind = null;
+						if (inside && span && date >= span[0] && date <= span[1]) {
+							if (span[0] === span[1]) kind = 'single';
+							else if (date === span[0]) kind = 'start';
+							else if (date === span[1]) kind = 'end';
+							else kind = 'middle';
+						}
+						attr(cell, 'data-range', kind);
+						cell.setAttribute('aria-selected', kind ? 'true' : 'false');
+						attr(cell, 'aria-disabled', inside && blocked(date) ? 'true' : null);
+						cell.setAttribute('tabindex', '-1');
+					});
+					var title = month.querySelector('[data-part="title"]');
+					if (title && names.length === 12) title.textContent = names[number] + ' ' + year;
+				});
+				var previous = part('month-previous');
+				var next = part('month-next');
+				var shown = months().length;
+				if (previous && props.min) previous.disabled = stamp(new Date(Date.UTC(at.year, at.month, 1))) <= props.min;
+				if (next && props.max) next.disabled = stamp(new Date(Date.UTC(at.year, at.month + shown, 1))) > props.max;
+				if (status) {
+					status.textContent = state.pending ? (props.pending || '') : '';
+				}
+			};
+
+			var setBase = function (year, month) {
+				var moved = new Date(Date.UTC(year, month, 1));
+				root.setAttribute('data-month', moved.getUTCFullYear() + '-' + pad(moved.getUTCMonth() + 1));
+				draw();
+			};
+			var step = function (by) {
+				var at = base();
+				setBase(at.year, at.month + by);
+			};
+
+			/* focusDate puts the single tab stop on a day and shows the months it
+			 * is in. A day outside the two drawn moves the pair of months. */
+			var focusDate = function (date) {
+				var day = parse(date);
+				if (!day) return false;
+				var at = base();
+				var offset = (day.getUTCFullYear() - at.year) * 12 + day.getUTCMonth() - at.month;
+				var shown = months().length || 1;
+				if (offset < 0) setBase(day.getUTCFullYear(), day.getUTCMonth());
+				else if (offset >= shown) setBase(day.getUTCFullYear(), day.getUTCMonth() - (shown - 1));
+				var found = null;
+				months().forEach(function (month) {
+					cells(month).forEach(function (cell) {
+						cell.setAttribute('tabindex', '-1');
+						if (!found && cell.getAttribute('data-date') === date && cell.getAttribute('data-outside') !== 'true') found = cell;
+					});
+				});
+				if (!found) return false;
+				found.setAttribute('tabindex', '0');
+				found.focus();
+				return true;
+			};
+
+			var write = function (from, to) {
+				state.from = from;
+				state.to = to;
+				state.pending = '';
+				state.hover = '';
+				fromField.value = from;
+				toField.value = to;
+				var text = trigger.querySelector('[data-part="value"]');
+				if (text) {
+					text.textContent = from && to ? format(from) + ' – ' + format(to) : (props.placeholder || '');
+					attr(text, 'data-empty', from && to ? null : 'true');
+				}
+				fromField.dispatchEvent(new Event('input', { bubbles: true }));
+				fromField.dispatchEvent(new Event('change', { bubbles: true }));
+			};
+
+			var isOpen = function () { return !panel.hidden; };
+
+			/* place puts the panel where the trigger is. A phone gets a sheet, which
+			 * the stylesheet positions; everything placed here is taken off. */
+			var place = function () {
+				if (!isOpen()) return;
+				if (sheet && sheet.matches) {
+					panel.style.removeProperty('left');
+					panel.style.removeProperty('top');
+					panel.style.removeProperty('max-height');
+					panel.setAttribute('data-side', 'sheet');
+					return;
+				}
+				var at = trigger.getBoundingClientRect();
+				var wide = document.documentElement.clientWidth;
+				var tall = window.innerHeight;
+				panel.style.removeProperty('max-height');
+				var width = panel.offsetWidth;
+				var height = panel.offsetHeight;
+				var rtl = getComputedStyle(trigger).direction === 'rtl';
+				var left = rtl ? at.right - width : at.left;
+				left = Math.max(8, Math.min(left, wide - width - 8));
+				var below = tall - at.bottom - 12;
+				var above = at.top - 12;
+				var flip = height > below && above > below;
+				var room = flip ? above : below;
+				if (height > room) panel.style.maxHeight = Math.max(room, 160) + 'px';
+				var top = flip ? Math.max(8, at.top - 4 - Math.min(height, room)) : at.bottom + 4;
+				panel.style.left = left + 'px';
+				panel.style.top = top + 'px';
+				panel.setAttribute('data-side', flip ? 'top' : 'bottom');
+			};
+
+			var open = function () {
+				if (isOpen() || trigger.disabled) return;
+				/* One panel at a time. */
+				Array.prototype.forEach.call(document.querySelectorAll('[data-kyse-behavior="date-range"]'), function (other) {
+					if (other !== root && other.__dateRangeClose) other.__dateRangeClose(false);
+				});
+				state.pending = '';
+				state.hover = '';
+				panel.hidden = false;
+				if (backdrop) backdrop.hidden = false;
+				trigger.setAttribute('aria-expanded', 'true');
+				root.setAttribute('data-open', 'true');
+				/* A period shows its own first month. With none, the months the
+				 * server drew stay: the current one unless the caller named
+				 * another. */
+				var kept = parse(state.from);
+				if (kept) root.setAttribute('data-month', kept.getUTCFullYear() + '-' + pad(kept.getUTCMonth() + 1));
+				draw();
+				place();
+				var at = base();
+				var wanted = state.from || todayISO();
+				var offset = (parse(wanted).getUTCFullYear() - at.year) * 12 + parse(wanted).getUTCMonth() - at.month;
+				if (offset < 0 || offset >= (months().length || 1)) wanted = iso(at.year, at.month, 1);
+				focusDate(wanted);
+			};
+
+			var close = function (restore) {
+				if (!isOpen()) return;
+				state.pending = '';
+				state.hover = '';
+				panel.hidden = true;
+				if (backdrop) backdrop.hidden = true;
+				['left', 'top', 'max-height'].forEach(function (name) { panel.style.removeProperty(name); });
+				panel.removeAttribute('style');
+				panel.removeAttribute('data-side');
+				trigger.setAttribute('aria-expanded', 'false');
+				root.removeAttribute('data-open');
+				if (restore) trigger.focus();
+			};
+			root.__dateRangeClose = close;
+
+			var choose = function (date) {
+				if (!date || blocked(date)) return;
+				if (!state.pending) {
+					state.pending = date;
+					state.hover = date;
+					draw();
+					focusDate(date);
+					return;
+				}
+				var a = state.pending;
+				var b = date;
+				if (b < a) { var swap = a; a = b; b = swap; }
+				close(true);
+				write(a, b);
+			};
+
+			var preset = function (days) {
+				var to = todayISO();
+				var from = shift(to, -(days - 1));
+				if (props.max && to > props.max) to = props.max;
+				if (props.min && from < props.min) from = props.min;
+				if (from > to) return;
+				close(true);
+				write(from, to);
+			};
+
+			ctx.click = function (event) {
+				var from = event.target.closest ? event.target : null;
+				if (!from) return;
+				if (from.closest('[data-part="trigger"]')) {
+					event.preventDefault();
+					if (isOpen()) close(true); else open();
+					return;
+				}
+				if (from.closest('[data-part="backdrop"]')) { close(true); return; }
+				var stepper = from.closest('[data-range-step]');
+				if (stepper) { step(Number(stepper.getAttribute('data-range-step')) || 1); return; }
+				if (from.closest('[data-range-clear]')) {
+					close(true);
+					write('', '');
+					return;
+				}
+				var shortcut = from.closest('[data-range-days]');
+				if (shortcut) { preset(Number(shortcut.getAttribute('data-range-days')) || 1); return; }
+				var cell = from.closest('[role="gridcell"]');
+				if (cell && cell.getAttribute('data-outside') !== 'true' && cell.getAttribute('aria-disabled') !== 'true') {
+					choose(cell.getAttribute('data-date'));
+				}
+			};
+
+			ctx.over = function (event) {
+				if (!state.pending) return;
+				var cell = event.target.closest ? event.target.closest('[role="gridcell"]') : null;
+				if (!cell || cell.getAttribute('data-outside') === 'true') return;
+				var date = cell.getAttribute('data-date');
+				if (date === state.hover) return;
+				state.hover = date;
+				draw();
+			};
+
+			ctx.key = function (event) {
+				if (event.key === 'Escape' && isOpen()) {
+					event.preventDefault();
+					event.stopPropagation();
+					close(true);
+					return;
+				}
+				var cell = event.target.closest ? event.target.closest('[role="gridcell"]') : null;
+				if (!cell) {
+					if (!isOpen() && event.target === trigger && event.key === 'ArrowDown') {
+						event.preventDefault();
+						open();
+					}
+					return;
+				}
+				var day = parse(cell.getAttribute('data-date'));
+				if (!day) return;
+				/* moveTo follows the keyboard: while a period is being picked the
+				 * day under the caret is the end it would have. */
+				var moveTo = function (date) {
+					if (state.pending) { state.hover = date; draw(); }
+					focusDate(date);
+				};
+				var go = function (days) {
+					event.preventDefault();
+					moveTo(shift(cell.getAttribute('data-date'), days));
+				};
+				var column = (day.getUTCDay() - firstDay + 7) % 7;
+				switch (event.key) {
+					case 'ArrowRight': go(1); break;
+					case 'ArrowLeft': go(-1); break;
+					case 'ArrowDown': go(7); break;
+					case 'ArrowUp': go(-7); break;
+					case 'Home': go(-column); break;
+					case 'End': go(6 - column); break;
+					case 'PageUp':
+					case 'PageDown':
+						event.preventDefault();
+						var by = event.key === 'PageUp' ? -1 : 1;
+						var moved = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth() + by, 1));
+						var last = new Date(Date.UTC(moved.getUTCFullYear(), moved.getUTCMonth() + 1, 0)).getUTCDate();
+						var target = iso(moved.getUTCFullYear(), moved.getUTCMonth(), Math.min(day.getUTCDate(), last));
+						moveTo(target);
+						break;
+					case 'Enter':
+					case ' ':
+						event.preventDefault();
+						if (cell.getAttribute('aria-disabled') !== 'true') choose(cell.getAttribute('data-date'));
+						break;
+				}
+			};
+
+			/* A press outside, focus that leaves, a resize and a scroll of whatever
+			 * holds the trigger are all the person moving on. */
+			ctx.away = function (event) {
+				if (isOpen() && !root.contains(event.target)) close(false);
+			};
+			ctx.focusAway = function (event) {
+				if (isOpen() && event.target && event.target.nodeType === 1 && !root.contains(event.target)) close(false);
+			};
+			ctx.reflow = function (event) {
+				if (!isOpen()) return;
+				if (event && event.type === 'scroll' && event.target && event.target.nodeType === 1 && panel.contains(event.target)) return;
+				place();
+			};
+
+			root.addEventListener('click', ctx.click);
+			root.addEventListener('keydown', ctx.key);
+			root.addEventListener('mouseover', ctx.over);
+			document.addEventListener('pointerdown', ctx.away, true);
+			document.addEventListener('focusin', ctx.focusAway);
+			window.addEventListener('resize', ctx.reflow);
+			window.addEventListener('scroll', ctx.reflow, true);
+		},
+		destroyed: function (ctx) {
+			var root = ctx.element;
+			root.removeEventListener('click', ctx.click);
+			root.removeEventListener('keydown', ctx.key);
+			root.removeEventListener('mouseover', ctx.over);
+			document.removeEventListener('pointerdown', ctx.away, true);
+			document.removeEventListener('focusin', ctx.focusAway);
+			window.removeEventListener('resize', ctx.reflow);
+			window.removeEventListener('scroll', ctx.reflow, true);
+			root.__dateRangeClose = null;
+		},
+	});
+
+	/* htmx keeps a snapshot of the page as a string before it leaves it, and a
+	 * panel placed with style.left is `style="left: …"` in that string, which the
+	 * policy refuses when the snapshot is parsed again. A panel left open would
+	 * also come back open. They are shut, and the placement taken off. */
+	document.addEventListener('htmx:beforeHistorySave', function () {
+		each(document, '[data-kyse-behavior="date-range"]', function (one) {
+			if (one.__dateRangeClose) one.__dateRangeClose(false);
+		});
+	});
+
 	/* ---- roving ---------------------------------------------------------------
 	 *
 	 * One tab stop for a group of controls, with the arrow keys moving inside
