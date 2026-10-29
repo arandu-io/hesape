@@ -1832,7 +1832,10 @@
 		if (height > room) panel.style.maxHeight = Math.max(room, 160) + 'px';
 		panel.style.left = left + 'px';
 		panel.style.top = (flip ? Math.max(8, at.top - 4 - Math.min(height, room)) : at.bottom + 4) + 'px';
-		panel.setAttribute('data-side', flip ? 'top' : 'bottom');
+		/* Not data-side: the popover's own rules read that name and pin the
+		 * panel to its trigger's edge, which fights the coordinates written
+		 * above. */
+		panel.setAttribute('data-placement', flip ? 'top' : 'bottom');
 	}
 
 	function placePickers() {
