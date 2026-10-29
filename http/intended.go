@@ -1,7 +1,10 @@
 package http
 
 import (
+	"mime"
 	stdhttp "net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/arandu-io/hesape/encryption"
@@ -93,13 +96,36 @@ func NewIntended(appKey []byte, secure bool) *Intended {
 // most links in this stack are followed, so dropping it would drop nearly
 // everything.
 //
+// # Only a navigation of the document
+//
+// Never a request a script made in the background. A page that polls -- a bell asking /notifications/new?since=...
+// every few seconds -- is turned away the moment its session expires, and that
+// request would otherwise be the last one remembered: the person signs in and
+// lands on the JSON of a poll. The browser says what kind of request it is in
+// the Fetch Metadata headers: Sec-Fetch-Mode other than "navigate", or a
+// Sec-Fetch-Dest other than "document", is a fetch(), an image, a script, a
+// frame, and is not kept. A client that sends neither header (an older browser,
+// a test) is judged by its Accept: one that asks for something and does not
+// list text/html is not after a page. An Accept that is absent leaves the
+// request remembered, because a client that says nothing is not shown to be
+// anything but a person following a link, and refusing it would break the
+// ones that always did.
+//
 // It writes nothing when there is nothing worth writing, so a caller has no
 // branch to get wrong.
 func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
 		return
 	}
-	if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-Boosted") != "true" {
+	boosted := r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-Boosted") == "true"
+	if r.Header.Get("HX-Request") == "true" && !boosted {
+		return
+	}
+	// A boosted navigation is exempt from the test below: htmx follows the link
+	// with XMLHttpRequest, which the browser describes as a cors fetch for an
+	// empty destination, so Fetch Metadata would drop nearly every link in this
+	// stack. The HX-Boosted header is the one thing that says it is a page.
+	if !boosted && !asksForADocument(r) {
 		return
 	}
 	to, ok := LocalPath(r.URL.RequestURI())
@@ -194,4 +220,52 @@ func (i *Intended) Clear(w stdhttp.ResponseWriter) {
 		Secure:   i.secure,
 		SameSite: stdhttp.SameSiteLaxMode,
 	})
+}
+
+// asksForADocument reports whether r is a navigation to a page rather than a
+// request a script, an image tag or a frame made.
+//
+// The Fetch Metadata headers decide when the browser sent them. They cannot be
+// set by a script -- the Sec- prefix is forbidden to fetch() -- which is why
+// they can be trusted to tell a navigation from a background request, and why
+// the Accept header, which a script sets freely, is only the fallback for a
+// request that carries none of them.
+func asksForADocument(r *stdhttp.Request) bool {
+	mode := r.Header.Get("Sec-Fetch-Mode")
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	if mode != "" || dest != "" {
+		if mode != "" && !strings.EqualFold(mode, "navigate") {
+			return false
+		}
+		if dest != "" && !strings.EqualFold(dest, "document") {
+			return false
+		}
+		return true
+	}
+
+	accept := strings.TrimSpace(strings.Join(r.Header.Values("Accept"), ","))
+	if accept == "" {
+		return true
+	}
+	return acceptsHTML(accept)
+}
+
+// acceptsHTML reports whether an Accept header lists text/html with a quality
+// above zero. A wildcard does not count: a browser following a link names
+// text/html, while fetch() sends "*/*", and a client that accepts anything is
+// exactly the one that cannot be shown to want a page.
+func acceptsHTML(accept string) bool {
+	for _, part := range strings.Split(accept, ",") {
+		media, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+		if err != nil || media != "text/html" {
+			continue
+		}
+		if q, ok := params["q"]; ok {
+			if v, err := strconv.ParseFloat(q, 64); err == nil && v <= 0 {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }

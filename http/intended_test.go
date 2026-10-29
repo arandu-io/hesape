@@ -160,6 +160,80 @@ func TestAFragmentIsNotRememberedAsAPageAndABoostedNavigationIs(t *testing.T) {
 	}
 }
 
+// A script that runs in the background -- a bell polling for new notifications
+// every few seconds -- is turned away when the session expires, exactly like a
+// page. Remembering it sends the person, after signing in, to the JSON of the
+// poll instead of to a page. Only a navigation of the document is kept.
+func TestOnlyANavigationOfTheDocumentIsRememberedAndNotABackgroundRequest(t *testing.T) {
+	const poll = "/painel/notificacoes/novas?desde=1730000000"
+
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"a navigation the browser describes", map[string]string{
+			"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "none",
+			"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		}, poll},
+		{"a fetch in cors mode", map[string]string{
+			"Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty", "Accept": "*/*",
+		}, "/"},
+		{"a fetch in cors mode that says nothing else", map[string]string{"Sec-Fetch-Mode": "cors"}, "/"},
+		{"a destination that is not a document", map[string]string{"Sec-Fetch-Dest": "empty"}, "/"},
+		{"a frame", map[string]string{"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe"}, "/"},
+		{"a client that wants JSON and sends no Fetch Metadata", map[string]string{"Accept": "application/json"}, "/"},
+		{"a client that accepts anything and sends no Fetch Metadata", map[string]string{"Accept": "*/*"}, "/"},
+		{"an old browser that names text/html and sends no Fetch Metadata", map[string]string{
+			"Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+		}, poll},
+		{"text/html refused with a zero quality", map[string]string{"Accept": "text/html;q=0,application/json"}, "/"},
+		{"a client that sends no headers at all", nil, poll},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			i := intended()
+			r := httptest.NewRequest(stdhttp.MethodGet, poll, nil)
+			for k, v := range c.headers {
+				r.Header.Set(k, v)
+			}
+
+			if got := i.Take(httptest.NewRecorder(), remembered(i, r), "/"); got != c.want {
+				t.Errorf("after signing in they would land on %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// The HTMX rule holds beside the Fetch Metadata one: a browser describes an
+// hx-get as a fetch, so it is turned away on either ground, and a boosted
+// navigation is kept when the browser calls it a navigation or says nothing.
+func TestTheHTMXRuleStillHoldsBesideFetchMetadata(t *testing.T) {
+	i := intended()
+
+	boosted := httptest.NewRequest(stdhttp.MethodGet, "/inbox?page=2", nil)
+	boosted.Header.Set("HX-Request", "true")
+	boosted.Header.Set("HX-Boosted", "true")
+	boosted.Header.Set("Accept", "*/*")
+	boosted.Header.Set("Sec-Fetch-Mode", "cors")
+	boosted.Header.Set("Sec-Fetch-Dest", "empty")
+	// hx-boost swaps a page through XMLHttpRequest, which the browser calls a
+	// cors fetch, so the Fetch Metadata alone would drop nearly every link in
+	// this stack: a boosted request is a page whatever the browser says it is.
+	if got := i.Take(httptest.NewRecorder(), remembered(i, boosted), "/"); got != "/inbox?page=2" {
+		t.Errorf("a boosted navigation was forgotten: %q", got)
+	}
+
+	fragment := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows?page=2", nil)
+	fragment.Header.Set("HX-Request", "true")
+	fragment.Header.Set("Sec-Fetch-Mode", "navigate")
+	fragment.Header.Set("Sec-Fetch-Dest", "document")
+	if got := i.Take(httptest.NewRecorder(), remembered(i, fragment), "/"); got != "/" {
+		t.Errorf("a fragment was remembered as %q", got)
+	}
+}
+
 // The address is replayed by a browser navigation, which is a GET. A POST
 // remembered here is a form submission turned into a link.
 func TestOnlySomethingABrowserCanNavigateToIsRemembered(t *testing.T) {
