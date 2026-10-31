@@ -27,6 +27,34 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.90.0 — a listing result serialises its state and its facet counts
+
+Nothing stops compiling. What changes is the JSON a `pagination.ListingResult`
+encodes to, which matters to a client that read it: the native table of Ayra,
+or a script that decoded the `application/vnd.arandu.view+json` answer of a
+route that lists.
+
+| Before | After |
+|---|---|
+| `{"State":{},"Page":{...}}` | `{"state":{...},"page":{...},"facets":{...}}` |
+
+- The keys are lower case, like every other payload of the package
+  (`per_page`, `current_page`). A reader that matched `State` or `Page` exactly
+  matches `state` and `page` now; one that compares without regard to case, as
+  Ayra's `ServerSource` does, changes nothing.
+- `state` was an empty object because `ListingState` has only unexported
+  fields. It is now `{"search","sort","dir","page","per_page","facets","hidden"}`,
+  all always present, defaults included.
+- `facets` is new: by the facet's key, an array of
+  `{"value","count","selected"}` in the order the spec lists the values.
+- `page` is unchanged.
+- `ListingResult.MarshalJSON` has a value receiver, so a result held by value in
+  a struct encodes like a pointer to one.
+- `ListingState` has a `MarshalJSON` and no `UnmarshalJSON`: a state is what a
+  `Listing` read and checked, and is not rebuilt from text.
+
+---
+
 ## v0.88.0 — a request declares its rules, validation speaks the language of the request and a module installs its own rules
 
 Three things stop compiling, and several rules change what they answer. Read the

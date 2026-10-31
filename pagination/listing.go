@@ -1,6 +1,7 @@
 package pagination
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -816,6 +817,67 @@ func (s ListingState) Values() url.Values {
 // Encode is Values encoded, with the parameters in the order of their names.
 func (s ListingState) Encode() string { return s.Values().Encode() }
 
+// listingStateJSON is the shape ListingState.MarshalJSON writes. The keys are
+// the ones the rest of the package writes in JSON: lower case, and snake case
+// where a name has two words (per_page, as in a page's payload).
+type listingStateJSON struct {
+	Search  string              `json:"search"`
+	Sort    string              `json:"sort"`
+	Dir     SortDirection       `json:"dir"`
+	Page    int                 `json:"page"`
+	PerPage int                 `json:"per_page"`
+	Facets  map[string][]string `json:"facets"`
+	Hidden  []string            `json:"hidden"`
+}
+
+// MarshalJSON writes the state a client that draws the table itself needs to
+// show it: the search text, the key of the sort and its direction, the page, the
+// page size, the values selected per facet and the hidden columns.
+//
+//	{"search":"abc","sort":"created","dir":"desc","page":2,"per_page":25,
+//	 "facets":{"status":["done"]},"hidden":["title"]}
+//
+// Every key is always there. "sort" is empty when the rows are ordered by the
+// tie-break alone, "facets" is an object holding only the facets with a value
+// selected, and "hidden" is an array, so a reader never meets a null. It writes
+// the state as it is, defaults included -- unlike [ListingState.Values], whose
+// job is the shortest address -- because a client has no spec to ask what the
+// default was.
+//
+// The names of the query parameters are not in it: they are the listing's, and
+// the address is built with [ListingState.Values].
+//
+// There is no UnmarshalJSON, on purpose. A state is only ever what a [Listing]
+// read out of a request, with every value checked against its spec; a decoder
+// would build one from text nobody checked, and it could not bind it to the
+// listing it belongs to.
+func (s ListingState) MarshalJSON() ([]byte, error) {
+	facets := make(map[string][]string, len(s.facets))
+	for key, values := range s.facets {
+		if len(values) > 0 {
+			facets[key] = values
+		}
+	}
+	return json.Marshal(listingStateJSON{
+		Search:  s.search,
+		Sort:    s.sort,
+		Dir:     s.Direction(),
+		Page:    s.Page(),
+		PerPage: s.perPage,
+		Facets:  facets,
+		Hidden:  nonNil(s.hidden),
+	})
+}
+
+// nonNil returns values, or an empty slice for a nil one, so that it encodes as
+// [] and not null.
+func nonNil[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
+}
+
 // URL returns path followed by the encoded state, with no "?" when the state
 // has nothing to write.
 func (s ListingState) URL(path string) string {
@@ -840,16 +902,18 @@ func (s ListingState) PageOptions(path string) Options {
 }
 
 // FacetCount is how many rows carry one value of a facet.
+//
+// It encodes as {"value":"done","count":5,"selected":true}.
 type FacetCount struct {
 	// Value is the facet value.
-	Value string
+	Value string `json:"value"`
 
 	// Count is how many rows match, with every other filter applied and the
 	// facet's own left out. It is zero for a value no row carries.
-	Count int
+	Count int `json:"count"`
 
 	// Selected reports whether the state has the value selected.
-	Selected bool
+	Selected bool `json:"selected"`
 }
 
 // ListingResult is what a listing hands the component that draws it: the state
@@ -886,4 +950,40 @@ func (r *ListingResult) Total() int { return r.Page.Total() }
 // order the spec lists the values.
 func (r *ListingResult) FacetCounts(key string) []FacetCount {
 	return slices.Clone(r.facets[key])
+}
+
+// listingResultJSON is the shape ListingResult.MarshalJSON writes.
+type listingResultJSON struct {
+	State  ListingState            `json:"state"`
+	Page   *LengthAwarePage        `json:"page"`
+	Facets map[string][]FacetCount `json:"facets"`
+}
+
+// MarshalJSON writes the result for a client that draws the table itself, such
+// as the native app answering the application/vnd.arandu.view+json
+// representation of a page:
+//
+//	{
+//	  "state":  {"search":"","sort":"created","dir":"desc","page":1,"per_page":25,"facets":{},"hidden":[]},
+//	  "page":   {"current_page":1,"total":57,"per_page":25, ...},
+//	  "facets": {"status":[{"value":"todo","count":12,"selected":false}, ...]}
+//	}
+//
+// "state" is [ListingState.MarshalJSON], "page" is the page's own payload (its
+// total is the total of the filtered rows), and "facets" holds, by the facet's
+// key, the count of every value in the order the spec lists them, as
+// [FacetCount] encodes them. A facet with nothing counted is an empty array,
+// never null, and a result with no facets has an empty object.
+//
+// The rows are not in it, for the reason the page holds none: they travel beside
+// the result as whatever type the query returned.
+//
+// The receiver is a value, so that a result held by value in a struct a handler
+// hands to its view is encoded the same way as a pointer to one.
+func (r ListingResult) MarshalJSON() ([]byte, error) {
+	facets := make(map[string][]FacetCount, len(r.facets))
+	for key, counts := range r.facets {
+		facets[key] = nonNil(counts)
+	}
+	return json.Marshal(listingResultJSON{State: r.State, Page: r.Page, Facets: facets})
 }
