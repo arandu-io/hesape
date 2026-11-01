@@ -27,7 +27,7 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
-## The next release — a page left open renews its CSRF token, and a refused browser reads a page
+## v0.95.0 — a page left open renews its CSRF token, and a refused browser reads a page
 
 Nothing stops compiling. Three behaviours change, and an application that
 worked around the first can take the workaround out.
