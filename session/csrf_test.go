@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/session"
+	"github.com/arandu-io/hesape/support"
 )
 
 var appKey = []byte("0123456789abcdef0123456789abcdef")
@@ -189,5 +190,92 @@ func TestATamperedGuestCookieIsNotABinding(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: session.GuestCookieName, Value: "chosen.forged"})
 	if got := c.Binding(nil, req, ""); got != "" {
 		t.Fatalf("Binding = %q for a forged cookie, want empty", got)
+	}
+}
+
+// TestCSRFTokenLapsesWithTheClock: the expiry is read off the clock the rest of
+// the collection travels, so a test moves it past the ttl instead of sleeping
+// through it. The token is accepted at the last second of its life and refused
+// the second after.
+func TestCSRFTokenLapsesWithTheClock(t *testing.T) {
+	support.FreezeTime()
+	t.Cleanup(support.TravelBack)
+	c := session.NewCSRF(appKey, 2*time.Hour)
+
+	token, err := c.Issue("session-1")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	support.Travel(2 * time.Hour)
+	if err := c.Validate("session-1", token); err != nil {
+		t.Fatalf("Validate at the end of its ttl: %v, want the token still accepted", err)
+	}
+	support.Travel(time.Second)
+	if err := c.Validate("session-1", token); !errors.Is(err, session.ErrTokenMismatch) {
+		t.Fatalf("Validate one second after its ttl: %v, want ErrTokenMismatch", err)
+	}
+}
+
+// TestTokenExpiryReadsWhatIssueWrote: a page plans its renewal by the instant
+// its own token lapses, and that instant is the one Validate enforces.
+func TestTokenExpiryReadsWhatIssueWrote(t *testing.T) {
+	support.FreezeTime()
+	t.Cleanup(support.TravelBack)
+	c := session.NewCSRF(appKey, 2*time.Hour)
+
+	token, err := c.Issue("session-1")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	at, ok := session.TokenExpiry(token)
+	if !ok {
+		t.Fatalf("TokenExpiry(%q) not ok", token)
+	}
+	if want := support.Now().Add(2 * time.Hour).Unix(); at.Unix() != want {
+		t.Fatalf("TokenExpiry = %d, want %d", at.Unix(), want)
+	}
+}
+
+// TestTokenExpiryRefusesWhatIsNotAToken: the shapes a page may hold in a field
+// that is not a token at all.
+func TestTokenExpiryRefusesWhatIsNotAToken(t *testing.T) {
+	for _, token := range []string{"", "abc", "a.b", "a.b.c.d", "a.12x.c", "a..c"} {
+		if _, ok := session.TokenExpiry(token); ok {
+			t.Errorf("TokenExpiry(%q) ok, want not ok", token)
+		}
+	}
+}
+
+// TestAGuestCookieLivesFromTheLatestPageAndNotTheFirst: a sign-in page left
+// open renews its token before the old one lapses, and the token is bound to
+// the guest the cookie names. A cookie that kept the deadline of the first page
+// lapsed under the newest token, and the form it was in was refused.
+func TestAGuestCookieLivesFromTheLatestPageAndNotTheFirst(t *testing.T) {
+	c := session.NewCSRF(appKey, 2*time.Hour)
+
+	first := httptest.NewRecorder()
+	binding := c.Binding(first, httptest.NewRequest(http.MethodGet, "/", nil), "")
+	cookies := first.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].MaxAge != 7200 {
+		t.Fatalf("the first page set %v, want one guest cookie of 7200 seconds", cookies)
+	}
+
+	again := httptest.NewRequest(http.MethodGet, "/", nil)
+	again.AddCookie(cookies[0])
+	second := httptest.NewRecorder()
+	if got := c.Binding(second, again, ""); got != binding {
+		t.Fatalf("a guest seen again was bound to %q, want the same %q", got, binding)
+	}
+	renewed := second.Result().Cookies()
+	if len(renewed) != 1 || renewed[0].Value != cookies[0].Value || renewed[0].MaxAge != 7200 {
+		t.Fatalf("a guest seen again was set %v, want the same cookie with its life afresh", renewed)
+	}
+
+	validating := httptest.NewRequest(http.MethodPost, "/", nil)
+	validating.AddCookie(cookies[0])
+	nowriter := c.Binding(nil, validating, "")
+	if nowriter != binding {
+		t.Fatalf("validation bound to %q, want %q", nowriter, binding)
 	}
 }

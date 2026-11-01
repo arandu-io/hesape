@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // ErrTokenMismatch means the token is invalid, expired, or bound to another
@@ -67,7 +69,9 @@ func (c *CSRF) Secure(on bool) *CSRF {
 // was issued to.
 //
 // When issuing, pass the ResponseWriter: a request without a valid guest cookie
-// is given one, set on w, and the new id is returned. When validating, pass a
+// is given one, set on w, and the new id is returned; a request that has one is
+// given it again, so that its life runs from the latest page and not from the
+// first. When validating, pass a
 // nil w: nothing is minted, and a request with neither a session nor a guest
 // cookie returns the empty string, which Validate refuses.
 func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string) string {
@@ -76,6 +80,14 @@ func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string)
 	}
 	if cookie, err := r.Cookie(GuestCookieName); err == nil {
 		if id, sig, ok := strings.Cut(cookie.Value, "."); ok && id != "" && hmac.Equal([]byte(c.signGuest(id)), []byte(sig)) {
+			if w != nil {
+				// Seen again, the guest is given the cookie's life afresh. A
+				// sign-in page left open is renewed token by token, and a cookie
+				// that kept its first deadline would lapse under the newest one:
+				// the form would carry a token bound to a guest the browser no
+				// longer holds.
+				c.setGuest(w, id)
+			}
 			return guestPrefix + id
 		}
 	}
@@ -87,6 +99,12 @@ func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string)
 		return ""
 	}
 	id := base64.RawURLEncoding.EncodeToString(raw)
+	c.setGuest(w, id)
+	return guestPrefix + id
+}
+
+// setGuest writes the guest cookie for id, with the life a token has.
+func (c *CSRF) setGuest(w http.ResponseWriter, id string) {
 	cookie := &http.Cookie{
 		Name:     GuestCookieName,
 		Value:    id + "." + c.signGuest(id),
@@ -99,7 +117,6 @@ func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string)
 		cookie.MaxAge = int(c.ttl.Seconds())
 	}
 	http.SetCookie(w, cookie)
-	return guestPrefix + id
 }
 
 // Issue generates a token bound to binding: a signed token that carries its
@@ -116,9 +133,28 @@ func (c *CSRF) Issue(binding string) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	exp := strconv.FormatInt(time.Now().Add(c.ttl).Unix(), 10)
+	exp := strconv.FormatInt(support.Now().Add(c.ttl).Unix(), 10)
 	payload := base64.RawURLEncoding.EncodeToString(nonce) + "." + exp
 	return payload + "." + c.sign(binding, payload), nil
+}
+
+// TokenExpiry reads the instant a token Issue produced stops being accepted.
+//
+// It reads the expiry the token carries and checks nothing else: the signature
+// is not verified, so a token that was never issued answers an instant all the
+// same, and the answer is only fit for a person's own page to plan a renewal
+// by. Validate is the one check. ok is false when token has not the three-part
+// shape Issue writes.
+func TokenExpiry(token string) (at time.Time, ok bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	exp, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(exp, 0), true
 }
 
 // Validate checks signature, expiry and the binding to the session, or to the
@@ -138,7 +174,7 @@ func (c *CSRF) Validate(binding, token string) error {
 		return ErrTokenMismatch
 	}
 	exp, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || time.Now().Unix() > exp {
+	if err != nil || support.Now().Unix() > exp {
 		return ErrTokenMismatch
 	}
 	return nil
