@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arandu-io/hesape/arandutest/browser"
 	"github.com/arandu-io/hesape/arandutest/browser/cdp"
@@ -41,6 +42,13 @@ func rangePage(t *testing.T, attrs string) *httptest.Server {
 <div data-part="backdrop" hidden></div>
 <div data-part="panel" id="r-panel" class="panel" role="dialog" hidden>
 <button type="button" data-range-days="7">7 dias</button><button type="button" data-range-days="1">Hoje</button>
+<button type="button" id="yesterday" data-range-days="1" data-range-ends-ago="1">Ontem</button>
+<button type="button" id="this-week" data-range-unit="week">Esta semana</button>
+<button type="button" id="this-month" data-range-unit="month">Este mes</button>
+<button type="button" id="last-month" data-range-unit="month" data-range-back="1">Mes passado</button>
+<button type="button" id="last-3-months" data-range-months="3">Ultimos 3 meses</button>
+<button type="button" id="this-year" data-range-unit="year">Este ano</button>
+<button type="button" id="last-year" data-range-unit="year" data-range-back="1">Ano passado</button>
 <button type="button" data-part="month-previous" data-range-step="-1">prev</button><button type="button" data-part="month-next" data-range-step="1">next</button>
 %s
 <p data-part="status" role="status"></p><button type="button" data-range-clear>Limpar</button>
@@ -183,7 +191,7 @@ func TestAPeriodIsPickedFromTheKeyboard(t *testing.T) {
 func TestAShortcutAndClearAreOneChangeEach(t *testing.T) {
 	page := rangeOpen(t, ``)
 	page.Click(browser.CSS("#r-trigger", "the field"))
-	page.Click(browser.CSS("[data-range-days='1']", "today"))
+	page.Click(browser.CSS("[data-range-days='1']:not([data-range-ends-ago])", "today"))
 	today := rangeEval(t, page, `(function () { var n = new Date(); var p = function (x) { return (x < 10 ? '0' : '') + x; }; return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate()); })()`)
 	got := rangeEval(t, page, `document.querySelector('[name=de]').value + '|' + document.querySelector('[name=ate]').value + '|' + window.changes`)
 	if got != today+"|"+today+"|1" {
@@ -267,5 +275,39 @@ func TestADayPickersPanelIsNotCutByItsContainer(t *testing.T) {
 	page.Evaluate(`document.getElementById('d').dispatchEvent(new Event('change', { bubbles: true }))`, nil)
 	if got := rangeEval(t, page, `document.getElementById('p').getAttribute('aria-hidden')`); got != "true" {
 		t.Fatalf("choosing a day left the panel open: aria-hidden=%s", got)
+	}
+}
+
+// A shortcut can end in the past. Each of Polar's named ranges is worked out
+// from the reader's own today in the browser: yesterday, the calendar month and
+// year before this one, the last three months from the same day, the week from
+// its first day.
+func TestShortcutsEndingInThePastAreWorkedOutFromToday(t *testing.T) {
+	day := func(t time.Time) string { return t.Format("2006-01-02") }
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	firstOfMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	back3 := time.Date(today.Year(), today.Month()-3, 1, 0, 0, 0, 0, time.UTC)
+	dayOf := min(today.Day(), time.Date(back3.Year(), back3.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day())
+
+	for _, c := range []struct {
+		button   string
+		from, to string
+	}{
+		{"yesterday", day(today.AddDate(0, 0, -1)), day(today.AddDate(0, 0, -1))},
+		{"this-week", day(today.AddDate(0, 0, -int(today.Weekday()))), day(today)},
+		{"this-month", day(firstOfMonth), day(today)},
+		{"last-month", day(firstOfMonth.AddDate(0, -1, 0)), day(firstOfMonth.AddDate(0, 0, -1))},
+		{"last-3-months", day(time.Date(back3.Year(), back3.Month(), dayOf, 0, 0, 0, 0, time.UTC)), day(today)},
+		{"this-year", day(time.Date(today.Year(), 1, 1, 0, 0, 0, 0, time.UTC)), day(today)},
+		{"last-year", day(time.Date(today.Year()-1, 1, 1, 0, 0, 0, 0, time.UTC)), day(time.Date(today.Year()-1, 12, 31, 0, 0, 0, 0, time.UTC))},
+	} {
+		page := rangeOpen(t, ``)
+		page.Click(browser.CSS("#r-trigger", "the field"))
+		page.Click(browser.CSS("#"+c.button, "the shortcut"))
+		got := rangeEval(t, page, `document.querySelector('[name=de]').value + '|' + document.querySelector('[name=ate]').value + '|' + window.changes`)
+		if want := c.from + "|" + c.to + "|1"; got != want {
+			t.Errorf("%s writes %q, want %q", c.button, got, want)
+		}
 	}
 }

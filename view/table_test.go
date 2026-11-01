@@ -38,7 +38,7 @@ func TestTheDataTableBehaviourKeepsWhatAnAddressCannotDo(t *testing.T) {
 		"a menu closes on Escape":                            "event.key === 'Escape'",
 		"a search is one request after a pause":              "form.requestSubmit",
 		"Enter cancels the pause":                            "document.addEventListener('submit'",
-		"the box's own change event is not a request":        "'[data-part=\"search\"], [data-part=\"facet-search\"]'",
+		"the box's own change event is not a request":        "'[data-part=\"facet-search\"], ' + TEXT_QUERY",
 		"the selection outlives the region it is drawn in":   "tableSelections[root.id]",
 		"the selection ends when the page leaves the list":   "!tableSwapping[root.id]",
 		"the keys of other pages ride in the bulk form":      "input[data-bulk-key]",

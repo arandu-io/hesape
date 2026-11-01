@@ -27,6 +27,45 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.91.0 — a search ignores accents, ui.js stops swallowing clicks and typing, and a shortcut can end in the past
+
+Nothing stops compiling. Three behaviours change, and an application that worked
+around any of them can take the workaround out.
+
+- **A listing's search ignores the marks on a letter**, as it already ignored
+  case: "camera" finds "Câmera" and "CÂM" finds "câm". `ApplyListing` folds the
+  column and the binding through the same function, `translate()` on PostgreSQL
+  and nested `replace()` on SQLite (whose `lower()` lowers ASCII only), so no
+  extension has to be installed and no function registered. MySQL and MariaDB
+  keep `lower()`, because their default collations ignore the marks. A
+  hand-written `lower(col) like lower(?)` in an application is the old form.
+  A grammar of your own folds by implementing `FoldAccents(expression string) string`.
+- **`ui.js` reads `data-size` only in the page-size menu** (`[data-part="sizes"]`).
+  A complete list used to take the click of any element carrying the attribute:
+  Kyse writes it on buttons (`icon`, `sm`, `lg`) and on dialogs, so a row's icon
+  link did not navigate and a form in a cell did not submit. A complete list no
+  longer cancels the submit of any form but its own query form (`data-part="query"`).
+- **The search box of a data table keeps what is typed while a request is out.**
+  The answer replaces the region and the box came back holding the text that was
+  sent; the text typed after the request left is now put back, with the caret
+  where it was, and asked for in its turn. A letter composed in two strokes
+  (a dead key, a phone keyboard) is not asked for until the composition ends.
+  A text control inside the form (`[data-control="text"]`) behaves the same.
+- **A complete list searches and sorts a cell by its own words.** The text of a
+  `<dialog>` drawn in the cell, of a `<template>`, and of anything marked
+  `data-search="false"` is left out, and the search folds case and accents.
+  The controls of the toolbar (`[data-control]`: a choice, a text, a period)
+  narrow it against the row's `data-facet-KEY`.
+- **A date-range shortcut can end in the past.** Besides `data-range-days`, a
+  button may carry `data-range-ends-ago` (yesterday is 1 day ending 1 day ago),
+  `data-range-unit` (`week`, `month` or `year`) with `data-range-back` (the
+  calendar unit that many units ago, whole; 0 is the current one up to today),
+  or `data-range-months` (the same day that many months ago through today, or
+  the last day of a shorter month). They are worked out from the reader's own
+  today in the browser.
+
+---
+
 ## v0.90.0 — a listing result serialises its state and its facet counts
 
 Nothing stops compiling. What changes is the JSON a `pagination.ListingResult`

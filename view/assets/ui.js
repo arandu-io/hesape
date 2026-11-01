@@ -191,6 +191,10 @@
 	 *   - the swap itself: an open menu stays open, the address bar says the
 	 *     canonical address of what is on screen, and the focus stays in the
 	 *     search box;
+	 *   - the controls of the toolbar: a text, a choice or a period inside the
+	 *     query form (data-control="text|select|period"). On a listed table the
+	 *     form asks the server for them like the search; on a complete list
+	 *     they narrow the rows against data-facet-KEY;
 	 *   - a complete list: when the page holds every row, the server says so
 	 *     (data-complete) and the browser orders, searches, filters and pages
 	 *     the rows in hand. That is the only case where ordering rows here is
@@ -208,6 +212,39 @@
 	var tableSwapping = {};
 	var tableCarried = {};
 	var tableTimers = {};
+
+	/* An entry of the page-size menu. Kyse writes data-size on buttons and
+	 * dialogs too ("icon", "sm", "lg"), so the attribute alone says nothing:
+	 * what makes it a size is the menu it is in. */
+	var SIZE_ITEM = '[data-part="sizes"] [data-size]';
+
+	/* The text boxes that ask the server on their own: the search, and a text
+	 * control the toolbar carries beside it. */
+	var TEXT_QUERY = '[data-part="search"], [data-control="text"] input';
+
+	/* foldText is what search compares: lower case, and with the marks that sit
+	 * on a letter taken off, so "camera" finds "Câmera" and "CÂM" finds "câm".
+	 * The server folds the same letters (hesape/database/query). */
+	function foldText(text) {
+		var lower = String(text == null ? '' : text).toLowerCase();
+		return lower.normalize ? lower.normalize('NFD').replace(/[̀-ͯ]/g, '') : lower;
+	}
+
+	/* textOf is what a cell says for search and for sorting: its text without
+	 * what is not the row's own words. A dialog drawn inside the cell (the
+	 * question a row action asks, with its Cancel and Confirm), a template, a
+	 * script, and anything marked data-search="false" are left out. */
+	function textOf(node) {
+		var out = '';
+		for (var child = node.firstChild; child; child = child.nextSibling) {
+			if (child.nodeType === 3) {
+				out += child.nodeValue;
+			} else if (child.nodeType === 1 && !child.matches('dialog, template, script, style, [data-search="false"]')) {
+				out += textOf(child);
+			}
+		}
+		return out;
+	}
 
 	function tableRootOf(node) {
 		return node && node.closest ? node.closest('[data-kyse-behavior="table"]') : null;
@@ -360,10 +397,10 @@
 		if (!from || !from.matches('[data-part="facet-search"]')) return;
 		var panel = from.closest('[data-menu-panel]');
 		if (!panel) return;
-		var needle = (from.value || '').trim().toLowerCase();
+		var needle = foldText((from.value || '').trim());
 		var shown = 0;
 		each(panel, '[data-facet-item]', function (item) {
-			var text = (item.getAttribute('data-text') || item.textContent || '').toLowerCase();
+			var text = foldText(item.getAttribute('data-text') || item.textContent || '');
 			var match = !needle || text.indexOf(needle) >= 0;
 			item.hidden = !match;
 			if (match) shown++;
@@ -382,29 +419,59 @@
 	 */
 	document.addEventListener('change', function (event) {
 		var from = origin(event);
-		if (from && from.matches('[data-part="search"], [data-part="facet-search"]')) event.stopPropagation();
+		if (from && from.matches('[data-part="facet-search"], ' + TEXT_QUERY)) event.stopPropagation();
 	}, true);
 
-	document.addEventListener('input', function (event) {
-		var from = origin(event);
-		if (!from || !from.matches('[data-part="search"]')) return;
+	/* Asking for what was typed. A word typed at speed is one request, so the
+	 * wait restarts on every key; and nothing is asked while a letter is being
+	 * composed -- a dead key for "~" then "a", a phone keyboard's suggestion --
+	 * because the browser holds the composition open in the box, and a swap
+	 * that replaced the box in the middle left the accent as a character of its
+	 * own ("p~ã"). The request goes when the composition ends. */
+	function askForTheQuery(from) {
 		var root = tableRootOf(from);
 		if (!root || root.getAttribute('data-complete') === 'true') return;
 		var form = from.form;
 		if (!form) return;
 		window.clearTimeout(tableTimers[root.id]);
 		tableTimers[root.id] = window.setTimeout(function () {
-			if (!from.isConnected || from.value === from.defaultValue) return;
+			if (!from.isConnected) return;
+			var typed = false;
+			each(form, TEXT_QUERY, function (box) { if (box.value !== box.defaultValue) typed = true; });
+			if (!typed) return;
 			if (form.requestSubmit) form.requestSubmit();
 			else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
 		}, 300);
+	}
+
+	document.addEventListener('input', function (event) {
+		var from = origin(event);
+		if (!from || !from.matches(TEXT_QUERY)) return;
+		if (event.isComposing || from.__composing) return;
+		askForTheQuery(from);
+	});
+
+	document.addEventListener('compositionstart', function (event) {
+		var from = origin(event);
+		if (from && from.matches && from.matches(TEXT_QUERY)) from.__composing = true;
+	});
+
+	document.addEventListener('compositionend', function (event) {
+		var from = origin(event);
+		if (!from || !from.matches || !from.matches(TEXT_QUERY)) return;
+		from.__composing = false;
+		askForTheQuery(from);
 	});
 
 	document.addEventListener('submit', function (event) {
 		var root = tableRootOf(event.target);
 		if (!root) return;
 		window.clearTimeout(tableTimers[root.id]);
-		if (root.getAttribute('data-complete') === 'true') event.preventDefault();
+		/* A complete list is worked in the browser, so its own query form never
+		 * goes to the server. Any other form in the region -- a row's action, a
+		 * dialog's -- is the page's, and submits. */
+		var own = event.target.getAttribute('data-part') === 'query' || event.target.id === root.id + '-query';
+		if (own && root.getAttribute('data-complete') === 'true') event.preventDefault();
 	}, true);
 
 	/* ---- the selection -------------------------------------------------- *
@@ -498,6 +565,21 @@
 	 * they are put back, before the next frame, so a menu that stays open
 	 * while its boxes are ticked never closes at all.
 	 */
+	/* What the request carried. The answer replaces the whole region and the
+	 * text boxes come back holding the text that was sent, so whatever is typed
+	 * after the request left and before its answer arrives would be gone. The
+	 * text sent is remembered here, and compared with what the boxes hold when
+	 * the answer comes (below). */
+	var tableSent = {};
+
+	document.addEventListener('htmx:beforeSend', function (event) {
+		var root = tableRootOf(event.detail && event.detail.elt);
+		if (!root || !root.id) return;
+		var sent = {};
+		each(root, TEXT_QUERY, function (box) { if (box.id) sent[box.id] = box.value; });
+		tableSent[root.id] = sent;
+	});
+
 	document.addEventListener('htmx:beforeSwap', function (event) {
 		var target = event.detail && event.detail.target;
 		var root = tableRootOf(target);
@@ -507,7 +589,14 @@
 		each(root, 'details[data-menu][open]', function (menu) { if (menu.id) open.push(menu.id); });
 		var scroller = root.querySelector('[data-part="table"]');
 		scroller = scroller && scroller.parentElement;
-		var carried = { menus: open, focus: null, scroll: scroller ? scroller.scrollLeft : 0 };
+		var carried = { menus: open, focus: null, typed: [], scroll: scroller ? scroller.scrollLeft : 0 };
+		var sent = tableSent[root.id] || {};
+		each(root, TEXT_QUERY, function (box) {
+			if (box.id && Object.prototype.hasOwnProperty.call(sent, box.id) && box.value !== sent[box.id]) {
+				carried.typed.push({ id: box.id, value: box.value });
+			}
+		});
+		delete tableSent[root.id];
 		var active = document.activeElement;
 		if (active && active !== document.body && root.contains(active) && active.id) {
 			carried.focus = {
@@ -534,6 +623,14 @@
 					menu.open = true;
 					placeMenu(menu);
 				}
+			});
+			/* What was typed while the request was out goes back into the box,
+			 * and is asked for in its turn. */
+			carried.typed.forEach(function (one) {
+				var box = document.getElementById(one.id);
+				if (!box || !root.contains(box)) return;
+				box.value = one.value;
+				askForTheQuery(box);
 			});
 			if (carried.focus) {
 				var field = document.getElementById(carried.focus.id);
@@ -621,7 +718,7 @@
 					var text = '';
 					for (var i = 0; i < row.cells.length; i++) {
 						if (row.cells[i].hidden) continue;
-						text += (row.cells[i].textContent || '').toLowerCase() + ' ';
+						text += foldText(textOf(row.cells[i])) + ' ';
 					}
 					row.__hay = text;
 				}
@@ -639,7 +736,7 @@
 				var cell = row.cells[at];
 				if (!cell) return '';
 				var raw = cell.getAttribute('data-sort-value');
-				return raw === null ? (cell.textContent || '').trim() : raw;
+				return raw === null ? textOf(cell).trim() : raw;
 			};
 
 			var order = function (at, dir) {
@@ -721,7 +818,7 @@
 			var show = function () {
 				var query = '';
 				var box = root.querySelector('[data-part="search"]');
-				if (box) query = (box.value || '').trim().toLowerCase();
+				if (box) query = foldText((box.value || '').trim());
 
 				/* A row passes a facet when its own value for it is one of
 				 * those ticked, and a facet with none ticked lets every row
@@ -730,10 +827,38 @@
 				each(root, '[data-part="filter"]:checked', function (one) {
 					(facets[one.name] = facets[one.name] || []).push(one.value);
 				});
+				/* The controls of the toolbar narrow a complete list the way a
+				 * facet does, against the value the row states for the control's
+				 * key (data-facet-KEY): a choice must equal it, a text must be
+				 * found in it, and a period must hold it, as a day. */
+				var controls = [];
+				each(root, '[data-control]', function (control) {
+					var kind = control.getAttribute('data-control');
+					if (kind === 'period') {
+						var from = control.querySelector('[data-part="from"]');
+						var to = control.querySelector('[data-part="to"]');
+						if (from && to && from.value && to.value) controls.push({ kind: kind, key: from.name, from: from.value, to: to.value });
+						return;
+					}
+					var field = control.querySelector('input, select');
+					var value = field ? foldText((field.value || '').trim()) : '';
+					if (value) controls.push({ kind: kind, key: field.name, value: value });
+				});
 				var passes = function (row) {
 					for (var key in facets) {
 						if (!Object.prototype.hasOwnProperty.call(facets, key)) continue;
 						if (facets[key].indexOf(row.getAttribute('data-facet-' + key)) < 0) return false;
+					}
+					for (var c = 0; c < controls.length; c++) {
+						var held = row.getAttribute('data-facet-' + controls[c].key) || '';
+						if (controls[c].kind === 'period') {
+							var day = held.slice(0, 10);
+							if (day < controls[c].from || day > controls[c].to) return false;
+						} else if (controls[c].kind === 'text') {
+							if (foldText(held).indexOf(controls[c].value) < 0) return false;
+						} else if (foldText(held) !== controls[c].value) {
+							return false;
+						}
 					}
 					return true;
 				};
@@ -846,6 +971,11 @@
 					facetSummary(filter.closest('[data-part="facet"]'));
 					page = 1;
 					show();
+					return;
+				}
+				if (event.target.closest('[data-control]')) {
+					page = 1;
+					show();
 				}
 			};
 
@@ -922,11 +1052,15 @@
 						closeMenus(null);
 						return;
 					}
-					var chosen = from.closest('[data-size]');
-					if (chosen) {
+					/* Only an entry of the page-size menu is a size. Kyse writes
+					 * data-size on a button ("icon", "sm", "lg") and on a dialog,
+					 * and a link or a form inside a cell carries one: taking those
+					 * for a size swallowed the click and set the page to zero. */
+					var chosen = from.closest(SIZE_ITEM);
+					if (chosen && root.contains(chosen)) {
 						take();
 						size = Number(chosen.getAttribute('data-size')) || 0;
-						each(root, '[data-size]', function (item) {
+						each(root, SIZE_ITEM, function (item) {
 							var on = item === chosen;
 							item.setAttribute('aria-checked', on ? 'true' : 'false');
 							each(item, '[data-indicator]', function (check) { check.hidden = !on; });
@@ -964,6 +1098,17 @@
 						var scope = from.closest('[data-facet-clear-link]') ? from.closest('[data-part="facet"]') : root;
 						if (scope === root) {
 							each(root, '[data-part="search"]', function (box) { box.value = ''; });
+							each(root, '[data-control]', function (control) {
+								var kind = control.getAttribute('data-control');
+								if (kind === 'period') {
+									/* The picker clears itself: it owns what it shows. */
+									var clear = control.querySelector('[data-range-clear]');
+									if (clear) clear.click();
+									else each(control, '[data-part="from"], [data-part="to"]', function (day) { day.value = ''; });
+								} else {
+									each(control, 'input, select', function (field) { field.value = ''; });
+								}
+							});
 						}
 						each(scope, '[data-part="filter"]', function (box) { box.checked = false; });
 						each(root, '[data-part="facet"]', facetSummary);
@@ -978,11 +1123,15 @@
 				 * there is no network to wait for. */
 				var pending = 0;
 				ctx.filter = function (event) {
-					if (!event.target.closest('[data-part="search"]')) return;
+					if (!event.target.closest(TEXT_QUERY)) return;
+					if (event.isComposing) return;
 					window.clearTimeout(pending);
 					pending = window.setTimeout(function () { page = 1; show(); }, 80);
 				};
 				root.addEventListener('input', ctx.filter);
+				/* A composition that ends is the moment to search: the input
+				 * events before it were left alone. */
+				root.addEventListener('compositionend', ctx.filter);
 
 				ctx.refresh = function () { forget(); show(); };
 				nameHeads();
@@ -1003,7 +1152,10 @@
 			root.removeEventListener('change', ctx.change);
 			root.removeEventListener('keydown', ctx.key);
 			if (ctx.click) root.removeEventListener('click', ctx.click, true);
-			if (ctx.filter) root.removeEventListener('input', ctx.filter);
+			if (ctx.filter) {
+				root.removeEventListener('input', ctx.filter);
+				root.removeEventListener('compositionend', ctx.filter);
+			}
 			window.clearTimeout(tableTimers[root.id]);
 			/* The selection belongs to the list and not to its markup. It
 			 * survives the region being swapped for the same region; it ends
@@ -1648,9 +1800,58 @@
 				write(a, b);
 			};
 
-			var preset = function (days) {
-				var to = todayISO();
-				var from = shift(to, -(days - 1));
+			/* A shortcut is a range worked out from the reader's own today, in
+			 * the browser, so it is right on a page left open past midnight and
+			 * on a page the server cached. It says one of three things:
+			 *
+			 *   - the last N days, the last of them EndsAgo days before today
+			 *     (data-range-days, data-range-ends-ago): "today" is 1 and 0,
+			 *     "yesterday" is 1 and 1, "the last 7 days" is 7 and 0;
+			 *   - the calendar week, month or year that is Back units ago
+			 *     (data-range-unit, data-range-back): this one runs from its
+			 *     first day to today, an earlier one is whole;
+			 *   - the same day N months ago through today, or through the day
+			 *     EndsAgo before it (data-range-months): "the last 3 months". A
+			 *     month with no such day gives its last.
+			 */
+			var resolve = function (shortcut) {
+				var number = function (name) { return Number(shortcut.getAttribute(name)) || 0; };
+				var today = todayISO();
+				var now = parse(today);
+				var year = now.getUTCFullYear();
+				var month = now.getUTCMonth();
+				var unit = shortcut.getAttribute('data-range-unit');
+				var back = number('data-range-back');
+				var ago = number('data-range-ends-ago');
+				var from;
+				var to;
+				if (unit === 'week') {
+					var start = new Date(now.getTime());
+					start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() - firstDay + 7) % 7) - 7 * back);
+					from = stamp(start);
+					to = back ? shift(from, 6) : today;
+				} else if (unit === 'month') {
+					from = stamp(new Date(Date.UTC(year, month - back, 1)));
+					to = back ? stamp(new Date(Date.UTC(year, month - back + 1, 0))) : today;
+				} else if (unit === 'year') {
+					from = stamp(new Date(Date.UTC(year - back, 0, 1)));
+					to = back ? stamp(new Date(Date.UTC(year - back, 11, 31))) : today;
+				} else if (number('data-range-months')) {
+					var target = new Date(Date.UTC(year, month - number('data-range-months'), 1));
+					var last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+					from = stamp(new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(now.getUTCDate(), last))));
+					to = shift(today, -ago);
+				} else {
+					to = shift(today, -ago);
+					from = shift(to, -((number('data-range-days') || 1) - 1));
+				}
+				return [from, to];
+			};
+
+			var preset = function (shortcut) {
+				var span = resolve(shortcut);
+				var from = span[0];
+				var to = span[1];
 				if (props.max && to > props.max) to = props.max;
 				if (props.min && from < props.min) from = props.min;
 				if (from > to) return;
@@ -1674,8 +1875,8 @@
 					write('', '');
 					return;
 				}
-				var shortcut = from.closest('[data-range-days]');
-				if (shortcut) { preset(Number(shortcut.getAttribute('data-range-days')) || 1); return; }
+				var shortcut = from.closest('[data-range-days], [data-range-unit], [data-range-months]');
+				if (shortcut) { preset(shortcut); return; }
 				var cell = from.closest('[role="gridcell"]');
 				if (cell && cell.getAttribute('data-outside') !== 'true' && cell.getAttribute('aria-disabled') !== 'true') {
 					choose(cell.getAttribute('data-date'));
