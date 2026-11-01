@@ -195,3 +195,89 @@ func testAListingNarrowsOrdersAndCountsInsideTheTenant(t *testing.T, db *databas
 		t.Fatalf("the table after the hostile sort: %d rows, %v", left, err)
 	}
 }
+
+// testAListingSearchIgnoresAccentsAndCase is the search of a listing on a real
+// engine, with text written the way Portuguese is: "camera" finds "Câmera",
+// "CÂM" finds "câm", and a capital that carries a mark is lowered like any
+// other. What the engines disagree on is exactly this: PostgreSQL lowers and
+// compares by its collation, SQLite lowers ASCII only, and MySQL ignores the
+// marks by default, so each is asked the same questions and must answer alike.
+func testAListingSearchIgnoresAccentsAndCase(t *testing.T, db *database.DB) {
+	ctx := context.Background()
+	name := table("accents")
+	drop(t, db, name)
+	t.Cleanup(func() { drop(t, db, name) })
+
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(
+		`CREATE TABLE %s (id %s PRIMARY KEY, tenant_id %s NOT NULL, title %s NOT NULL)`,
+		name, database.KeyText, database.KeyText, database.KeyText)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, row := range [][2]string{
+		{"1", "Câmera Garagem"},
+		{"2", "CAMERA FRONTAL"},
+		{"3", "café com leite"},
+		{"4", "ÂNCORA"},
+		{"5", "ancora seca"},
+		{"6", "Ação e Reação"},
+		{"7", "Maçã verde"},
+		{"8", "lingüiça"},
+		{"9", "plain"},
+		{"10", "100% pão"},
+	} {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s (id, tenant_id, title) VALUES (?, ?, ?)`, name),
+			row[0], "acme", row[1]); err != nil {
+			t.Fatalf("insert %s: %v", row[0], err)
+		}
+	}
+
+	listing, err := pagination.NewListing(pagination.ListingSpec{
+		Search:    []string{"title"},
+		Sorts:     map[string]string{"title": "title"},
+		TieBreak:  "id",
+		PageSizes: []int{50},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acme := auth.SystemGrant("ticket.list", "acme")
+
+	for _, c := range []struct {
+		search string
+		want   []string
+	}{
+		{"camera", []string{"1", "2"}},
+		{"CÂMERA", []string{"1", "2"}},
+		{"câm", []string{"1", "2"}},
+		{"CAM", []string{"1", "2"}},
+		{"cafe", []string{"3"}},
+		{"CAFÉ", []string{"3"}},
+		{"ancora", []string{"4", "5"}},
+		{"âncora", []string{"4", "5"}},
+		{"acao", []string{"6"}},
+		{"REAÇÃO", []string{"6"}},
+		{"maca", []string{"7"}},
+		{"lingüiça", []string{"8"}},
+		{"linguica", []string{"8"}},
+		{"pao", []string{"10"}},
+		{"100%", []string{"10"}},
+		{"nothing like it", nil},
+	} {
+		state := listing.Parse(url.Values{"q": {c.search}})
+		records, result, err := query.NewBuilder(db, db.GetQueryGrammar(), db.GetPostProcessor()).From(name).
+			Listing(ctx, acme, state, "/things")
+		if err != nil {
+			t.Fatalf("search %q: %v", c.search, err)
+		}
+		var got []string
+		for _, record := range records {
+			got = append(got, fmt.Sprint(record["id"]))
+		}
+		slices.Sort(got)
+		want := slices.Clone(c.want)
+		slices.Sort(want)
+		if !slices.Equal(got, want) || result.Total() != len(want) {
+			t.Errorf("search %q found ids %v (total %d), want %v", c.search, got, result.Total(), want)
+		}
+	}
+}

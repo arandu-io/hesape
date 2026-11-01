@@ -81,7 +81,8 @@ func TestEveryStatementOfAModelListingCarriesTheTenantOfTheGrant(t *testing.T) {
 	if !strings.Contains(conn.statements[2].SQL, "group by") {
 		t.Errorf("the kind count is not grouped:\n%s", conn.statements[2].SQL)
 	}
-	if !strings.Contains(conn.statements[1].SQL, `like lower(?) escape '!'`) {
+	// SQLite's lower() lowers ASCII only, so the search folds the marks as well.
+	if !strings.Contains(conn.statements[1].SQL, `, 'Ž', 'z') escape '!'`) || !strings.Contains(conn.statements[1].SQL, `lower(?)`) {
 		t.Errorf("the page does not search:\n%s", conn.statements[1].SQL)
 	}
 }

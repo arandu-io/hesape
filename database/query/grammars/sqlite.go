@@ -64,6 +64,14 @@ func (g *SQLiteGrammar) WhereBasic(q *query.Builder, where query.Where) string {
 	return g.Grammar.WhereBasic(q, where)
 }
 
+// FoldAccents is the SQL of expression with its case and its accents folded, by
+// nested replace(): what the search of a listing compares through. SQLite's
+// lower() lowers ASCII only, so the capital letters carrying a mark are
+// replaced as well. See query.FoldAccentsReplace.
+func (g *SQLiteGrammar) FoldAccents(expression string) string {
+	return query.FoldAccentsReplace(expression)
+}
+
 // WhereLike compiles a like where clause.
 //
 // SQLite's like is case insensitive and has no case sensitive form, so the

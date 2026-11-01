@@ -41,8 +41,12 @@ func escapeLike(text string) string {
 // Every column it names comes from the spec the state was read with, so nothing
 // in a request reaches the statement as an identifier, and every value it
 // compares against is a binding. The search is "contains", without regard to
-// case, over the declared search columns joined with "or"; the wildcards of the
-// text are escaped so that a "%" is looked for and not matched against. Each
+// case or to the marks that sit on a letter ("camera" finds "Câmera", and "CÂM"
+// finds "câm"), over the declared search columns joined with "or"; the wildcards
+// of the text are escaped so that a "%" is looked for and not matched against.
+// The marks are folded by the grammar of the engine, translate() on PostgreSQL
+// and replace() on SQLite, with no extension to install, and by the collation on
+// MySQL and MariaDB, whose defaults ignore them. Each
 // facet is an "in" over the values selected, joined to the rest with "and".
 //
 // It builds and runs nothing, like Where and OrderBy: the tenant goes on where
@@ -69,7 +73,7 @@ func (b *Builder) ApplyListingFilters(state pagination.ListingState, except stri
 		if len(columns) > 0 {
 			b.WhereNested(func(group *Builder) {
 				for _, column := range columns {
-					group.OrWhereRaw("lower("+b.Grammar.Wrap(column)+") like lower(?) escape '"+likeEscape+"'", pattern)
+					group.OrWhereRaw(b.fold(b.Grammar.Wrap(column))+" like "+b.fold("?")+" escape '"+likeEscape+"'", pattern)
 				}
 			}, "and")
 		}

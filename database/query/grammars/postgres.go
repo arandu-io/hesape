@@ -133,6 +133,13 @@ func (g *PostgresGrammar) WhereBitwise(q *query.Builder, where query.Where) stri
 	return "(" + d.Wrap(where.Column) + " " + operator + " " + value + ")::bool"
 }
 
+// FoldAccents is the SQL of expression with its case and its accents folded, by
+// translate(): what the search of a listing compares through, so "camera" finds
+// "Câmera" with no extension installed. See query.FoldAccentsTranslate.
+func (g *PostgresGrammar) FoldAccents(expression string) string {
+	return query.FoldAccentsTranslate(expression)
+}
+
 // WhereLike compiles a like comparison. Postgres is the one engine whose like
 // is case sensitive, so the case insensitive form is ilike.
 func (g *PostgresGrammar) WhereLike(q *query.Builder, where query.Where) string {

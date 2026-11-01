@@ -121,6 +121,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("a listing narrows, orders and counts inside the tenant", func(t *testing.T) {
 		testAListingNarrowsOrdersAndCountsInsideTheTenant(t, db)
 	})
+	t.Run("a listing search ignores case and accents", func(t *testing.T) {
+		testAListingSearchIgnoresAccentsAndCase(t, db)
+	})
 	t.Run("the presence count is scoped to the tenant", func(t *testing.T) {
 		testThePresenceCount(t, db)
 	})
