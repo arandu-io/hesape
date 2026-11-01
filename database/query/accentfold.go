@@ -82,8 +82,17 @@ type accentFolder interface {
 	FoldAccents(expression string) string
 }
 
-// fold is the SQL a listing's search compares a text expression through.
-func (b *Builder) fold(expression string) string {
+// FoldText is the SQL of a text expression with its case and its accents
+// folded, as the engine of this builder's grammar does it: what a listing's
+// search compares a column and a binding through. A search written by hand
+// because the text is matched through another table folds both sides of its
+// comparison with it:
+//
+//	q.WhereRaw(b.FoldText("customers.name")+" like "+b.FoldText("?")+" escape '!'", pattern)
+//
+// Only the expression is folded, never a value: the text to look for stays a
+// binding.
+func (b *Builder) FoldText(expression string) string {
 	if folder, ok := b.Grammar.(accentFolder); ok {
 		return folder.FoldAccents(expression)
 	}

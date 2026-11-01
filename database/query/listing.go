@@ -73,7 +73,7 @@ func (b *Builder) ApplyListingFilters(state pagination.ListingState, except stri
 		if len(columns) > 0 {
 			b.WhereNested(func(group *Builder) {
 				for _, column := range columns {
-					group.OrWhereRaw(b.fold(b.Grammar.Wrap(column))+" like "+b.fold("?")+" escape '"+likeEscape+"'", pattern)
+					group.OrWhereRaw(b.FoldText(b.Grammar.Wrap(column))+" like "+b.FoldText("?")+" escape '"+likeEscape+"'", pattern)
 				}
 			}, "and")
 		}

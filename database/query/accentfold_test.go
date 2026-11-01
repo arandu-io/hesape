@@ -75,3 +75,20 @@ func TestTheFoldMapsEveryAccentedLetterToItsPlainOne(t *testing.T) {
 		t.Errorf("replace() is called %d times for %d letters", got, len(letters))
 	}
 }
+
+// FoldText is what a search written by hand uses, so it must be the fold the
+// listing's own search compiles to on every grammar.
+func TestFoldTextIsTheFoldTheListingUses(t *testing.T) {
+	for name, grammar := range map[string]query.Grammar{
+		"postgres": grammars.NewPostgresGrammar(), "sqlite": grammars.NewSQLiteGrammar(), "mysql": grammars.NewMySQLGrammar(),
+	} {
+		b := query.NewBuilder(nil, grammar, nil).From("notes")
+		sql := b.Clone().ApplyListing(noteState(t, "q=x")).ToSQL()
+		if folded := b.FoldText(b.Grammar.Wrap("title")); !strings.Contains(sql, folded) {
+			t.Errorf("%s: the listing does not fold the title as FoldText does:\n%s\n%s", name, folded, sql)
+		}
+	}
+	if got := query.NewBuilder(nil, grammars.NewMySQLGrammar(), nil).FoldText("x"); got != "lower(x)" {
+		t.Errorf("mysql folds with %q, want lower(x)", got)
+	}
+}
