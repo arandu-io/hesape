@@ -84,8 +84,8 @@ func JSONLimit(bytes int64) JSONOption {
 //   - keyed JSONBodyKey ("body"), for the body as a whole: not JSON, empty,
 //     an unknown field, trailing data;
 //   - keyed by the path of the field, written with the names of the json tags
-//     and a dot ("events.0.cost.amount"), for a value of the wrong type or out
-//     of range, with the short sentence Bind says for the same failure, and in
+//     and a dot, without the position in a list ("events.cost.amount"), for a
+//     value of the wrong type or out of range, with the short sentence Bind says for the same failure, and in
 //     the application's language when it wired a translator.
 //
 // Only the first wrong-typed field is reported: encoding/json keeps the first
@@ -223,10 +223,7 @@ func jsonFailure(err error, errs validation.Errors) bool {
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.As(err, &syntax):
 		errs.Add(JSONBodyKey, "must be valid JSON")
 	case errors.As(err, &typed):
-		field := typed.Field
-		if field == "" {
-			field = JSONBodyKey
-		}
+		field := jsonFieldPath(typed.Field)
 		errs.Add(field, jsonTypeMessage(typed))
 	case errors.As(err, &invalid):
 		return false
@@ -236,6 +233,24 @@ func jsonFailure(err error, errs validation.Errors) bool {
 		errs.Add(JSONBodyKey, "must be a JSON document of the shape this request takes")
 	}
 	return true
+}
+
+// jsonFieldPath is the path encoding/json reports for a value, without the
+// positions in a list. The toolchain decides whether the path carries them
+// ("events.0.qty" or "events.qty"), and a key that depends on the Go that built
+// the program is not one a client can be told about.
+func jsonFieldPath(path string) string {
+	var kept []string
+	for _, segment := range strings.Split(path, ".") {
+		if segment == "" || strings.Trim(segment, "0123456789") == "" {
+			continue
+		}
+		kept = append(kept, segment)
+	}
+	if len(kept) == 0 {
+		return JSONBodyKey
+	}
+	return strings.Join(kept, ".")
 }
 
 // jsonTypeMessage is the short sentence for a value that did not fit its field,
