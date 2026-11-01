@@ -38,6 +38,36 @@ const (
 // that one searches the database's default schema, which is somebody's real
 // one on a server the suite was pointed at by accident.
 func testAWipeStaysInTheSearchPath(t *testing.T, dialect database.Dialect, driverName, dsn string, db *database.DB) {
+	wipeAndCheck(t, dialect, driverName, dsn, db, func(ctx context.Context, builder *schema.Builder, _ *sql.DB) error {
+		if err := builder.DropAllViews(ctx); err != nil {
+			return fmt.Errorf("DropAllViews: %w", err)
+		}
+		if err := builder.DropAllTables(ctx); err != nil {
+			return fmt.Errorf("DropAllTables: %w", err)
+		}
+		return nil
+	})
+}
+
+// testTheWiperDropsViewsBeforeTables is the defect that left migrate:fresh
+// failing: the wipe a command is handed dropped tables and nothing else, so a
+// view survived it -- SQLite's drop of tables leaves the views of its
+// catalogue, MySQL keeps a view whose table is gone -- and the migration that
+// creates the view failed on the next run with "already exists".
+//
+// The same two namespaces as the test above, but wiped through database.Wiper,
+// which is the function migrate:fresh and db:wipe call.
+func testTheWiperDropsViewsBeforeTables(t *testing.T, dialect database.Dialect, driverName, dsn string, db *database.DB) {
+	wipeAndCheck(t, dialect, driverName, dsn, db, func(ctx context.Context, _ *schema.Builder, scoped *sql.DB) error {
+		resolver := database.NewSingleConnectionResolver(database.Wrap(scoped, dialect), "")
+		return database.Wiper(resolver)(ctx, "")
+	})
+}
+
+// wipeAndCheck builds the two namespaces -- one the session searches, one
+// beside it -- puts a table and a view in each, runs wipe against the session,
+// and requires the searched namespace to be empty and the other untouched.
+func wipeAndCheck(t *testing.T, dialect database.Dialect, driverName, dsn string, db *database.DB, wipe func(ctx context.Context, builder *schema.Builder, scoped *sql.DB) error) {
 	ctx := context.Background()
 
 	var scoped *sql.DB
@@ -95,11 +125,8 @@ func testAWipeStaysInTheSearchPath(t *testing.T, dialect database.Dialect, drive
 		t.Fatalf("SearchPath = %q, want [%s]: the session searches one namespace", path, searched)
 	}
 
-	if err := builder.DropAllViews(ctx); err != nil {
-		t.Fatalf("DropAllViews: %v", err)
-	}
-	if err := builder.DropAllTables(ctx); err != nil {
-		t.Fatalf("DropAllTables: %v", err)
+	if err := wipe(ctx, builder, scoped); err != nil {
+		t.Fatalf("the wipe: %v", err)
 	}
 
 	if names := relations(t, builder, searched); len(names) != 0 {

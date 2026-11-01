@@ -103,6 +103,9 @@ func Run(t *testing.T, dialect database.Dialect, driverName, dsn string) {
 	t.Run("a wipe stays inside the search path", func(t *testing.T) {
 		testAWipeStaysInTheSearchPath(t, dialect, driverName, dsn, db)
 	})
+	t.Run("the wiper drops views before tables", func(t *testing.T) {
+		testTheWiperDropsViewsBeforeTables(t, dialect, driverName, dsn, db)
+	})
 	t.Run("the default search path still reaches public", func(t *testing.T) {
 		testTheDefaultSearchPathStillReachesPublic(t, dialect, driverName, dsn, db)
 	})

@@ -2,6 +2,8 @@ package database_test
 
 import (
 	"context"
+	"database/sql/driver"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/database"
@@ -119,5 +121,35 @@ func TestWiperReachesTheConnectionItIsNamed(t *testing.T) {
 	}
 	if !state.sawStatement("select 'main'") {
 		t.Fatalf("the wipe did not ask the default connection for the schemas it searches: %q", state.statements())
+	}
+}
+
+// TestWiperDropsTheViewsBeforeTheTables: a wipe that drops tables alone leaves
+// every view standing -- SQLite's drop of tables never touches the views of its
+// catalogue -- and the migration that creates one fails on the next run with
+// "already exists". The views are dropped first.
+func TestWiperDropsTheViewsBeforeTheTables(t *testing.T) {
+	handle, state := newFakeDB()
+	state.answer([]string{"name"}, []driver.Value{"main"})
+	wipe := database.Wiper(database.NewSingleConnectionResolver(database.Wrap(handle, database.DialectSQLite), ""))
+
+	if err := wipe(context.Background(), ""); err != nil {
+		t.Fatalf("wipe: %v", err)
+	}
+
+	views, tables := -1, -1
+	for i, statement := range state.statements() {
+		switch {
+		case views < 0 && strings.Contains(statement, "type in ('view')"):
+			views = i
+		case tables < 0 && strings.Contains(statement, "type in ('table'"):
+			tables = i
+		}
+	}
+	if views < 0 || tables < 0 {
+		t.Fatalf("the wipe did not drop both views and tables: %q", state.statements())
+	}
+	if views > tables {
+		t.Fatalf("the wipe dropped tables (statement %d) before views (statement %d): %q", tables, views, state.statements())
 	}
 }

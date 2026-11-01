@@ -75,9 +75,18 @@ func NewMigrator(db *DB, table string) *migrations.Migrator {
 	return migrator
 }
 
-// Wiper returns the function that drops every table of a named connection,
-// which is what migrate:fresh and db:wipe are handed. An empty connection name
-// is the resolver's default.
+// Wiper returns the function that drops every view and then every table of a
+// named connection, which is what migrate:fresh and db:wipe are handed. An empty
+// connection name is the resolver's default.
+//
+// Views go first, on every driver, because a view is not a table and a wipe of
+// tables alone leaves it behind. SQLite's drop of tables never touches the
+// views of its catalogue, and MySQL leaves a view standing after the table it
+// reads is gone; the migration that creates that view then fails on the next
+// run with "view ... already exists", which is exactly what migrate:fresh
+// exists to prevent. PostgreSQL's cascading drop would take the views that read
+// a dropped table, but not one that reads nothing a wipe drops, and the order is
+// kept the same on all three so no driver is the exception.
 //
 // It reads and drops through the schema builder over that connection, the same
 // door every migration writes DDL through, so what a wipe removes and what a
@@ -100,6 +109,10 @@ func Wiper(resolver ConnectionResolverInterface) func(ctx context.Context, conne
 			return fmt.Errorf("database: dropping every table needs a *database.Connection to reach the schema builder, and %q resolved to %T",
 				connection, resolved)
 		}
-		return schema.NewBuilder(ForSchema(concrete)).DropAllTables(ctx)
+		builder := schema.NewBuilder(ForSchema(concrete))
+		if err := builder.DropAllViews(ctx); err != nil {
+			return err
+		}
+		return builder.DropAllTables(ctx)
 	}
 }
