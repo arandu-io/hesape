@@ -887,7 +887,10 @@
 				root.setAttribute('data-total', String(matched));
 				if (!props.selectName) {
 					var count = root.querySelector('[data-part="count"]');
-					if (count) count.textContent = (props.rows || '{total} row(s).').split('{total}').join(String(matched));
+					/* One row has a sentence of its own when the page wrote one
+					 * (rowsOne); a page that wrote only rows says it for every
+					 * count, as it did before the footer had a singular. */
+					if (count) count.textContent = (matched === 1 && props.rowsOne ? props.rowsOne : (props.rows || '{total} row(s).')).split('{total}').join(String(matched));
 				}
 				pager(pages);
 				syncSelection(root);

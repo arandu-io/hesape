@@ -185,7 +185,7 @@ func TestAComposedLetterIsAskedForWhenTheCompositionEnds(t *testing.T) {
 // completeRows is a list the browser works whole: three rows, the second with
 // a dialog drawn in its cell and a span the markup marks as not searchable, a
 // page-size menu, and the controls of the toolbar.
-const completeRows = `<div id="c" data-part="root" role="region" aria-label="C" data-kyse-behavior="table" data-complete="true" data-total="3" data-kyse-props='{"complete":true,"pageSize":10}'>
+const completeRows = `<div id="c" data-part="root" role="region" aria-label="C" data-kyse-behavior="table" data-complete="true" data-total="3" data-kyse-props='{"complete":true,"pageSize":10,"rows":"{total} rows.","rowsOne":"{total} row."}'>
 <form id="c-query" data-part="query" action="/" method="get" hx-boost="false">
 <label for="c-search">Search C</label><input id="c-search" data-part="search" type="text" name="q">
 <div data-part="control" data-control="select"><label for="c-kind">Kind</label><select id="c-kind" name="kind"><option value="">All</option><option value="open">Open</option><option value="paid">Paid</option></select></div>
@@ -322,3 +322,18 @@ func TestTheControlsOfTheToolbarNarrowACompleteList(t *testing.T) {
 }
 
 var _ = strings.TrimSpace
+
+// The footer of a list the browser narrows says "1 row." for exactly one match
+// and the plural for every other count, zero included.
+func TestTheFooterOfACompleteListSaysOneRowInTheSingular(t *testing.T) {
+	page := completeOpen(t)
+	count := func() string {
+		return tableEval(t, page, `document.querySelector('#c [data-part=count]').textContent`)
+	}
+	for text, want := range map[string]string{"camera": "1 row.", "": "3 rows.", "zzz": "0 rows.", "a": "3 rows."} {
+		search(t, page, text)
+		if got := count(); got != want {
+			t.Errorf("searching %q says %q, want %q", text, got, want)
+		}
+	}
+}
