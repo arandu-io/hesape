@@ -129,6 +129,17 @@ const StatusCSRFExpired = 419
 // Nothing rotates them: the binding changes when the session does, at sign-in
 // and sign-out, and those answers are a redirect to a page that issues afresh.
 //
+// A token does lapse, and a screen that stays open longer than the ttl -- a
+// console, a live table -- would answer StatusCSRFExpired to a click that was
+// legitimate in every other respect. The ttl is not stretched for that, since a
+// token that outlives the page it was drawn on can be replayed. The page renews
+// its own token instead: this middleware answers GET CSRFRefreshPath with a
+// fresh token for the same binding, and the script the layout loads asks it
+// before the old one lapses, when the tab comes back to the
+// front, and before sending a form whose token is due. A request that still
+// arrives with a token that has lapsed is refused as before: the renewal makes
+// that rare, and does not make it acceptable.
+//
 // The guest cookie carries the Secure attribute unless the CSRF was built with
 // Secure(false), which is for development over plain HTTP only: without it the
 // browser never sends the cookie back, and every guest form answers
@@ -165,7 +176,14 @@ func CSRFProtect(c *session.CSRF, sessionIDFrom func(*http.Request) string, opts
 					// then the page is drawn without a token: a form on it is
 					// refused on submit, which is the safe side of the failure.
 					if token, err := c.Issue(c.Binding(w, r, sessionIDFrom(r))); err == nil {
+						if r.Method == http.MethodGet && r.URL.Path == CSRFRefreshPath {
+							answerRefresh(w, r, token)
+							return
+						}
 						r = r.WithContext(hhttp.WithCSRFToken(r.Context(), token))
+					} else if r.Method == http.MethodGet && r.URL.Path == CSRFRefreshPath {
+						http.Error(w, "no CSRF token could be issued", http.StatusServiceUnavailable)
+						return
 					}
 				}
 				next.ServeHTTP(w, r)

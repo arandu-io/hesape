@@ -4149,6 +4149,239 @@
 		},
 	});
 
+	/* # The CSRF token of a page that stays open
+	 *
+	 * A token carries its own expiry and the form that holds it is drawn once, so
+	 * a screen left open for longer than the expiry answered 419 to a click that
+	 * was legitimate in every other respect: same session, same person. The
+	 * console and the live tables are exactly the screens that stay open for
+	 * hours.
+	 *
+	 * The page renews the token itself. It asks CSRF_URL for a new one before the
+	 * old one lapses, when the tab comes back to the front, when a page is
+	 * restored from the back/forward cache, and right before a submission that
+	 * would otherwise carry one that is due. A new token goes into every hidden
+	 * _token field and every hx-headers that carries X-CSRF-Token, so whichever
+	 * of them the form or the request reads is the fresh one. The token is not
+	 * made to live longer: the server still checks signature, binding and expiry
+	 * exactly as before, and a request that carries a token it refuses is still
+	 * refused.
+	 *
+	 * The renewal is planned on this page's clock: the server says how many
+	 * seconds a token has left, and the page counts them from when the answer
+	 * arrived. The only token whose expiry is read off its own text is the one
+	 * the page was drawn with, and a skew between the two clocks costs one
+	 * early or late renewal, after which the counts are exact.
+	 */
+	var CSRF_URL = '/_arandu/csrf';
+	var CSRF_HEADER = 'X-CSRF-Token';
+	/* token is the freshest the page holds; stamp is the expiry its own text
+	 * names (the server's clock, and the only thing tokens are compared by); exp
+	 * is when this page's clock expects it to lapse; due is when to renew it. */
+	var csrf = { token: '', stamp: 0, exp: 0, due: 0, timer: 0, asking: null, passing: null };
+
+	/* When a token is read off its own text: payload "nonce.exp", then the
+	 * signature. Nothing is checked here; the server checks. */
+	function csrfExpiry(token) {
+		var parts = String(token || '').split('.');
+		if (parts.length !== 3 || !/^[0-9]+$/.test(parts[1])) return 0;
+		return parseInt(parts[1], 10) * 1000;
+	}
+
+	function csrfHeaders(element) {
+		try {
+			var parsed = JSON.parse(element.getAttribute('hx-headers'));
+			return parsed && typeof parsed === 'object' && typeof parsed[CSRF_HEADER] === 'string' ? parsed : null;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	/* Every place the page keeps a token: the hidden fields and the elements whose
+	 * hx-headers name the header. */
+	function csrfHolders(root) {
+		var found = [];
+		each(root, 'input[name="_token"]', function (input) {
+			found.push({ token: input.value, put: function (value) { input.value = value; } });
+		});
+		each(root, '[hx-headers]', function (element) {
+			var headers = csrfHeaders(element);
+			if (!headers) return;
+			found.push({
+				token: headers[CSRF_HEADER],
+				put: function (value) {
+					headers[CSRF_HEADER] = value;
+					element.setAttribute('hx-headers', JSON.stringify(headers));
+				},
+			});
+		});
+		return found;
+	}
+
+	/* Takes the freshest token the page holds, and writes it over every older
+	 * one: markup restored from the history cache or swapped in from an older
+	 * render carries a token that is behind the one in hand. */
+	function csrfSync(root) {
+		var holders = csrfHolders(root || document);
+		holders.forEach(function (holder) {
+			var named = csrfExpiry(holder.token);
+			if (named > csrf.stamp) {
+				csrf.token = holder.token;
+				csrf.stamp = named;
+				csrf.exp = named;
+				csrf.due = 0;
+			}
+		});
+		if (!csrf.stamp) return;
+		holders.forEach(function (holder) {
+			if (csrfExpiry(holder.token) < csrf.stamp) holder.put(csrf.token);
+		});
+		csrfPlan();
+	}
+
+	/* When the next renewal is due: three quarters of what the token has left, so
+	 * a token is replaced while it still works and a missed renewal has a quarter
+	 * of its life to be caught up in. */
+	function csrfPlan() {
+		window.clearTimeout(csrf.timer);
+		if (!csrf.exp) return;
+		var left = csrf.exp - Date.now();
+		var wait = left > 0 ? Math.max(5000, left * 0.75) : 0;
+		if (!csrf.due) csrf.due = Date.now() + wait;
+		csrf.timer = window.setTimeout(csrfRenew, Math.min(Math.max(0, csrf.due - Date.now()), 2147483647));
+	}
+
+	function csrfDue() { return !!csrf.exp && Date.now() >= csrf.due; }
+
+	/* Asks for a new token and writes it everywhere. It answers true when the
+	 * page holds a fresh one and false when it could not ask, in which case the
+	 * old token stays in place and the next trigger asks again: a failed renewal
+	 * must never be worse than no renewal. */
+	function csrfRenew() {
+		if (csrf.asking) return csrf.asking;
+		if (!csrf.exp || typeof window.fetch !== 'function') return Promise.resolve(false);
+		csrf.asking = window.fetch(CSRF_URL, {
+			method: 'GET', credentials: 'same-origin', cache: 'no-store',
+			headers: { 'Accept': 'application/json' },
+		}).then(function (response) {
+			if (!response.ok) throw new Error('csrf ' + response.status);
+			return response.json();
+		}).then(function (answer) {
+			if (!answer || typeof answer.token !== 'string' || typeof answer.expires_in !== 'number') throw new Error('csrf shape');
+			csrf.token = answer.token;
+			csrf.stamp = csrfExpiry(answer.token) || csrf.stamp;
+			csrf.exp = Date.now() + answer.expires_in * 1000;
+			csrf.due = 0;
+			csrfHolders(document).forEach(function (holder) { holder.put(csrf.token); });
+			csrfPlan();
+			return true;
+		}).catch(function () {
+			window.clearTimeout(csrf.timer);
+			csrf.due = Date.now() + 60000;
+			csrf.timer = window.setTimeout(csrfRenew, 60000);
+			return false;
+		}).then(function (renewed) {
+			csrf.asking = null;
+			return renewed;
+		});
+		return csrf.asking;
+	}
+
+	function csrfCheck() {
+		csrfSync(document);
+		if (csrfDue()) csrfRenew();
+	}
+
+	function csrfSameOrigin(path) {
+		try {
+			return new URL(path, window.location.href).origin === window.location.origin;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	/* A form htmx sends is held by htmx:confirm; this is for the form the browser
+	 * sends itself, which is any form outside a boosted region or without an
+	 * hx- verb. */
+	function csrfHtmxForm(form) {
+		if (form.matches('[hx-get],[hx-post],[hx-put],[hx-patch],[hx-delete]')) return true;
+		var boost = form.closest('[hx-boost]');
+		return !!boost && boost.getAttribute('hx-boost') === 'true';
+	}
+
+	document.addEventListener('htmx:afterSettle', function (event) { csrfSync((event.target && event.target.querySelectorAll) ? event.target : document); });
+	document.addEventListener('htmx:historyRestore', function () { csrfCheck(); });
+	document.addEventListener('visibilitychange', function () { if (!document.hidden) csrfCheck(); });
+	window.addEventListener('pageshow', function (event) { if (event.persisted) csrfCheck(); });
+	window.addEventListener('online', csrfCheck);
+	window.addEventListener('focus', csrfCheck);
+
+	/* The header every htmx request that changes something carries is the freshest
+	 * token the page holds, for an address of this origin only: the token is not
+	 * sent anywhere else. */
+	document.addEventListener('htmx:configRequest', function (event) {
+		var detail = event.detail;
+		if (!detail || !detail.headers || !csrf.token || String(detail.verb).toLowerCase() === 'get') return;
+		if (!csrfSameOrigin(detail.path)) return;
+		detail.headers[CSRF_HEADER] = csrf.token;
+	});
+
+	/* A request htmx is about to send while the token is due waits for the new
+	 * one, and is then sent as it was. It listens on window, after every handler
+	 * on document: another handler that cancelled the request keeps it cancelled,
+	 * and this one never sends what it was told to stop. */
+	window.addEventListener('htmx:confirm', function (event) {
+		var detail = event.detail;
+		if (event.defaultPrevented || !detail || typeof detail.issueRequest !== 'function') return;
+		if (String(detail.verb).toLowerCase() === 'get' || !csrfDue() || !csrfSameOrigin(detail.path)) return;
+		event.preventDefault();
+		csrfRenew().then(function () { detail.issueRequest(false); });
+	});
+
+	/* The same for a form the browser submits. The submission waits for the new
+	 * token and is then sent again, once, with the submitter it had. */
+	window.addEventListener('submit', function (event) {
+		var form = event.target;
+		if (event.defaultPrevented || !form || form.nodeName !== 'FORM') return;
+		if (csrf.passing === form) { csrf.passing = null; return; }
+		if (String(form.method).toLowerCase() !== 'post' || csrfHtmxForm(form) || !csrf.exp) return;
+		if (!form.querySelector('input[name="_token"]') || !csrfDue()) {
+			csrfSync(form);
+			return;
+		}
+		var submitter = event.submitter;
+		event.preventDefault();
+		csrfRenew().then(function () {
+			csrfSync(form);
+			csrf.passing = form;
+			try {
+				if (typeof form.requestSubmit === 'function') {
+					if (submitter) form.requestSubmit(submitter); else form.requestSubmit();
+				} else {
+					csrf.passing = null;
+					form.submit();
+				}
+			} catch (e) {
+				csrf.passing = null;
+				form.submit();
+			}
+		});
+	});
+
+	/* Public so a page that swaps tokens in by its own means can say so, and a
+	 * test can see the state the page is in. */
+	arandu.ui.csrf = {
+		sync: function () { csrfSync(document); },
+		renew: csrfRenew,
+		state: function () { return { token: csrf.token, expires: csrf.exp, due: csrf.due }; },
+	};
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', function () { csrfSync(document); });
+	} else {
+		csrfSync(document);
+	}
+
 	/* By window load every deferred script has run, so a behaviour still
 	 * unmounted is one nobody registered -- which is worth one line each, and is
 	 * the only moment this file can tell that apart from a script that has not
