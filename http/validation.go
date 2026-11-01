@@ -127,9 +127,16 @@ func configured(ctx context.Context) bool {
 // declares, and returns what passed. A failure is validation.Errors, the type
 // Bind answers a failed conversion with.
 func (c *Context) runRules(input *Request, declaring validation.RequestRules) error {
+	return c.runRulesOver(input.validationData(), declaring)
+}
+
+// runRulesOver is runRules over data the caller already holds, which is how a
+// JSON body bound without going through the input map is validated by the same
+// rules, in the same language, and leaves Validated the same way.
+func (c *Context) runRulesOver(data validation.Data, declaring validation.RequestRules) error {
 	factory := factoryFor(c.Request.Context())
 
-	validated, err := factory.ValidateRequest(declaring, input.validationData(), validationOptions(c.Request.Context())...)
+	validated, err := factory.ValidateRequest(declaring, data, validationOptions(c.Request.Context())...)
 	if err != nil {
 		var invalid *validation.ValidationException
 		if errors.As(err, &invalid) {

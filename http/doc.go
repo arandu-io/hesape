@@ -29,6 +29,14 @@
 // name, `form:"body,raw"`, and keeps its spaces and newlines; raw is the only
 // option a form tag takes.
 //
+// # Binding a JSON document
+//
+// Context.BindJSON reads a JSON body that is a document -- nested objects, a
+// list of objects -- into a struct tagged with json names. It refuses a field
+// the struct does not declare, anything after the document and a body over its
+// size limit (JSONLimit), runs the Rules of the request type as Bind does, and
+// answers a body that is not the document with validation.Errors.
+//
 // # A page with a status
 //
 // Context.View answers a page with 200. A page that says something else -- a
