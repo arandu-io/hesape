@@ -38,7 +38,11 @@ import (
 //
 // Rules is the first of two steps and Validate, which the service calls, is the
 // second: Rules says what each field may be, Validate says what the fields may be
-// together, or against the data. Bind never calls Validate.
+// together, or against the data. Bind never calls Validate. A Validate that the
+// service calls for a request built without a page -- by a job, a command, a
+// test -- runs the first step too with Factory.CheckRequest, over the values the
+// struct holds, so the declaration is the one rule of the form and of the direct
+// call.
 
 // validationKey is the context key of the Factory validation runs through.
 type validationKey struct{}

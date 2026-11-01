@@ -27,6 +27,19 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.97.0 — a sentence written beside the rules comes before the language file
+
+Nothing stops compiling. One behaviour changes.
+
+- **`Messages()` of a request, and `WithMessageOverrides`, win over the
+  language files.** The sentence written for one field and one rule
+  (`"email.required"`) was reached only by a Validator with no translator: with
+  a Factory over a catalogue the line of the rule in the locale was said and the
+  override never was. It now comes right after an inline message
+  (`WithCustomMessages`) and before `validation.custom.<field>.<rule>` and
+  `validation.<rule>`. An application that kept a sentence in both places and
+  relied on the language file winning deletes the override.
+
 ## v0.95.0 — a page left open renews its CSRF token, and a refused browser reads a page
 
 Nothing stops compiling. Three behaviours change, and an application that

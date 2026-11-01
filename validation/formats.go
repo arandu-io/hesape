@@ -193,6 +193,16 @@ func (v *Validator) getMessage(attribute, rule string) string {
 		return inline
 	}
 
+	// Then the sentence the rule set was compiled to say for this field and
+	// this rule -- Messages() of a request, WithMessageOverrides -- which is
+	// the same thing as an inline message written where the rules are, and
+	// comes before any language file.
+	if f, declared := v.set.byName[attribute]; declared {
+		if override, found := v.set.override(f, lowerRule); found {
+			return override
+		}
+	}
+
 	if v.trans != nil {
 		customKey := "validation.custom." + attribute + "." + lowerRule
 

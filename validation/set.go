@@ -160,15 +160,26 @@ func (s *Set) Validate(values url.Values) (Input, Errors) {
 // override is keyed "items.*.price.required" because that is what the rule set
 // declares, and the failure lands on "items.0.price".
 func (s *Set) message(f *field, r *rule) string {
-	if custom, ok := s.messages[f.name+"."+r.name]; ok {
+	if custom, ok := s.override(f, r.name); ok {
 		return custom
 	}
+	return r.spec.message(f, r)
+}
+
+// override is the sentence the set was compiled to say for one rule on one
+// field, and whether it holds one. It is asked before the language files: a
+// sentence written against a field and a rule, in the code that declares the
+// rules, is more specific than the sentence of the rule in any locale.
+func (s *Set) override(f *field, ruleName string) (string, bool) {
+	if custom, ok := s.messages[f.name+"."+ruleName]; ok {
+		return custom, true
+	}
 	if f.primary != "" {
-		if custom, ok := s.messages[f.primary+"."+r.name]; ok {
-			return custom
+		if custom, ok := s.messages[f.primary+"."+ruleName]; ok {
+			return custom, true
 		}
 	}
-	return r.spec.message(f, r)
+	return "", false
 }
 
 // Input is what passed the rules. It is the only way to read a submitted value
