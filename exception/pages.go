@@ -91,6 +91,25 @@ func statusMessage(status int) string {
 	return "This request could not be answered."
 }
 
+// WriteStatusPage answers status with the built-in status page, carrying
+// message.
+//
+// It is for a refusal written outside the Handler -- a middleware that answers
+// before any controller runs -- when the person in front of the browser should
+// read a page and not a line of plain text. The page is the one the Handler
+// falls back to, with the same policy and the same no-store header, and the
+// request's own identifier when one was assigned. It does not look for an
+// application's errors/<status> view: that is the Handler's, which has the
+// views; this is the page that renders when nothing else could.
+func WriteStatusPage(w http.ResponseWriter, r *http.Request, status int, message string) {
+	statusPage(w, PageData{
+		Status:    status,
+		Title:     statusTitle(status),
+		Message:   message,
+		RequestID: requestID(w, r),
+	})
+}
+
 // statusPage writes the built-in page for a status.
 //
 // One template and a table of sentences, not eight files: eight files is eight

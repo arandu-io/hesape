@@ -27,6 +27,43 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## The next release — a page left open renews its CSRF token, and a refused browser reads a page
+
+Nothing stops compiling. Three behaviours change, and an application that
+worked around the first can take the workaround out.
+
+- **A screen left open no longer answers 419 to a legitimate click.** `ui.js`
+  keeps the page's CSRF token alive: it asks `middleware.CSRFRefreshPath`
+  (`GET /_arandu/csrf`, answered by `CSRFProtect` itself, so no route is
+  registered and none can be forgotten) for a new token at three quarters of
+  the old one's life, when the tab comes back to the front, when a page returns
+  from the back/forward cache, and right before a form or an htmx request goes
+  out with a token that is due. The new token is written into every
+  hidden `_token` field and every `hx-headers` that names `X-CSRF-Token`, and
+  htmx requests to this origin carry the freshest one in the header. The ttl is
+  not longer and the check is not weaker: a request that arrives with a lapsed
+  token is still refused. A layout that loads `ui.js` behind `CSRFProtect`
+  needs nothing else. One that overwrites the header from a form's own field in
+  a `htmx:configRequest` listener keeps working, because the field is renewed
+  too.
+- **A guest's cookie lives from the latest page and not the first.**
+  `CSRF.Binding`, given a writer, sets the guest cookie again when the browser
+  already holds a valid one, with its life afresh. A sign-in page left open is
+  renewed token by token, and the cookie the tokens are bound to no longer
+  lapses under the newest of them.
+- **`Refuse` answers a browser with a page.** A request that lists `text/html`
+  in `Accept` and is not sent by htmx now gets the built-in status page
+  (`exception.WriteStatusPage`) carrying the sentence, where it got a line of
+  plain text. The status and the sentence are unchanged, the answer varies with
+  `Accept`, and every client that did not ask for HTML (`*/*`, JSON, curl) keeps
+  the plain text. An application that wraps the 419 to draw its own screen is
+  unaffected: it sees the same status.
+
+`CSRF` now reads the clock through `support.Now`, so a test moves a token past
+its ttl with `support.Travel` instead of sleeping.
+
+---
+
 ## v0.91.0 — a search ignores accents, ui.js stops swallowing clicks and typing, and a shortcut can end in the past
 
 Nothing stops compiling. Three behaviours change, and an application that worked

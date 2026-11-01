@@ -447,13 +447,30 @@ func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 // Redirect above is one function: the last time this decision existed in three
 // copies, one of them was wrong.
 //
+// A browser that asked for a page (an Accept that lists text/html) and was not
+// sent by htmx is answered with the built-in status page, carrying the
+// sentence, and the answer varies with Accept; every other client is answered
+// with the sentence as plain text. The status is the same either way.
+//
 // The sentence is the application's when its exception.Sentences chose one for
 // the status, and message otherwise.
 func Refuse(w stdhttp.ResponseWriter, r *stdhttp.Request, status int, message string) {
+	sentence := exception.Sentence(r, status, message)
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Refresh", "true")
+		stdhttp.Error(w, sentence, status)
+		return
 	}
-	stdhttp.Error(w, exception.Sentence(r, status, message), status)
+	w.Header().Add("Vary", "Accept")
+	if acceptsHTML(strings.Join(r.Header.Values("Accept"), ",")) {
+		// A browser that asked for a page and was refused is shown one, and not
+		// a bare line of text that looks like the server broke. A client that
+		// did not ask for HTML -- fetch with */*, curl, an API client -- keeps
+		// the plain answer.
+		exception.WriteStatusPage(w, r, status, sentence)
+		return
+	}
+	stdhttp.Error(w, sentence, status)
 }
 
 // JsonResource is what [Context.JSON] takes: the fields a type is allowed to
