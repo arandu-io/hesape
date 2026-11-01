@@ -118,9 +118,6 @@ func (c *Context) BindJSON(dst any, options ...JSONOption) error {
 	if err != nil {
 		return err
 	}
-	if len(bytes.TrimSpace(body)) == 0 {
-		return validation.Errors{JSONBodyKey: {"must be a JSON document"}}
-	}
 
 	if declaring, ok := dst.(validation.RequestRules); ok {
 		var document map[string]any
@@ -136,21 +133,63 @@ func (c *Context) BindJSON(dst any, options ...JSONOption) error {
 		}
 	}
 
+	errs, err := decodeJSON(body, dst)
+	if err != nil {
+		return err
+	}
+	if errs.Any() {
+		return c.localizeConversion(errs, requestAttributes(dst))
+	}
+	return nil
+}
+
+// DecodeJSON is BindJSON for a document that is not the body of a request: a
+// JSON value held in a field of another, or read from somewhere that is not the
+// request. It decodes body into the value dst points to with the same
+// strictness -- an unknown field, anything after the document and an empty body
+// are refused -- and reports a document that is not the one dst describes as
+// the same validation.Errors, keyed JSONBodyKey or by the path of the field.
+//
+// It has no request, so it applies no size limit, runs no Rules and says its
+// sentences in English; the caller that holds a request binds through
+// Context.BindJSON.
+func DecodeJSON(body []byte, dst any) error {
+	errs, err := decodeJSON(body, dst)
+	if err != nil {
+		return err
+	}
+	if errs.Any() {
+		return errs
+	}
+	return nil
+}
+
+// decodeJSON is the strict decode both BindJSON and DecodeJSON stand on. It
+// returns the faults of the document as errs, and an error only for a dst the
+// decoder cannot write into, which is the program's mistake.
+func decodeJSON(body []byte, dst any) (validation.Errors, error) {
+	target := reflect.ValueOf(dst)
+	if target.Kind() != reflect.Pointer || target.IsNil() {
+		return nil, fmt.Errorf("http: decoding JSON needs a non-nil pointer, and was given %T", dst)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return validation.Errors{JSONBodyKey: {"must be a JSON document"}}, nil
+	}
+
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	errs := validation.Errors{}
 	if err := decoder.Decode(dst); err != nil {
-		if !jsonFailure(err, dst, errs) {
-			return err
+		if !jsonFailure(err, errs) {
+			return nil, err
 		}
 	}
 	if !errs.Any() {
 		if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-			return validation.Errors{JSONBodyKey: {"must be a single JSON document"}}
+			errs.Add(JSONBodyKey, "must be a single JSON document")
 		}
-		return nil
 	}
-	return c.localizeConversion(errs, requestAttributes(dst))
+	return errs, nil
 }
 
 // readJSONBody reads the body up to limit bytes and puts it back for the next
@@ -176,7 +215,7 @@ func (c *Context) readJSONBody(limit int64) ([]byte, error) {
 // jsonFailure files err, which the decoder returned, as a message on the body
 // or on the field it names. It reports false for an error that is not the
 // request's: the decoder was handed a type it cannot decode into.
-func jsonFailure(err error, dst any, errs validation.Errors) bool {
+func jsonFailure(err error, errs validation.Errors) bool {
 	var syntax *json.SyntaxError
 	var typed *json.UnmarshalTypeError
 	var invalid *json.InvalidUnmarshalError

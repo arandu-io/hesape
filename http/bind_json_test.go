@@ -251,3 +251,34 @@ func TestBindJSONSpeaksTheApplicationsLanguageForAWrongType(t *testing.T) {
 		t.Fatalf("status %d, errors = %v, want the portuguese sentence of the integer rule", rec.Code, problem.Errors)
 	}
 }
+
+// TestDecodeJSONIsBindJSONForADocumentThatIsNotTheBody: a JSON value held in a
+// field of another document is read as strictly as a body is.
+func TestDecodeJSONIsBindJSONForADocumentThatIsNotTheBody(t *testing.T) {
+	var in eventsDocument
+	if err := hhttp.DecodeJSON([]byte(`{"source":"sdk","events":[{"id":"a"}]}`), &in); err != nil || in.Source != "sdk" || len(in.Events) != 1 {
+		t.Fatalf("DecodeJSON = %v, %+v", err, in)
+	}
+
+	for name, body := range map[string]string{
+		"empty":    ``,
+		"unknown":  `{"nope":1}`,
+		"trailing": `{} {}`,
+		"not json": `x`,
+	} {
+		errs := fieldErrors(t, hhttp.DecodeJSON([]byte(body), &in))
+		if len(errs.Get(hhttp.JSONBodyKey)) == 0 {
+			t.Errorf("%s: errors = %v, want a message on %q", name, errs, hhttp.JSONBodyKey)
+		}
+	}
+
+	errs := fieldErrors(t, hhttp.DecodeJSON([]byte(`{"events":[{"qty":"x"}]}`), &in))
+	if got := errs.Get("events.qty"); len(got) != 1 || got[0] != "must be a whole number" {
+		t.Errorf("errors = %v, want a whole number on events.qty", errs)
+	}
+
+	var errsValue validation.Errors
+	if err := hhttp.DecodeJSON([]byte(`{}`), in); err == nil || errors.As(err, &errsValue) {
+		t.Errorf("a dst that is not a pointer: error = %v, want an ordinary error", err)
+	}
+}
