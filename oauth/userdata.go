@@ -3,6 +3,7 @@ package oauth
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // UserData is whatever the provider said about the person who just signed in.
@@ -94,5 +95,31 @@ func (u UserData) String(key string, fallback ...string) string {
 		return fmt.Sprintf("%t", t)
 	default:
 		return fmt.Sprintf("%v", t)
+	}
+}
+
+// Bool is Get for a flag.
+//
+// Providers do not agree on how to write a flag: Google sends email_verified
+// as a JSON boolean and Apple has sent it as the text "true", and a type
+// assertion to bool reads the second as false -- an address the person did
+// confirm, refused. A boolean is read as it is and the text "true" is true, in
+// any case; anything else, a number included, is false rather than a guess.
+// fallback is returned when the provider did not send the key.
+func (u UserData) Bool(key string, fallback ...bool) bool {
+	v, ok := u.params[key]
+	if !ok || v == nil {
+		if len(fallback) > 0 {
+			return fallback[0]
+		}
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return false
 	}
 }

@@ -64,3 +64,30 @@ func TestTheZeroUserDataIsUsable(t *testing.T) {
 		t.Fatal("the zero UserData must answer as an empty one")
 	}
 }
+
+func TestUserDataBoolReadsABooleanOrTheTextTrue(t *testing.T) {
+	user := oauth.NewUserData(map[string]any{
+		"yes":       true,
+		"no":        false,
+		"text":      "true",
+		"loud":      " TRUE ",
+		"text no":   "false",
+		"one":       float64(1),
+		"something": "yes",
+		"nothing":   nil,
+	})
+	for key, want := range map[string]bool{
+		"yes": true, "no": false, "text": true, "loud": true,
+		"text no": false, "one": false, "something": false, "nothing": false, "absent": false,
+	} {
+		if got := user.Bool(key); got != want {
+			t.Errorf("Bool(%q) = %v, want %v", key, got, want)
+		}
+	}
+	if !user.Bool("absent", true) || !user.Bool("nothing", true) {
+		t.Error("the fallback was not used for a key the provider did not send")
+	}
+	if user.Bool("no", true) {
+		t.Error("the fallback replaced a value the provider did send")
+	}
+}
