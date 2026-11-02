@@ -275,16 +275,36 @@
 		return menu.querySelector(':scope > [data-menu-panel]');
 	}
 
+	/* A fixed panel is placed in the window's coordinates, but only when
+	 * nothing around it makes itself the containing block of its fixed
+	 * descendants: a card that is a size container, a transform and a filter all
+	 * do, and the coordinates are then read from that box -- below and to the
+	 * right of where they were meant, or at a negative x. The panel is written
+	 * where it should be, then measured where it landed, and moved by the
+	 * difference, so the placement holds whatever draws around it. */
+	function pin(panel, left, top) {
+		panel.style.left = left + 'px';
+		panel.style.top = top + 'px';
+		var landed = panel.getBoundingClientRect();
+		var dx = left - landed.left;
+		var dy = top - landed.top;
+		if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+		panel.style.left = (left + dx) + 'px';
+		panel.style.top = (top + dy) + 'px';
+	}
+
 	/* The panel is fixed, so the table's own overflow cannot cut it, and it is
 	 * placed from the button's rectangle: under it, aligned to the side the
-	 * markup says, turned over when there is no room below, and kept inside the
-	 * window. Assigning a property of style is the CSSOM; the policy refuses a
-	 * style attribute, not this. */
+	 * markup says, shifted to stay inside the window, and turned over when there
+	 * is no room below and more above. A panel taller than the room it has is
+	 * given that room and scrolls. Assigning a property of style is the CSSOM;
+	 * the policy refuses a style attribute, not this. */
 	function placeMenu(menu) {
 		var panel = menuPanel(menu);
 		var button = menu.querySelector(':scope > summary');
 		if (!panel || !button) return;
 		var at = button.getBoundingClientRect();
+		panel.style.removeProperty('max-height');
 		var width = panel.offsetWidth;
 		var height = panel.offsetHeight;
 		var wide = document.documentElement.clientWidth;
@@ -293,11 +313,16 @@
 		var right = (panel.getAttribute('data-align') === 'end') !== rtl;
 		var left = right ? at.right - width : at.left;
 		left = Math.max(8, Math.min(left, wide - width - 8));
-		var top = at.bottom + 4;
-		var flipped = top + height > tall - 8 && at.top - 4 - height >= 8;
-		if (flipped) top = at.top - 4 - height;
-		panel.style.left = left + 'px';
-		panel.style.top = top + 'px';
+		var below = tall - at.bottom - 12;
+		var above = at.top - 12;
+		var flipped = height > below && above > below;
+		var room = flipped ? above : below;
+		if (height > room) {
+			height = Math.max(room, 160);
+			panel.style.maxHeight = height + 'px';
+		}
+		var top = flipped ? Math.max(8, at.top - 4 - height) : at.bottom + 4;
+		pin(panel, left, top);
 		panel.setAttribute('data-side', flipped ? 'top' : 'bottom');
 	}
 
@@ -2036,8 +2061,7 @@
 		var flip = height > below && above > below;
 		var room = flip ? above : below;
 		if (height > room) panel.style.maxHeight = Math.max(room, 160) + 'px';
-		panel.style.left = left + 'px';
-		panel.style.top = (flip ? Math.max(8, at.top - 4 - Math.min(height, room)) : at.bottom + 4) + 'px';
+		pin(panel, left, flip ? Math.max(8, at.top - 4 - Math.min(height, room)) : at.bottom + 4);
 		/* Not data-side: the popover's own rules read that name and pin the
 		 * panel to its trigger's edge, which fights the coordinates written
 		 * above. */
