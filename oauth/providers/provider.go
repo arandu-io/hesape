@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +29,8 @@ type HTTPClient interface {
 // defaultClient is the client a provider uses when none was given.
 //
 // It is the guarded one rather than a bare http.Client, and the difference is
-// the endpoints: three of them are strings, and two of the four constructors
-// here let an application supply its own. A string that reaches an address
+// the endpoints: three of them are strings, and [NewProvider] lets an
+// application supply its own. A string that reaches an address
 // inside the network turns the token exchange into a request the application
 // makes on somebody else's behalf to a service that trusts it -- a cloud
 // metadata endpoint answers one of those with credentials. This one refuses
@@ -44,9 +46,10 @@ var defaultClient = httpclient.NewFactory(nil).Client()
 // data back.
 //
 // What separates one provider from another is three endpoint strings, so the
-// four this package carries are constructors -- [NewGithubProvider],
-// [NewGoogleProvider], [NewFacebookProvider], [NewStripeProvider] -- and
-// [NewProvider] is the fifth, for a service this package does not carry.
+// five this package carries are constructors -- [NewGithubProvider],
+// [NewGoogleProvider], [NewFacebookProvider], [NewAppleProvider],
+// [NewStripeProvider] -- and [NewProvider] is the sixth, for a service this
+// package does not carry.
 //
 // The flow is two handlers:
 //
@@ -94,11 +97,37 @@ type Provider struct {
 	userDataAccept string
 	// userDataQuery is what Facebook needs: the fields to return.
 	userDataQuery map[string]string
+
+	// authParameters are sent on the authorization request only, and before
+	// the ones [Provider.With] sets. parameters are sent on both requests;
+	// Apple's response_mode is a fact about the redirect and has no place in
+	// the token request.
+	authParameters map[string]string
+	// secretFunc, when set, makes the client secret at each exchange instead
+	// of using secret. Apple's is a token signed for the occasion.
+	secretFunc func() (string, error)
+	// idToken, when set, makes the person come from the ID token the exchange
+	// returned and not from a user data endpoint.
+	idToken *idTokenSource
+	// callbackUser adds what only the callback request carries to the person
+	// read from the ID token: Apple's one-time name.
+	callbackUser func(r *http.Request, user oauth.UserData) oauth.UserData
+	// configErr is a mistake made in a constructor that has no error to
+	// return, reported by the first method that needs the provider to work.
+	configErr error
+	// verifiedState is the state of the callback that [Provider.GetAccessToken]
+	// verified. The nonce of the ID token is derived from it.
+	verifiedState string
+}
+
+// idTokenSource is how a provider whose person is in the ID token verifies it.
+type idTokenSource struct {
+	issuer TokenIssuer
 }
 
 // NewProvider builds a provider from the three endpoints of the flow.
 //
-// It is the way to reach a provider this package does not carry. The four it
+// It is the way to reach a provider this package does not carry. The five it
 // does carry have constructors of their own, and those set the scope delimiter
 // and the default scope as well.
 func NewProvider(state StateStoreInterface, clientID, secret, authEndpoint, accessEndpoint, userDataEndpoint string) *Provider {
@@ -126,6 +155,9 @@ func NewProvider(state StateStoreInterface, clientID, secret, authEndpoint, acce
 // options is applied last, so a provider asking for prompt=consent or a
 // login_hint can say so.
 func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) (string, error) {
+	if p.configErr != nil {
+		return "", p.configErr
+	}
 	query := url.Values{}
 
 	if p.usesState() {
@@ -137,6 +169,9 @@ func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) 
 			return "", fmt.Errorf("oauth: storing the state: %w", err)
 		}
 		query.Set("state", state)
+		if p.idToken != nil {
+			query.Set("nonce", nonceFor(state))
+		}
 	}
 
 	query.Set("client_id", p.clientID)
@@ -144,6 +179,9 @@ func (p *Provider) GetAuthURL(callbackURL string, options ...map[string]string) 
 	query.Set("response_type", "code")
 	query.Set("scope", p.formattedScope())
 
+	for k, v := range p.authParameters {
+		query.Set(k, v)
+	}
 	for k, v := range p.parameters {
 		query.Set(k, v)
 	}
@@ -188,6 +226,9 @@ func (p *Provider) Redirect(w http.ResponseWriter, r *http.Request) error {
 //
 // options is applied last, so grant_type can be replaced.
 func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string) (AccessToken, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	callback := hhttp.NewRequest(r)
 	if p.usesState() {
 		if p.state == nil {
@@ -200,6 +241,7 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 		if err := Verify(stored, callback.String("state")); err != nil {
 			return nil, err
 		}
+		p.verifiedState = stored
 	}
 
 	if code := callback.String("code"); code == "" {
@@ -211,10 +253,19 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 		return nil, errors.New("oauth: the callback carries no authorization code")
 	}
 
+	secret := p.secret
+	if p.secretFunc != nil {
+		made, err := p.secretFunc()
+		if err != nil {
+			return nil, err
+		}
+		secret = made
+	}
+
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("client_id", p.clientID)
-	form.Set("client_secret", p.secret)
+	form.Set("client_secret", secret)
 	form.Set("redirect_uri", p.redirectTarget(currentURL(r)))
 	form.Set("code", callback.String("code"))
 	for k, v := range p.parameters {
@@ -240,7 +291,7 @@ func (p *Provider) GetAccessToken(r *http.Request, options ...map[string]string)
 
 // executeAccessRequest exchanges the code for a token.
 //
-// It POSTs for every provider, which is what all four document:
+// It POSTs for every provider, which is what every one of them documents:
 // client_secret in a query string is client_secret in an access log, in a
 // proxy's history and in a Referer header, and no provider requires it there.
 func (p *Provider) executeAccessRequest(ctx context.Context, form url.Values) ([]byte, error) {
@@ -276,6 +327,12 @@ func (p *Provider) executeAccessRequest(ctx context.Context, form url.Values) ([
 // and Google both stopped accepting it there, and a token in a URL is logged
 // everywhere a secret in a URL is logged.
 func (p *Provider) GetUserData(ctx context.Context, token AccessToken) (oauth.UserData, error) {
+	if p.configErr != nil {
+		return oauth.UserData{}, p.configErr
+	}
+	if p.idToken != nil {
+		return p.userFromIDToken(ctx, token)
+	}
 	if p.userDataEndpoint == "" {
 		return oauth.UserData{}, errors.New("oauth: this provider has no user data endpoint")
 	}
@@ -336,7 +393,60 @@ func (p *Provider) User(r *http.Request) (oauth.UserData, AccessToken, error) {
 	if err != nil {
 		return oauth.UserData{}, token, err
 	}
+	if p.callbackUser != nil {
+		user = p.callbackUser(r, user)
+	}
 	return user, token, nil
+}
+
+// UserFromIDToken makes the person come from the ID token the code exchange
+// returns, instead of from a user data endpoint.
+//
+// The token is verified by [VerifyIDToken] against issuer, with the client id
+// as the only audience; and unless [Provider.Stateless] was called, a nonce
+// derived from the state is sent on the redirect and required in the token, so
+// that a token is accepted only for the sign-in that asked for it. The
+// nonce can be checked only once [Provider.GetAccessToken] has verified the
+// callback's state, so [Provider.GetUserData] on its own, with a token that
+// came from somewhere else, is refused.
+//
+// [NewAppleProvider] is built this way. It is also the way to reach another
+// OpenID Connect provider that answers without a user data endpoint.
+func (p *Provider) UserFromIDToken(issuer TokenIssuer) *Provider {
+	p.idToken = &idTokenSource{issuer: issuer}
+	return p
+}
+
+// userFromIDToken verifies the token's id_token and maps its claims.
+func (p *Provider) userFromIDToken(ctx context.Context, token AccessToken) (oauth.UserData, error) {
+	raw := token.Get("id_token")
+	if raw == "" {
+		return oauth.UserData{}, errors.New("oauth: the provider returned no id_token")
+	}
+	var options []IDTokenOption
+	if p.usesState() {
+		if p.verifiedState == "" {
+			return oauth.UserData{}, errors.New("oauth: the nonce of the ID token cannot be checked before GetAccessToken has verified the callback")
+		}
+		options = append(options, WithNonce(nonceFor(p.verifiedState)))
+	}
+	claims, err := VerifyIDToken(ctx, raw, p.idToken.issuer, []string{p.clientID}, options...)
+	if err != nil {
+		return oauth.UserData{}, err
+	}
+	return claims.UserData(), nil
+}
+
+// nonceFor is the nonce sent for a state and expected back with it.
+//
+// It is derived and not stored because the state store keeps one value and
+// forgets it on reading; the nonce needs no store of its own as long as it
+// cannot be known without the state. Hashing separates the two values, so that
+// the nonce, which Apple signs into a token and which is visible to anybody who
+// holds the token, does not reveal the state the browser's cookie holds.
+func nonceFor(state string) string {
+	sum := sha256.Sum256([]byte("hesape/oauth nonce\x00" + state))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // GetStateStore is the store the state is kept in.

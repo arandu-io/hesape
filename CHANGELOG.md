@@ -1,5 +1,15 @@
 # Release Notes
 
+## Unreleased
+
+- **oauth: Sign in with Apple.** `providers.NewAppleProvider(state, servicesID, teamID, keyID, p8)` is the authorization code flow for people who already have an account: it answers who the person is and creates nothing. The client secret is an ES256 JWT signed with the `.p8` key, made for each exchange and valid for five minutes. The redirect asks for `response_mode=form_post`, so the callback is a cross-site POST: the route accepts POST, is exempted with `middleware.CSRFExcept` and keeps the state check. The person comes from the `id_token`, verified for signature, `iss`, `aud`, expiry and a nonce derived from the state; the answer carries `id`, `sub`, `email`, `email_verified` and `is_private_email` as booleans, and the name Apple posts once on the first authorization.
+- **oauth: `providers.VerifyIDToken`** checks an OpenID Connect ID token for the native flow, where Android and iOS hand the token to the app and no redirect happens. `GoogleIssuer()` and `AppleIssuer()` carry the `iss` values and the signing keys; `NewTokenIssuer` builds one for another provider. It accepts RS256 only, refuses an empty audience list, compares in constant time, takes `WithNonce`, and never repeats the token in an error. A fault of the token wraps `ErrInvalidIDToken` (`ErrExpiredIDToken` for age alone); keys that could not be fetched wrap `ErrKeysUnavailable`.
+- **oauth: `providers.KeySet`** fetches a provider's JWKS with the guarded client, keeps it for the `max-age` the provider sends (clamped to five minutes through a day), refetches for a key id it has not seen at most once a minute, and keeps serving the old keys for up to a day when the provider is down.
+- **oauth: `CookieStateStore.CrossSite()`** keeps the state cookie as `SameSite=None; Secure`, which is what a browser sends on a cross-site POST. `NewAppleProvider` calls it on a `CookieStateStore` it is given.
+- **oauth: `UserFromIDToken`** on `Provider` makes the person come from the ID token instead of a user data endpoint, for any OpenID Connect provider.
+- **oauth: `UserData.Bool`** reads a flag that a provider writes as a boolean or as the text `true`.
+- **oauth: the package comments listed Twitter**, which was never carried; they now list the providers that are.
+
 ## [v0.100.0](https://github.com/arandu-io/hesape/compare/v0.99.0...v0.100.0) - 2026-11-02
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.99.0...v0.100.0

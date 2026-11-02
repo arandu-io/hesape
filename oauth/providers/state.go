@@ -94,6 +94,9 @@ type CookieStateStore struct {
 	// insecure leaves the Secure attribute off. It is the negative so the zero
 	// value is the safe one: a store nobody configured sends Secure.
 	insecure bool
+	// crossSite sets SameSite=None, so the cookie travels on a POST that
+	// another site started.
+	crossSite bool
 }
 
 // NewCookieStateStore builds the store for one request.
@@ -113,6 +116,36 @@ func NewCookieStateStore(w http.ResponseWriter, r *http.Request) *CookieStateSto
 func (s *CookieStateStore) Secure(on bool) *CookieStateStore {
 	s.insecure = !on
 	return s
+}
+
+// CrossSite lets the cookie come back on a POST started by another site, and
+// returns s.
+//
+// A provider that answers with response_mode=form_post -- Apple always does --
+// sends the browser back with a cross-site POST, and a browser withholds a
+// SameSite=Lax cookie from that request: the callback would arrive with no
+// state to compare and be refused every time. SameSite=None is the attribute
+// that is sent, and browsers accept it only together with Secure, so this also
+// turns Secure on whatever [CookieStateStore.Secure] said. [NewAppleProvider]
+// calls it on a CookieStateStore it is given; call it yourself for any other
+// provider that posts back.
+//
+// It costs the state cookie nothing it had: the state is compared, never
+// trusted as a credential, and HttpOnly and the ten minute lifetime stay.
+func (s *CookieStateStore) CrossSite() *CookieStateStore {
+	s.crossSite = true
+	return s
+}
+
+func (s *CookieStateStore) sameSite() http.SameSite {
+	if s.crossSite {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
+}
+
+func (s *CookieStateStore) secure() bool {
+	return s.crossSite || !s.insecure
 }
 
 func (s *CookieStateStore) name() string {
@@ -142,9 +175,9 @@ func (s *CookieStateStore) SetState(state string) error {
 		HttpOnly: true,
 		// Lax and not Strict: the callback arrives as a top-level navigation
 		// from the provider's domain, and Strict would withhold the cookie on
-		// exactly that request.
-		SameSite: http.SameSiteLaxMode,
-		Secure:   !s.insecure,
+		// exactly that request. None, when the callback is a POST.
+		SameSite: s.sameSite(),
+		Secure:   s.secure(),
 	})
 	return nil
 }
@@ -170,8 +203,8 @@ func (s *CookieStateStore) GetState() (string, error) {
 			Path:     s.path(),
 			MaxAge:   -1,
 			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			Secure:   !s.insecure,
+			SameSite: s.sameSite(),
+			Secure:   s.secure(),
 		})
 	}
 	return c.Value, nil

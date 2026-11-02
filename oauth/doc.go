@@ -2,7 +2,8 @@
 //
 // It holds [UserData] -- what a provider says about the person who just signed
 // in -- and the providers subpackage, which is the flow that gets it: Google,
-// GitHub, Facebook and Twitter today.
+// GitHub, Facebook, Apple and Stripe Connect today, and the check of the ID
+// token a native app hands the server.
 //
 // # What it is not
 //

@@ -1,6 +1,6 @@
 package providers
 
-// The four providers this package carries, as four constructors.
+// The providers this package carries, as one constructor each.
 //
 // What separates them is data -- three URLs, a scope delimiter, a list of
 // default scopes, a header -- so it is data, and there is one implementation of
