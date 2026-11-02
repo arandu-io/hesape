@@ -97,6 +97,18 @@ type Subject struct {
 	// session that survived a deploy walk past the confirmation screen.
 	PasswordConfirmedAt time.Time
 
+	// TouchedAt is when the session store last gave this session a fresh
+	// lifetime: at sign-in, at a password confirmation, and each time the guards
+	// renewed it because the person was using it.
+	//
+	// It is the store's own bookkeeping, carried on the subject for the reason
+	// PasswordConfirmedAt is: the store keeps the subject as it is written, and a
+	// field it could not write would be lost. It lets the store renew a session
+	// once in a while instead of on every request. Only the session store sets
+	// it, over whatever the caller put here, and nothing decides on it. Zero
+	// means a session written before the field existed, which is renewed at once.
+	TouchedAt time.Time
+
 	// Impersonator is who is really acting when this subject is somebody else
 	// being viewed by them -- an operator looking at a customer's account as the
 	// customer sees it. Nil on every ordinary session.

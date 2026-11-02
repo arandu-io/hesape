@@ -30,7 +30,7 @@ import (
 // working.
 //
 // The fields the session itself owns -- Remembered, PasswordConfirmedAt,
-// Impersonator and Acting -- are the session's, and whatever the resolver puts
+// TouchedAt, Impersonator and Acting -- are the session's, and whatever the resolver puts
 // in them is replaced.
 type SubjectResolver func(ctx context.Context, who auth.Subject) (auth.Subject, error)
 
@@ -61,8 +61,8 @@ var (
 // It is session.RecordStore of auth.Subject with the address beside it: the
 // record store keeps the session, and an Intended over the same application
 // key keeps the destination, which is an address and so not the session's to
-// validate. Load answers the Subject inside the record, with the two fields
-// the store owns -- Remembered and PasswordConfirmedAt -- folded back onto it.
+// validate. Load answers the Subject inside the record, with the fields
+// the store owns -- Remembered, PasswordConfirmedAt and TouchedAt -- folded back onto it.
 //
 // The session keeps who the person is, not what they may do. With a
 // SubjectResolver installed by ResolveSubjects, Load reads the account's
@@ -171,10 +171,44 @@ func (s *SessionStore) Rotate(ctx context.Context, w stdhttp.ResponseWriter, old
 // Without one, a session holding roles or actions answers
 // ErrNoSubjectResolver.
 func (s *SessionStore) Load(ctx context.Context, r *stdhttp.Request) (auth.Subject, error) {
-	rec, err := s.store.All(ctx, r)
+	sub, _, err := s.load(ctx, r)
+	return sub, err
+}
+
+// LoadAndSlide is Load for a request that is the person using the session: it
+// also renews the session's lifetime and its cookie, so the ttl is an idle limit
+// that activity pushes out and not a fixed time since sign-in. See
+// session.RecordStore.Slide for how often it writes and for the remembered
+// session it leaves alone.
+//
+// The guards in http/middleware call it, and it must run before the response
+// writes its header, since the renewal sets the cookie. A renewal that fails
+// does not fail the request: the session is valid, and keeps the lifetime it
+// had.
+//
+// Load stays the read that changes nothing, for the code that only asks whether
+// a session exists, such as the rate limiter's key.
+func (s *SessionStore) LoadAndSlide(ctx context.Context, w stdhttp.ResponseWriter, r *stdhttp.Request) (auth.Subject, error) {
+	sub, rec, err := s.load(ctx, r)
 	if err != nil {
 		return auth.Subject{}, err
 	}
+	_ = s.store.Slide(ctx, w, r, rec)
+	return sub, nil
+}
+
+// load is Load, and also answers the record the subject was read from.
+func (s *SessionStore) load(ctx context.Context, r *stdhttp.Request) (auth.Subject, session.Record[auth.Subject], error) {
+	rec, err := s.store.All(ctx, r)
+	if err != nil {
+		return auth.Subject{}, rec, err
+	}
+	sub, err := s.subjectOf(ctx, r, rec)
+	return sub, rec, err
+}
+
+// subjectOf is the rest of Load: the stored subject made current.
+func (s *SessionStore) subjectOf(ctx context.Context, r *stdhttp.Request, rec session.Record[auth.Subject]) (auth.Subject, error) {
 	stored := subjectFrom(rec)
 	resolve := s.resolver.Load()
 	if resolve == nil {
@@ -210,6 +244,7 @@ func (s *SessionStore) Load(ctx context.Context, r *stdhttp.Request) (auth.Subje
 	}
 	current.Remembered = stored.Remembered
 	current.PasswordConfirmedAt = stored.PasswordConfirmedAt
+	current.TouchedAt = stored.TouchedAt
 	return current, nil
 }
 
@@ -230,7 +265,7 @@ func resolveOne(ctx context.Context, resolve SubjectResolver, stored auth.Subjec
 	}
 	// Who is viewing whom is the session's to say, never the resolver's.
 	current.Impersonator, current.Acting = nil, false
-	current.Remembered, current.PasswordConfirmedAt = false, time.Time{}
+	current.Remembered, current.PasswordConfirmedAt, current.TouchedAt = false, time.Time{}, time.Time{}
 	return current, nil
 }
 
@@ -372,6 +407,7 @@ func recordFor(sub auth.Subject) session.Record[auth.Subject] {
 		SubjectID:           sub.ID,
 		Remembered:          sub.Remembered,
 		PasswordConfirmedAt: sub.PasswordConfirmedAt,
+		TouchedAt:           sub.TouchedAt,
 	}
 }
 
@@ -381,6 +417,7 @@ func subjectFrom(rec session.Record[auth.Subject]) auth.Subject {
 	sub := rec.Payload
 	sub.Remembered = rec.Remembered
 	sub.PasswordConfirmedAt = rec.PasswordConfirmedAt
+	sub.TouchedAt = rec.TouchedAt
 	return sub
 }
 

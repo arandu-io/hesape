@@ -132,6 +132,16 @@ type Record[T any] struct {
 	// an already open session. Zero means never, and reads as not confirmed.
 	// Only Confirm sets it.
 	PasswordConfirmedAt time.Time
+
+	// TouchedAt is when the record was last written with a fresh lifetime: at
+	// Start, at Confirm, and each time Slide renewed it. Zero means a record
+	// written before the field existed, and reads as due for renewal.
+	//
+	// It is what lets Slide renew a session once in a while instead of on every
+	// request: the store cannot ask a handler how much life a record has left,
+	// and a renewal that rewrote the record on every page would cost a write
+	// per request. Start and Confirm set it over whatever the caller left.
+	TouchedAt time.Time
 }
 
 // PasswordConfirmedWithin reports whether the password was typed again on
@@ -332,6 +342,7 @@ func (s *RecordStore[T]) Start(ctx context.Context, w http.ResponseWriter, rec R
 	// one earned.
 	rec.Remembered = set.remember
 	rec.PasswordConfirmedAt = time.Time{}
+	rec.TouchedAt = time.Now()
 
 	life := s.lifetime(rec.Remembered)
 	if err := s.handler.Write(ctx, id, rec, life); err != nil {
@@ -381,6 +392,64 @@ func (s *RecordStore[T]) All(ctx context.Context, r *http.Request) (Record[T], e
 	return rec, nil
 }
 
+// slideEvery is the share of a session's lifetime that has to pass before Slide
+// renews it: a tenth. Renewing on every request would write the record once per
+// page; renewing once a tenth of the life has gone costs one write per
+// lifetime/10 of activity, and keeps the idle limit within a tenth of the
+// configured one -- a 15 minute session ends after at least 13.5 idle minutes
+// and at most 15.
+const slideEvery = 10
+
+// Slide renews the lifetime of the request's session, and its cookie, because
+// the person is using it. It is what makes the ttl an idle limit and not a
+// time since sign-in: without it a session ends ttl after it started whatever
+// the person did in between, and somebody working in the console is signed out
+// mid-task. PCI DSS 8.2.8 asks for re-authentication after 15 idle minutes, not
+// after 15 minutes.
+//
+// rec is the record the request has just read, so the common case, a request
+// within lifetime/10 of the last renewal, costs nothing beyond that read.
+// Otherwise the record is read again and written whole with a new lifetime and
+// the cookie is set again with the same Max-Age; reading it again narrows to
+// one round trip the window in which a Confirm landing at the same moment could
+// be written over by the older copy.
+//
+// A remembered session is not renewed. Its 30 days are absolute on purpose --
+// the box is for a computer the person does not own, and a lifetime that every
+// visit extended would never end on its own -- so it keeps the lifetime Start
+// gave it.
+//
+// It must be called before the response writes its header, since it sets the
+// cookie. It returns the handler's error, which a caller that only wants the
+// session kept alive may ignore: a failed renewal leaves the session with the
+// lifetime it already had.
+func (s *RecordStore[T]) Slide(ctx context.Context, w http.ResponseWriter, r *http.Request, rec Record[T]) error {
+	if rec.Remembered {
+		return nil
+	}
+	life := s.lifetime(false)
+	if age := time.Since(rec.TouchedAt); !rec.TouchedAt.IsZero() && age >= 0 && age < life/slideEvery {
+		return nil
+	}
+	id := s.ID(r)
+	if id == "" {
+		return ErrNoSession
+	}
+	fresh, err := s.handler.Read(ctx, id)
+	if err != nil {
+		return err
+	}
+	if fresh.Remembered {
+		return nil
+	}
+	fresh.TouchedAt = time.Now()
+	if err := s.handler.Write(ctx, id, fresh, life); err != nil {
+		return err
+	}
+	s.writeCookie(w, id, life)
+	return nil
+}
+
 // Confirm records on the request's session that the subject has just typed
 // their password again. It writes the whole record, reads it back and
 // rewrites the cookie, for the reasons below.
@@ -411,6 +480,7 @@ func (s *RecordStore[T]) Confirm(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	rec.PasswordConfirmedAt = time.Now()
+	rec.TouchedAt = rec.PasswordConfirmedAt
 	life := s.lifetime(rec.Remembered)
 	if err := s.handler.Write(ctx, id, rec, life); err != nil {
 		return err

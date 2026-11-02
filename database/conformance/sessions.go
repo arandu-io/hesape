@@ -53,6 +53,7 @@ func testTheSessionRecordTable(t *testing.T, dialect database.Dialect, db *datab
 		SubjectID:           "1",
 		Remembered:          true,
 		PasswordConfirmedAt: confirmed,
+		TouchedAt:           confirmed,
 	}
 	if err := h.Write(ctx, "s-1", rec, time.Hour); err != nil {
 		t.Fatalf("the first write, an insert: %v", err)
@@ -70,7 +71,7 @@ func testTheSessionRecordTable(t *testing.T, dialect database.Dialect, db *datab
 		t.Fatalf("Read: %v", err)
 	}
 	if got.Payload.Email != rec.Payload.Email || len(got.Payload.Roles) != 2 || got.Tenant != "acme" ||
-		got.SubjectID != "1" || !got.Remembered || !got.PasswordConfirmedAt.Equal(confirmed) {
+		got.SubjectID != "1" || !got.Remembered || !got.PasswordConfirmedAt.Equal(confirmed) || !got.TouchedAt.Equal(confirmed) {
 		t.Fatalf("the record came back as %+v, want %+v", got, rec)
 	}
 

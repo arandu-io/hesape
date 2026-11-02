@@ -202,7 +202,26 @@ func TestAnEmptyPayloadReadsAsTheZeroValue(t *testing.T) {
 // too -- and a dropped field reads back as its zero value, which is the defect
 // Handler.Write warns about. This fails the moment the count moves.
 func TestDecodeCarriesEveryFieldOfTheRecord(t *testing.T) {
-	if n := reflect.TypeFor[session.Record[subject]]().NumField(); n != 5 {
-		t.Errorf("Record has %d fields and Decode copies 5: carry the new one through Read and Write", n)
+	if n := reflect.TypeFor[session.Record[subject]]().NumField(); n != 6 {
+		t.Errorf("Record has %d fields and Decode copies 6: carry the new one through Read and Write", n)
+	}
+}
+
+// TestDecodeCarriesTheRenewalStamp is the field-by-field half of the count above
+// for the field Slide depends on: a stamp Decode dropped would make every
+// request look due for renewal, a write per request.
+func TestDecodeCarriesTheRenewalStamp(t *testing.T) {
+	ctx := context.Background()
+	h := session.Decode[subject](session.NewArrayHandler[json.RawMessage]())
+	stamp := time.Now().Add(-time.Minute).Truncate(time.Second)
+	if err := h.Write(ctx, "s-1", session.Record[subject]{Tenant: rawTenant, TouchedAt: stamp}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Read(ctx, "s-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TouchedAt.Equal(stamp) {
+		t.Errorf("TouchedAt = %v, want %v", got.TouchedAt, stamp)
 	}
 }

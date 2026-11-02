@@ -76,7 +76,7 @@ const PasswordConfirmPath = "/auth/password/confirm"
 func RequireAuth(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subject, err := sessions.Load(r.Context(), r)
+			subject, err := sessions.LoadAndSlide(r.Context(), w, r)
 			if err != nil {
 				if !unchecked(w, r, err) {
 					sendToSignIn(sessions, w, r)
@@ -103,7 +103,7 @@ func RequireAuth(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 func LoadSubject(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subject, err := sessions.Load(r.Context(), r)
+			subject, err := sessions.LoadAndSlide(r.Context(), w, r)
 			switch {
 			case err == nil:
 				r = withSubject(r, subject)
@@ -124,7 +124,7 @@ func LoadSubject(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 func RedirectIfAuthenticated(sessions *hhttp.SessionStore, to string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, err := sessions.Load(r.Context(), r)
+			_, err := sessions.LoadAndSlide(r.Context(), w, r)
 			switch {
 			case err == nil:
 				sendTo(w, r, to)
@@ -160,7 +160,7 @@ func RequireRole(sessions *hhttp.SessionStore, roles ...string) func(http.Handle
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subject, err := sessions.Load(r.Context(), r)
+			subject, err := sessions.LoadAndSlide(r.Context(), w, r)
 			if err != nil {
 				if !unchecked(w, r, err) {
 					sendToSignIn(sessions, w, r)
@@ -210,7 +210,7 @@ func RequireRole(sessions *hhttp.SessionStore, roles ...string) func(http.Handle
 func RequireConfirmedPassword(sessions *hhttp.SessionStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subject, err := sessions.Load(r.Context(), r)
+			subject, err := sessions.LoadAndSlide(r.Context(), w, r)
 			if err != nil {
 				if !unchecked(w, r, err) {
 					sendToSignIn(sessions, w, r)

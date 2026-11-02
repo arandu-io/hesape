@@ -31,7 +31,7 @@ type Keeper interface {
 // them encoded.
 //
 // The payload is marshalled on the way in and unmarshalled on the way out;
-// Tenant, SubjectID, Remembered and PasswordConfirmedAt pass through untouched,
+// Tenant, SubjectID, Remembered, PasswordConfirmedAt and TouchedAt pass through untouched,
 // because they are the index and the lifetime, and a handler that rewrote them
 // would sign people out of sessions it was never asked about.
 //
@@ -74,6 +74,7 @@ func (d decoded[T]) Read(ctx context.Context, id string) (Record[T], error) {
 		SubjectID:           stored.SubjectID,
 		Remembered:          stored.Remembered,
 		PasswordConfirmedAt: stored.PasswordConfirmedAt,
+		TouchedAt:           stored.TouchedAt,
 	}, nil
 }
 
@@ -90,6 +91,7 @@ func (d decoded[T]) Write(ctx context.Context, id string, rec Record[T], ttl tim
 		SubjectID:           rec.SubjectID,
 		Remembered:          rec.Remembered,
 		PasswordConfirmedAt: rec.PasswordConfirmedAt,
+		TouchedAt:           rec.TouchedAt,
 	}, ttl)
 }
 
