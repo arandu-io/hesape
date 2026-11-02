@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.101.0](https://github.com/arandu-io/hesape/compare/v0.100.0...v0.101.0) - 2026-11-02
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.100.0...v0.101.0
+
 ## v0.101.0 - 2026-11-02
 
 - **oauth: Sign in with Apple.** `providers.NewAppleProvider(state, servicesID, teamID, keyID, p8)` is the authorization code flow for people who already have an account: it answers who the person is and creates nothing. The client secret is an ES256 JWT signed with the `.p8` key, made for each exchange and valid for five minutes. The redirect asks for `response_mode=form_post`, so the callback is a cross-site POST: the route accepts POST, is exempted with `middleware.CSRFExcept` and keeps the state check. The person comes from the `id_token`, verified for signature, `iss`, `aud`, expiry and a nonce derived from the state; the answer carries `id`, `sub`, `email`, `email_verified` and `is_private_email` as booleans, and the name Apple posts once on the first authorization.
