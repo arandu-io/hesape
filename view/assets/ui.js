@@ -63,6 +63,8 @@
 		'#': { accepts: /[0-9]/, repeating: true },
 		'A': { accepts: /[0-9a-zA-Z]/ },
 		'S': { accepts: /[a-zA-Z]/ },
+		'U': { accepts: /[a-zA-Z]/, upper: true },
+		'X': { accepts: /[0-9a-zA-Z]/, upper: true },
 	};
 
 	// define() can mount existing elements before the rest of this file runs.
@@ -3444,6 +3446,8 @@
 	 *     #  a digit, repeated to the end
 	 *     A  a letter or a digit
 	 *     S  a letter
+	 *     U  a letter, written in capitals
+	 *     X  a letter or a digit, written in capitals
 	 *
 	 * Everything else in the pattern is written through as it stands.
 	 *
@@ -3621,7 +3625,7 @@
 				continue;
 			}
 			if (!token.accepts.test(value.charAt(at))) { at++; continue; }
-			out += value.charAt(at);
+			out += token.upper ? value.charAt(at).toUpperCase() : value.charAt(at);
 			at++;
 			if (!token.repeating) cursor++;
 		}
@@ -3655,7 +3659,7 @@
 				continue;
 			}
 			if (!token.accepts.test(value.charAt(at))) { at--; continue; }
-			out = value.charAt(at) + out;
+			out = (token.upper ? value.charAt(at).toUpperCase() : value.charAt(at)) + out;
 			at--;
 			if (!token.repeating) cursor--;
 		}
@@ -3679,7 +3683,7 @@
 				continue;
 			}
 			if (!token.accepts.test(value.charAt(at))) { at++; continue; }
-			out += value.charAt(at);
+			out += token.upper ? value.charAt(at).toUpperCase() : value.charAt(at);
 			at++;
 			if (!token.repeating) cursor++;
 		}

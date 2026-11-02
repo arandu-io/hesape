@@ -84,7 +84,7 @@ func TestEveryValueAFormCanSendIsAccepted(t *testing.T) {
 		mask.Date, mask.DateISO, mask.Time, mask.TimeSeconds,
 		mask.CreditCard, mask.CardExpiry, mask.CardSecurity,
 		postcode, "000.000.000-00", "00.000.000/0000-00",
-		"(00) 0000-0000", "(00) 00000-0000", "SSS-0A00", "0.#",
+		"(00) 0000-0000", "(00) 00000-0000", "SSS-0A00", "UUU0X00", "0.#",
 	}
 	typed := []string{
 		"", "1", "12", "1234", "12345678", "123456789012345678901234",
@@ -124,5 +124,37 @@ func TestUnmaskAndCompleteAnswerTheSameForBothForms(t *testing.T) {
 		if a, b := postcode.Complete(raw), postcode.Complete(formatted); a != b {
 			t.Errorf("Complete(%q) = %v, Complete(%q) = %v", raw, a, formatted, b)
 		}
+	}
+}
+
+// TestCapitalTokensWriteWhatTheyAcceptInCapitals: a licence plate is typed in
+// lower case as often as not and is stored as it is printed, in both of its
+// shapes, the old one and the Mercosul one.
+func TestCapitalTokensWriteWhatTheyAcceptInCapitals(t *testing.T) {
+	t.Parallel()
+
+	plate := mask.Pattern("UUU0X00")
+	cases := map[string]string{
+		"abc1234":     "ABC1234",
+		"abc1d23":     "ABC1D23",
+		"ABC1D23":     "ABC1D23",
+		"abc-1234":    "ABC1234",
+		" abc 1d23\n": "ABC1D23",
+		"ação1234":    "AO",
+		"ab":          "AB",
+	}
+	for typed, want := range cases {
+		if got := plate.Apply(typed); got != want {
+			t.Errorf("Apply(%q) = %q, want %q", typed, got, want)
+		}
+		if got := plate.Unmask(typed); got != want {
+			t.Errorf("Unmask(%q) = %q, want %q", typed, got, want)
+		}
+	}
+	if !plate.Complete("abc1d23") || plate.Complete("abc1d2") {
+		t.Error("Complete does not count the characters the capital tokens accept")
+	}
+	if plate.Capacity() != 7 {
+		t.Errorf("Capacity = %d, want 7", plate.Capacity())
 	}
 }

@@ -30,3 +30,15 @@ func TestPasswordRuntimeOwnsPanelAndLiveSummary(t *testing.T) {
 		}
 	}
 }
+
+// TestTheBrowsersMaskHasTheCapitalTokensTheServersHas: U and X write what they
+// accept in capitals in mask/mask.go, and the field somebody types in must agree
+// with the pattern the server unmasks with.
+func TestTheBrowsersMaskHasTheCapitalTokensTheServersHas(t *testing.T) {
+	source := code(readUI(t))
+	for _, expected := range []string{"'U': { accepts: /[a-zA-Z]/, upper: true }", "'X': { accepts: /[0-9a-zA-Z]/, upper: true }", "token.upper ? value.charAt(at).toUpperCase()"} {
+		if !strings.Contains(source, expected) {
+			t.Errorf("the mask in ui.js lacks %s", expected)
+		}
+	}
+}
