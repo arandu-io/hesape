@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.100.0](https://github.com/arandu-io/hesape/compare/v0.99.0...v0.100.0) - 2026-11-02
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.99.0...v0.100.0
+
 ## [v0.99.0](https://github.com/arandu-io/hesape/compare/v0.98.0...v0.99.0) - 2026-11-02
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.98.0...v0.99.0
