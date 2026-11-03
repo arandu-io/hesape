@@ -4404,6 +4404,180 @@
 		state: function () { return { token: csrf.token, expires: csrf.exp, due: csrf.due }; },
 	};
 
+	/* ---- confirmation ----------------------------------------------------------
+	 *
+	 * htmx asks the question of an element with hx-confirm through window.confirm:
+	 * the browser's own box, headed with the address of the site, in the
+	 * browser's own words and colours, which no stylesheet reaches and no policy
+	 * can restyle. This takes the question before htmx does and draws it as the
+	 * confirmation dialog the components draw -- the same <dialog>, the same
+	 * parts, the same classes -- so no hx-confirm anywhere can reach the native
+	 * box.
+	 *
+	 *     <button hx-delete="/groups/7" hx-confirm="Delete this group?"
+	 *             data-variant="destructive">Delete</button>
+	 *
+	 * What the element can say about it, all optional:
+	 *
+	 *     data-confirm-title    the heading; the question then becomes the text
+	 *                           under it, and without it the question is the heading
+	 *     data-confirm-label    the word on the button that goes through with it;
+	 *                           without it the button the person pressed says it,
+	 *                           and a long or missing word says "Confirm"
+	 *     data-confirm-cancel   the word on the way out
+	 *     data-confirm-variant  "destructive" paints the confirm button red and
+	 *                           makes the dialog an alert dialog; without it the
+	 *                           variant of the control is used
+	 *
+	 * Each is read from the element or the nearest ancestor that carries it, so a
+	 * form or a table can say it once. The words of the two buttons that nobody
+	 * wrote come from the page's language, for the three the catalogue ships.
+	 *
+	 * The dialog is a modal, so the page behind it is inert, focus stays inside,
+	 * and Escape cancels. The cursor starts on the way out, because the question
+	 * is about something that is not undone. Nothing is evaluated and nothing is
+	 * written into a style attribute: the words go in as text and the markup is
+	 * built with the DOM, which the policy has no quarrel with.
+	 *
+	 * It listens on document and the CSRF listener above listens on window, so
+	 * this one answers first, and the request that follows a yes is sent through
+	 * the same renewal of the token a request with no question goes through.
+	 * Where the browser has no showModal the question is left to htmx, which is
+	 * the one case the browser's box is the only one there is.
+	 */
+	var CONFIRM_WORDS = {
+		en: { confirm: 'Confirm', cancel: 'Cancel' },
+		pt: { confirm: 'Confirmar', cancel: 'Cancelar' },
+		es: { confirm: 'Confirmar', cancel: 'Cancelar' },
+	};
+
+	function confirmSaid(from, name) {
+		var holder = from && from.closest ? from.closest('[data-confirm-' + name + ']') : null;
+		return holder ? holder.getAttribute('data-confirm-' + name) : '';
+	}
+
+	function confirmWord(name) {
+		var lang = String(document.documentElement.lang || 'en').toLowerCase().split('-')[0];
+		return (CONFIRM_WORDS[lang] || CONFIRM_WORDS.en)[name];
+	}
+
+	/* The controls that stand for the one the person pressed: the element, the
+	 * button that submitted its form, and the button a form carries. */
+	function confirmControls(elt, trigger) {
+		var found = [];
+		var submitter = trigger && trigger.submitter;
+		if (submitter && submitter.nodeType === 1) found.push(submitter);
+		if (elt) {
+			found.push(elt);
+			if (elt.querySelector) {
+				var inside = elt.querySelector('button[type="submit"], input[type="submit"]');
+				if (inside) found.push(inside);
+			}
+		}
+		return found;
+	}
+
+	function confirmDestructive(from, controls) {
+		var said = confirmSaid(from, 'variant');
+		if (said) return said === 'destructive';
+		return controls.some(function (control) { return control.getAttribute('data-variant') === 'destructive'; });
+	}
+
+	function confirmLabel(from, controls) {
+		var said = confirmSaid(from, 'label');
+		if (said) return said;
+		for (var at = 0; at < controls.length; at++) {
+			var word = (controls[at].getAttribute('aria-label') || controls[at].textContent || '').replace(/\s+/g, ' ').trim();
+			if (word && word.length <= 32) return word;
+		}
+		return confirmWord('confirm');
+	}
+
+	function confirmNode(tag, attributes, text) {
+		var node = document.createElement(tag);
+		Object.keys(attributes).forEach(function (name) { node.setAttribute(name, attributes[name]); });
+		if (text) node.textContent = text;
+		return node;
+	}
+
+	/* The dialog the components draw, built with the same parts. It is built
+	 * for each question and taken away when it closes: htmx swaps the body of a
+	 * boosted page out from under anything left standing. */
+	function confirmPanel(question, title, label, cancel, destructive) {
+		var id = 'kyse-confirm';
+		var dialog = confirmNode('dialog', {
+			'data-part': 'root', 'data-search': 'false', 'data-kyse-confirm': '', id: id,
+			'class': destructive ? 'alert-dialog' : 'dialog', 'aria-labelledby': id + '-title',
+		});
+		if (destructive) dialog.setAttribute('role', 'alertdialog');
+		var content = confirmNode('article', { 'data-part': 'content' });
+		var header = confirmNode('header', { 'data-part': 'header' });
+		header.appendChild(confirmNode('h2', { 'data-part': 'title', id: id + '-title' }, title || question));
+		if (title) {
+			dialog.setAttribute('aria-describedby', id + '-description');
+			header.appendChild(confirmNode('p', { 'data-part': 'message', id: id + '-description', 'class': 'text-muted-foreground text-sm' }, question));
+		}
+		var footer = confirmNode('footer', { 'data-part': 'footer', 'class': 'flex justify-end gap-2' });
+		var way = confirmNode('form', { method: 'dialog' });
+		var out = confirmNode('button', { 'data-part': 'cancel', type: 'submit', 'class': 'btn', 'data-variant': 'outline' }, cancel);
+		if (destructive) out.setAttribute('autofocus', '');
+		way.appendChild(out);
+		footer.appendChild(way);
+		var through = confirmNode('button', { 'data-part': 'confirm', type: 'button', 'class': 'btn' }, label);
+		if (destructive) through.setAttribute('data-variant', 'destructive');
+		through.addEventListener('click', function () { dialog.close('confirm'); });
+		footer.appendChild(through);
+		content.appendChild(header);
+		content.appendChild(footer);
+		dialog.appendChild(content);
+		return dialog;
+	}
+
+	/* Asks one question. The answer is a promise that is true for a yes and false
+	 * for anything else: the way out, Escape, or the dialog taken from the page. */
+	function confirmAsk(options) {
+		return new Promise(function (resolve) {
+			var dialog = confirmPanel(
+				options.question, options.title || '', options.label || confirmWord('confirm'),
+				options.cancel || confirmWord('cancel'), !!options.destructive
+			);
+			dialog.addEventListener('close', function () {
+				var yes = dialog.returnValue === 'confirm';
+				dialog.remove();
+				resolve(yes);
+			});
+			document.body.appendChild(dialog);
+			if (options.opener) openers.set(dialog, options.opener);
+			showModal(dialog);
+		});
+	}
+
+	document.addEventListener('htmx:confirm', function (event) {
+		var detail = event.detail;
+		if (event.defaultPrevented || !detail || !detail.question || typeof detail.issueRequest !== 'function') return;
+		if (typeof HTMLDialogElement === 'undefined' || typeof HTMLDialogElement.prototype.showModal !== 'function') return;
+		event.preventDefault();
+		var elt = detail.elt;
+		var controls = confirmControls(elt, detail.triggeringEvent);
+		confirmAsk({
+			question: detail.question,
+			title: confirmSaid(elt, 'title'),
+			label: confirmLabel(elt, controls),
+			cancel: confirmSaid(elt, 'cancel'),
+			destructive: confirmDestructive(elt, controls),
+			opener: controls[0] || elt,
+		}).then(function (yes) {
+			if (!yes) return;
+			if (String(detail.verb).toLowerCase() !== 'get' && csrfDue() && csrfSameOrigin(detail.path)) {
+				csrfRenew().then(function () { detail.issueRequest(true); });
+				return;
+			}
+			detail.issueRequest(true);
+		});
+	});
+
+	arandu.ui.confirm = confirmAsk;
+
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', function () { csrfSync(document); });
 	} else {
