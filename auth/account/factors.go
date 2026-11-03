@@ -224,6 +224,45 @@ func (s *Factors) Disable(ctx context.Context, actor auth.Subject) error {
 	return err
 }
 
+// Reset turns an account's second factor off on an operator's behalf, for the
+// person who lost the authenticator and every recovery code. It removes the
+// secret, the replay state and every recovery code, and stores TwoFactorReset.
+//
+// The package's policy lets only the account's owner manage an enrolment, an
+// administrator included, because a second factor somebody else can manage
+// proves nothing about the person signing in. A reset is therefore a separate
+// act, and it asks for a Grant of ActionTwoFactorReset that the application's
+// own policy issued for the operator and the account: this package cannot know
+// who an operator is. The tenant is the Grant's, so an operator authorized for
+// one tenant resets no account of another. The application records who asked
+// and why; the event stored here names the account and nothing a consumer could
+// sign in with.
+//
+// An account with no enrolment answers ErrTwoFactorNotEnrolled. Signing in
+// afterwards asks for the password alone, and the person enrols again.
+func (s *Factors) Reset(ctx context.Context, authority auth.Grant, userID string) error {
+	if err := authority.Check(ActionTwoFactorReset); err != nil {
+		return err
+	}
+	tenant := auth.Tenant(authority)
+	user, err := s.users.FindForAuthentication(ctx, tenant, userID)
+	if err != nil {
+		return err
+	}
+	//arandu:system-grant the application's policy has authorized the operator for ActionTwoFactorReset; the removal itself is the account's own enrolment rows, bound to the tenant of that Grant
+	manage := auth.SystemGrant(ActionTwoFactorManage, tenant)
+	err = database.Transaction(ctx, s.db, func(ctx context.Context) error {
+		if err := s.store.disable(ctx, manage, user.AccountID()); err != nil {
+			return err
+		}
+		return s.record(ctx, manage, TwoFactorReset, user)
+	})
+	if err == nil {
+		log.For(ctx).Warn("second factor reset by an operator", "user_id", user.AccountID(), "tenant", tenant)
+	}
+	return err
+}
+
 // RegenerateRecoveryCodes replaces every previous recovery code, stores
 // RecoveryCodesRegenerated and returns the new ones.
 func (s *Factors) RegenerateRecoveryCodes(ctx context.Context, actor auth.Subject) ([]string, error) {

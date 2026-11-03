@@ -18,6 +18,11 @@ const (
 	ActionTwoFactorRead auth.Action = "user.two-factor.read"
 	// ActionTwoFactorManage permits changing an enrolment and spending its codes.
 	ActionTwoFactorManage auth.Action = "user.two-factor.manage"
+	// ActionTwoFactorReset is the authority to turn another account's second
+	// factor off, and it is the application's to grant: Reset asks for a Grant
+	// issued for it by the application's own policy, which decides who an
+	// operator is.
+	ActionTwoFactorReset auth.Action = "user.two-factor.reset"
 )
 
 // The events stored in the outbox, past-tense facts about one account. Every
@@ -32,6 +37,7 @@ const (
 	AccountClosed            = "auth.user.closed"
 	TwoFactorEnabled         = "auth.two_factor.enabled"
 	TwoFactorDisabled        = "auth.two_factor.disabled"
+	TwoFactorReset           = "auth.two_factor.reset"
 	RecoveryCodesRegenerated = "auth.two_factor.recovery_codes.regenerated"
 	RecoveryCodeUsed         = "auth.two_factor.recovery_code.used"
 )

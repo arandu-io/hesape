@@ -19,6 +19,7 @@ func factorCases() []testCase {
 		{"ConcurrentRecoveryRedemptionHasExactlyOneWinner", concurrentRecovery},
 		{"TheSecondFactorStaysInsideItsTenant", secondFactorTenant},
 		{"OnlyTheOwnerManagesAnEnrolment", onlyTheOwner},
+		{"AnOperatorsResetTurnsTheFactorOffWithTheApplicationsGrant", operatorReset},
 	}
 }
 
@@ -238,5 +239,65 @@ func onlyTheOwner(t *testing.T, e *env) {
 	}
 	if _, err := account.NewFactors(e.f.DB, []byte("short"), cache.NewArrayStore(), nil, users); err == nil {
 		t.Fatal("the second factor was built with a key AES-256 cannot use")
+	}
+}
+
+// operatorReset: an administrator may not manage somebody's enrolment with the
+// subject's own powers, but the application can issue a Grant for the reset; it
+// removes the factor and its recovery codes, stores one event, stays inside the
+// Grant's tenant, and refuses a Grant issued for anything else.
+func operatorReset(t *testing.T, e *env) {
+	users := e.users(account.Hooks{}, nil)
+	user := e.register(users, tenantA, "Ana", "ana@example.test")
+	actor := subject(user)
+	factors := e.factors(users, cache.NewArrayStore())
+
+	provisioning, err := factors.Begin(e.ctx, actor, issuer)
+	if err != nil {
+		t.Fatalf("beginning an enrolment: %v", err)
+	}
+	code, err := otp.Default().Generate(provisioning.Secret, time.Now())
+	if err != nil {
+		t.Fatalf("generating the first code: %v", err)
+	}
+	if _, err := factors.Confirm(e.ctx, actor, code); err != nil {
+		t.Fatalf("confirming the enrolment: %v", err)
+	}
+
+	//arandu:system-grant stands for the Grant an application's own policy issues to an operator it has authorized
+	reset := auth.SystemGrant(account.ActionTwoFactorReset, tenantA)
+	//arandu:system-grant a Grant issued for something else than the reset
+	wrong := auth.SystemGrant(account.ActionTwoFactorRead, tenantA)
+	//arandu:system-grant the same operator's Grant, for another tenant
+	foreign := auth.SystemGrant(account.ActionTwoFactorReset, tenantB)
+
+	if err := factors.Reset(e.ctx, wrong, user.AccountID()); !errors.Is(err, auth.ErrForbidden) {
+		t.Fatalf("a Grant for another action answered %v, want auth.ErrForbidden", err)
+	}
+	if err := factors.Reset(e.ctx, foreign, user.AccountID()); err == nil {
+		t.Fatal("a Grant of another tenant reset the factor")
+	}
+	if required, err := factors.Required(e.ctx, tenantA, user.AccountID()); err != nil || !required {
+		t.Fatalf("the refused resets left Required = %v, %v; want true", required, err)
+	}
+
+	if err := factors.Reset(e.ctx, reset, user.AccountID()); err != nil {
+		t.Fatalf("resetting the factor: %v", err)
+	}
+	if required, err := factors.Required(e.ctx, tenantA, user.AccountID()); err != nil || required {
+		t.Fatalf("Required after the reset = %v, %v; want false", required, err)
+	}
+	if n := e.count(`SELECT count(*) FROM user_recovery_codes WHERE user_id = ?`, user.AccountID()); n != 0 {
+		t.Fatalf("recovery codes left after the reset = %d, want 0", n)
+	}
+	if got := e.eventCount(user.AccountID(), account.TwoFactorReset); got != 1 {
+		t.Fatalf("the reset stored %d %s events, want one", got, account.TwoFactorReset)
+	}
+	if err := factors.Reset(e.ctx, reset, user.AccountID()); !errors.Is(err, account.ErrTwoFactorNotEnrolled) {
+		t.Fatalf("resetting twice answered %v, want ErrTwoFactorNotEnrolled", err)
+	}
+	// The person enrols again from nothing.
+	if _, err := factors.Begin(e.ctx, actor, issuer); err != nil {
+		t.Fatalf("enrolling again after the reset: %v", err)
 	}
 }
