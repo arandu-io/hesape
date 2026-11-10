@@ -3,6 +3,7 @@ package webhook_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/arandu-io/hesape/auth"
@@ -60,4 +61,22 @@ func assertNothingDispatched(t *testing.T, g auth.Grant, want error) {
 	if _, err := module.Send(context.Background(), g, "ep_1", webhook.Message{Event: "order.paid", Body: []byte(`{}`)}); !errors.Is(err, want) {
 		t.Errorf("Send answered %v, want %v", err, want)
 	}
+	body := &countedBody{Reader: strings.NewReader("a plate")}
+	if _, err := module.Relay(context.Background(), g, "ep_1", webhook.RelayMessage{Body: body}); !errors.Is(err, want) {
+		t.Errorf("Relay answered %v, want %v", err, want)
+	}
+	if body.reads != 0 {
+		t.Errorf("Relay read %d times from the body of a request it was not allowed to record", body.reads)
+	}
+}
+
+// countedBody counts the reads made of it.
+type countedBody struct {
+	*strings.Reader
+	reads int
+}
+
+func (b *countedBody) Read(p []byte) (int, error) {
+	b.reads++
+	return b.Reader.Read(p)
 }

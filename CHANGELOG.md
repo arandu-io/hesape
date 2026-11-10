@@ -1,5 +1,13 @@
 # Release Notes
 
+## Unreleased
+
+- **webhook: relay.** `Module.Relay(ctx, g, endpointID, RelayMessage{...})` forwards a request the application received to an endpoint of the new `DialectRelay` as it arrived: the same method (POST or PUT), the same `Content-Type`, the same body bytes, the allowlisted headers of the original request (never `Authorization`, `Cookie`, `Host`, `Forwarded`, `X-Forwarded-*`, `CF-*`, or a name `session.IsSecretField` calls secret) and the endpoint's own headers, with no signature and no `X-Arandu` header. An endpoint with `KeepPath` is called at its address plus the original path and query. `Relay` records a `Delivery` and queues its first attempt, in the caller's transaction when it has one, and never waits for the receiving server. The retry policy, the history, the redelivery, the guarded transport and the cleans are the delivery engine's own.
+- **webhook: large bodies stay out of the database.** A relayed body above `Server.RelayInlineBytes` (64 KiB by default, as base64 in the row below it) is written to `Server.Bodies`, a `*filesystem.Disk` the application passes, under a key the module generates in the Grant's tenant. The row keeps the key, the size and the SHA-256; every attempt and redelivery streams the same bytes with their length. The clean that removes a settled delivery removes its body first, and removes the bodies older than a day that no delivery holds. Without `Server.Bodies`, `Relay` answers `ErrNoBodyDisk` to a body above the inline room.
+- **webhook: `Policy.MaxRelayBytes`** is the limit of a relayed body, 16 MiB in `DefaultPolicy()` and at most `MaxRelayBytes`; zero relays nothing. `MaxRequestBytes` stays 1 MiB for every other delivery. An endpoint's own policy stores it as `max_relay_bytes`.
+- **webhook: `EndpointRequest.KeepPath`**, `Endpoint.KeepPath` and the `keep_path` field of the management routes. `Endpoint.Receives` is false for a relay endpoint, `Module.Send` and the test call answer `ErrRelayEndpoint` for one, and `Relay` answers `ErrNotRelayEndpoint` for any other.
+- **webhook: migrations** `20261110_0010_add_keep_path_to_webhook_server_endpoints` and `20261110_0011_add_relay_to_webhook_server_deliveries` add columns with defaults and one index; a row written by the previous release reads back as the POST of a JSON body it was. Run them before the binary that relays.
+
 ## [v0.102.0](https://github.com/arandu-io/hesape/compare/v0.101.0...v0.102.0) - 2026-11-03
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.101.0...v0.102.0

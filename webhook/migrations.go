@@ -20,6 +20,8 @@ var (
 	_ migrations.ReversibleMigration = addCallReference{}
 	_ migrations.ReversibleMigration = addCallRequest{}
 	_ migrations.ReversibleMigration = addCallDeliveryID{}
+	_ migrations.ReversibleMigration = addEndpointKeepPath{}
+	_ migrations.ReversibleMigration = addDeliveryRelay{}
 )
 
 // createEndpoints is the sending side's endpoints.
@@ -290,3 +292,67 @@ func (addCallDeliveryID) Down(ctx context.Context, conn migrations.Connection) e
 
 // callsDeliveryIndex is the unique index of a call's delivery id.
 const callsDeliveryIndex = "webhook_client_calls_delivery_uidx"
+
+// addEndpointKeepPath gives an endpoint whether a relayed request keeps the
+// path it arrived with. The column has a default, so the endpoints already
+// stored, and a row a binary of the previous release writes during a rollout,
+// read back as they always did.
+type addEndpointKeepPath struct{ migrations.BaseMigration }
+
+// GetName is the migration's identity, and it carries the order.
+func (addEndpointKeepPath) GetName() string {
+	return "20261110_0010_add_keep_path_to_webhook_server_endpoints"
+}
+
+// Up adds the column.
+func (addEndpointKeepPath) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, endpointsTable, func(table *schema.Blueprint) {
+		table.UnsignedSmallInteger("keep_path").Default(0)
+	})
+}
+
+// Down drops the column.
+func (addEndpointKeepPath) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, endpointsTable, func(table *schema.Blueprint) {
+		table.DropColumn("keep_path")
+	})
+}
+
+// addDeliveryRelay gives a delivery what a relayed request needs beyond a
+// JSON body: its method and content type, the size of the body, how the row
+// holds it and, for a body kept out of the database, where it is. Every column
+// has a default, so the deliveries already stored, and a row a binary of the
+// previous release writes during a rollout, are the POST of a JSON body they
+// were.
+type addDeliveryRelay struct{ migrations.BaseMigration }
+
+// GetName is the migration's identity, and it carries the order.
+func (addDeliveryRelay) GetName() string {
+	return "20261110_0011_add_relay_to_webhook_server_deliveries"
+}
+
+// Up adds the columns and the index the clean finds a stored body by.
+func (addDeliveryRelay) Up(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, deliveriesTable, func(table *schema.Blueprint) {
+		table.String("method", 8).Default("POST")
+		table.String("content_type", 255).Default("")
+		table.BigInteger("body_size").Default(0)
+		table.String("body_key", maxBodyKeyLen).Default("")
+		table.String("body_encoding", 16).Default("")
+		table.Index([]string{"tenant_id", "body_key"}, deliveriesBodyIndex)
+	})
+}
+
+// Down drops the index before the columns it names.
+func (addDeliveryRelay) Down(ctx context.Context, conn migrations.Connection) error {
+	return conn.Schema().Table(ctx, deliveriesTable, func(table *schema.Blueprint) {
+		table.DropIndex(deliveriesBodyIndex)
+		table.DropColumn("method", "content_type", "body_size", "body_key", "body_encoding")
+	})
+}
+
+// deliveriesBodyIndex is the index of a delivery's stored body.
+const deliveriesBodyIndex = "webhook_server_deliveries_body_idx"
+
+// maxBodyKeyLen is the width of a stored body's key.
+const maxBodyKeyLen = 255

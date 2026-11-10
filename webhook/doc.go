@@ -53,13 +53,14 @@
 // transaction of the act, for an activity log to read. Those events are never
 // delivered to endpoints.
 //
-// Three paths record a Delivery: Publisher, for every event the outbox relays,
+// Four paths record a Delivery: Publisher, for every event the outbox relays,
 // to the tenant's active endpoints subscribed to it; Module.Send, for a
-// message the application built, to one endpoint; and Outgoing, for a call
+// message the application built, to one endpoint; Outgoing, for a call
 // built in code to any address, signed with a secret of Server.Secrets and
-// dispatched outright or under a condition. A delivery is recorded once per
-// event and endpoint, its body frozen, in the transaction of the job that
-// makes its first attempt.
+// dispatched outright or under a condition; and Module.Relay, for a request
+// the application received and forwards as it arrived (see Relaying a
+// received request). A delivery is recorded once per event and endpoint, its
+// body frozen, in the transaction of the job that makes its first attempt.
 //
 // Each attempt is signed when it is made, under the secrets signing at that
 // moment, and goes out through a transport that refuses loopback, private,
@@ -95,6 +96,63 @@
 // base64 HMAC-SHA256 of id.timestamp.body under the key a whsec_ secret
 // encodes -- one signature per secret still signing, so a receiver rotating
 // its secret accepts either. SignStandard computes it.
+//
+// DialectRelay signs nothing and writes no Arandu header; it belongs to
+// Module.Relay and is described there.
+//
+// # Relaying a received request
+//
+// Some senders accept one or two destinations and no more -- a plate camera
+// posts to the address it was given -- and the application becomes that one
+// address, then sends what it received on to the other systems the customer
+// still runs. An Endpoint of DialectRelay is such a system, and Module.Relay
+// records one RelayMessage to it: the method (POST or PUT), the Content-Type,
+// the body bytes and a few headers of the original request, to the endpoint's
+// address, with the original path and query appended when the endpoint has
+// KeepPath. Relay only records the delivery and queues its first attempt, in
+// the transaction of the caller when it has one; it never waits for the
+// receiving server. The Grant carries DeliveryDispatch, as it does for Send,
+// and decides the tenant: the endpoint is read in it, so another tenant's id
+// answers ErrNotFound, and the bodies are written under it.
+//
+// What travels is the request and nothing of ours. The attempt writes the
+// method, the Content-Type and the body, then the headers of the original
+// request that are on the allowlist -- Content-Encoding, Content-Language,
+// Content-MD5, Accept, Accept-Language, User-Agent, SOAPAction and the names
+// of Server.RelayHeaders -- then the headers the endpoint was given, which win.
+// An Authorization, a Cookie, a Host, a Forwarded or X-Forwarded-* header, a
+// CF-* header, the headers the Arandu and Standard Webhooks dialects write
+// and every name session.IsSecretField calls secret are never forwarded, and
+// Server.RelayHeaders cannot list them. There is no signature and no
+// X-Arandu header, so the secret of a relay endpoint signs nothing. An endpoint
+// of this dialect subscribes to no event: Publisher, Send and the test call
+// leave it alone, and Relay refuses an endpoint of any other dialect with
+// ErrNotRelayEndpoint.
+//
+// A body is not text, so a body up to Server.RelayInlineBytes (64 KiB unless
+// set) is kept in the delivery's row as base64, and a larger one is written to
+// the disk the application gives as Server.Bodies -- the private disk, R2 in
+// production -- under a key the module generates, in the tenant of the Grant.
+// The row keeps the key, the size and the SHA-256, and every attempt and every
+// redelivery opens the same object again and streams it with its length, not
+// chunked. Server.Bodies is written to and read by this package alone. A
+// module wired without it keeps small bodies in the row and answers
+// ErrNoBodyDisk to a larger one. Policy.MaxRelayBytes, 16 MiB by default and
+// at most MaxRelayBytes, is the limit of a relayed body, read from the
+// message once and never past the limit; the 1 MiB of Policy.MaxRequestBytes
+// stays the limit of every other delivery.
+//
+// The retry policy, the timeouts, the delivery and attempt history,
+// redelivery, the guarded transport and the cap on the answer are those of any
+// delivery. A relayed attempt follows a redirect only when it keeps its
+// method (307 and 308), so the old system never takes a GET in the place of
+// the request. The scheduled clean that removes a settled delivery -- delivered
+// or given up -- removes its body from the disk first, and a body that cannot
+// be removed keeps its row for the next run. The same clean removes the bodies
+// older than a day that no delivery holds: what a relay wrote before the
+// transaction of its caller rolled back. To relay one request to several
+// endpoints, read it once and call Relay for each with a new reader on the
+// bytes.
 //
 // # Receiving
 //

@@ -39,7 +39,8 @@ type EndpointRequest struct {
 	// or every one in Config.Server.Events when that list is set.
 	Events []string
 	// Dialect is DialectArandu (empty means it, unless Signer names one),
-	// DialectHMAC or DialectStandardWebhooks.
+	// DialectHMAC, DialectStandardWebhooks or DialectRelay. A relay endpoint
+	// subscribes to no event: it takes what Module.Relay records.
 	Dialect string
 	// Signer is the older name of Dialect, read when Dialect is empty.
 	Signer string
@@ -54,6 +55,10 @@ type EndpointRequest struct {
 	// drops them, and the update sends them again to keep them.
 	Headers string
 	Active  bool
+	// KeepPath, for DialectRelay, sends a relayed request to the endpoint's
+	// address with the path and the query it arrived with appended. It is
+	// refused for the other dialects.
+	KeepPath bool
 	// Policy is the endpoint's own delivery policy. Nil follows Server.Policy
 	// on a create, and keeps what the endpoint has on an update.
 	Policy *Policy
@@ -162,10 +167,14 @@ func (s *EndpointService) validate(in EndpointRequest) (endpointInput, validatio
 		e.Add("url", "Enter a complete http:// or https:// address, without a user or password.")
 	}
 	out.url = url
+	dialect := strings.TrimSpace(in.Dialect)
+	if dialect == "" {
+		dialect = strings.TrimSpace(in.Signer)
+	}
 	seen := map[string]bool{}
 	for _, name := range in.Events {
 		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
+		if name == "" || seen[name] || dialect == DialectRelay {
 			continue
 		}
 		if name != AllEvents && !s.sender.admits(name) {
@@ -175,18 +184,19 @@ func (s *EndpointService) validate(in EndpointRequest) (endpointInput, validatio
 		seen[name] = true
 		out.events = append(out.events, name)
 	}
-	if len(out.events) == 0 && !s.sender.allowEmpty {
+	if len(out.events) == 0 && !s.sender.allowEmpty && dialect != DialectRelay {
 		e.Add("events", "Choose at least one event.")
 	}
-	dialect := strings.TrimSpace(in.Dialect)
-	if dialect == "" {
-		dialect = strings.TrimSpace(in.Signer)
+	if in.KeepPath && dialect != DialectRelay {
+		e.Add("keep_path", "Keeping the path belongs to an endpoint that relays requests.")
 	}
 	switch dialect {
 	case "", DialectArandu:
 		out.Dialect, out.SignatureHeader = DialectArandu, ""
 	case DialectStandardWebhooks:
 		out.Dialect, out.SignatureHeader = DialectStandardWebhooks, ""
+	case DialectRelay:
+		out.Dialect, out.SignatureHeader = DialectRelay, ""
 	case DialectHMAC:
 		out.Dialect = DialectHMAC
 		out.SignatureHeader = strings.TrimSpace(in.SignatureHeader)
@@ -197,7 +207,7 @@ func (s *EndpointService) validate(in EndpointRequest) (endpointInput, validatio
 			e.Add("signature_header", "Name a header such as Signature or X-Signature-256.")
 		}
 	default:
-		e.Add("dialect", "Choose the Arandu signature, the HMAC of the body or Standard Webhooks.")
+		e.Add("dialect", "Choose the Arandu signature, the HMAC of the body, Standard Webhooks or a relay.")
 	}
 	for _, line := range strings.Split(in.Headers, "\n") {
 		if line = strings.TrimSpace(line); line == "" {
@@ -719,6 +729,9 @@ func (s *EndpointService) Test(ctx context.Context, actor auth.Subject, id strin
 	if record, err = s.authorized(ctx, actor, EndpointTest, record); err != nil {
 		return nil, err
 	}
+	if record.Dialect == DialectRelay {
+		return nil, ErrRelayEndpoint
+	}
 	item, err := s.sender.target(record)
 	if err != nil {
 		return nil, err
@@ -873,6 +886,7 @@ func (s *EndpointService) apply(record *Endpoint, in endpointInput, keepHeaders 
 	record.Events = strings.Join(in.events, ",")
 	record.Dialect, record.Signer, record.SignatureHeader = in.Dialect, signerFor(in.Dialect), in.SignatureHeader
 	record.AranduHeaders = Flag(!in.WithoutAranduHeaders)
+	record.KeepPath = Flag(in.KeepPath && in.Dialect == DialectRelay)
 	record.UpdatedAt = s.sender.clock()
 	if in.policy != nil {
 		encoded, err := encodePolicy(in.policy)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/auth"
+	"github.com/arandu-io/hesape/filesystem"
 	"github.com/arandu-io/hesape/http/middleware"
 )
 
@@ -58,6 +59,15 @@ const (
 	MaxHeaders = 20
 	// MinSecretBytes is the shortest signing secret accepted.
 	MinSecretBytes = 32
+	// DefaultRelayInlineBytes is the largest relayed body kept in the
+	// delivery's own row when Server.RelayInlineBytes is zero: 64 KiB. A larger
+	// body is written to Server.Bodies.
+	DefaultRelayInlineBytes = 64 << 10
+	// MaxRelayInlineBytes is the ceiling Server.RelayInlineBytes is refused
+	// above.
+	MaxRelayInlineBytes = 1 << 20
+	// DefaultRelayEvent is the event name of a relayed request that names none.
+	DefaultRelayEvent = "webhook.relay"
 )
 
 // Config is what the application passes when it wires the Module: the sending
@@ -168,6 +178,25 @@ type Server struct {
 	// Secrets are named signing secrets for calls built with Outgoing, chosen
 	// with Outgoing.UseSecret. Each is at least MinSecretBytes long.
 	Secrets map[string]string
+
+	// Bodies is the private disk a relayed body above RelayInlineBytes is
+	// written to, under a key the module generates, for the tenant of the Grant
+	// that relayed it: R2 in production. Nil keeps every relayed body in the
+	// database, and Module.Relay refuses a body above RelayInlineBytes with
+	// ErrNoBodyDisk. Nothing else is ever written to it.
+	Bodies *filesystem.Disk
+
+	// RelayInlineBytes is the largest relayed body kept in the delivery's own
+	// row, as base64. Zero means DefaultRelayInlineBytes; above
+	// MaxRelayInlineBytes is refused.
+	RelayInlineBytes int64
+
+	// RelayHeaders are request headers Module.Relay forwards beside the ones it
+	// always forwards (Content-Type, Content-Encoding, Content-Language,
+	// Content-MD5, Accept, Accept-Language, User-Agent and SOAPAction). A name
+	// that carries a credential or a hop of the sender's network is refused
+	// here and never forwarded whatever is listed.
+	RelayHeaders []string
 }
 
 // Receiver is one system that calls this application, mounted at ReceivePrefix + "/" + Name unless Path or Mount
@@ -337,6 +366,14 @@ func (c Config) Validate() error {
 	}
 	if c.Server.Timeout < 0 || c.Server.Retention < 0 {
 		return errors.New("webhook: Config.Server.Timeout and Retention cannot be negative")
+	}
+	if c.Server.RelayInlineBytes < 0 || c.Server.RelayInlineBytes > MaxRelayInlineBytes {
+		return fmt.Errorf("webhook: Config.Server.RelayInlineBytes is %d, and has to be between 0 and %d, where 0 means %d", c.Server.RelayInlineBytes, MaxRelayInlineBytes, DefaultRelayInlineBytes)
+	}
+	for _, name := range c.Server.RelayHeaders {
+		if !headerPattern.MatchString(name) || forbiddenRelayHeader(name) {
+			return fmt.Errorf("webhook: Config.Server.RelayHeaders has %q, which is not a header that can be forwarded: a credential, a hop of the sender's network and the headers the request itself writes never are", name)
+		}
 	}
 	if c.Server.Policy != nil {
 		if c.Server.Timeout != 0 || c.Server.UserAgent != "" {
@@ -664,6 +701,9 @@ func (c Config) withDefaults() Config {
 	if c.Server.Retention == 0 {
 		c.Server.Retention = DefaultRetention
 	}
+	if c.Server.RelayInlineBytes == 0 {
+		c.Server.RelayInlineBytes = DefaultRelayInlineBytes
+	}
 	if c.Server.Now == nil {
 		c.Server.Now = time.Now
 	}
@@ -717,6 +757,8 @@ const (
 	MaxTimeout = 2 * time.Minute
 	// MaxRequestBytes is the largest body a delivery may carry.
 	MaxRequestBytes = 1 << 20
+	// MaxRelayBytes is the largest body a relayed request may carry: 16 MiB.
+	MaxRelayBytes = 16 << 20
 	// MaxResponseBytes is the most of an answer an attempt reads.
 	MaxResponseBytes = 1 << 20
 )
@@ -765,6 +807,10 @@ type Policy struct {
 	MaxRedirects int
 	// MaxRequestBytes is the largest body a delivery may be recorded with.
 	MaxRequestBytes int64
+	// MaxRelayBytes is the largest body Module.Relay records, up to the
+	// MaxRelayBytes constant; zero relays nothing. A relayed request is not
+	// held to MaxRequestBytes, which is the limit of a JSON delivery.
+	MaxRelayBytes int64
 	// MaxResponseBytes is how much of an answer an attempt reads; the rest is
 	// left unread, and the answer's status decides the attempt.
 	MaxResponseBytes int64
@@ -782,8 +828,9 @@ type Policy struct {
 // DefaultPolicy is the policy a delivery gets when nobody chose one: 5
 // attempts, waiting 5 s, 30 s, 2 min and 10 min between them, the receiver's
 // Retry-After honored, 408, 425, 429 and the 5xx tried again and every other
-// answer final, at most 5 redirects, http or https, a body of up to 1 MiB, the
-// first 1 MiB of an answer read, 10 s per attempt, and DefaultUserAgent.
+// answer final, at most 5 redirects, http or https, a body of up to 1 MiB (16
+// MiB when relayed), the first 1 MiB of an answer read, 10 s per attempt, and
+// DefaultUserAgent.
 func DefaultPolicy() Policy {
 	return Policy{
 		Tries:            5,
@@ -792,6 +839,7 @@ func DefaultPolicy() Policy {
 		HonorRetryAfter:  true,
 		MaxRedirects:     5,
 		MaxRequestBytes:  MaxRequestBytes,
+		MaxRelayBytes:    MaxRelayBytes,
 		MaxResponseBytes: MaxResponseBytes,
 		Timeout:          DefaultTimeout,
 		UserAgent:        DefaultUserAgent,
@@ -813,6 +861,8 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("MaxRedirects is %d, and has to be between 0 and %d", p.MaxRedirects, MaxRedirects)
 	case p.MaxRequestBytes < 1 || p.MaxRequestBytes > MaxRequestBytes:
 		return fmt.Errorf("MaxRequestBytes is %d, and has to be between 1 and %d", p.MaxRequestBytes, MaxRequestBytes)
+	case p.MaxRelayBytes < 0 || p.MaxRelayBytes > MaxRelayBytes:
+		return fmt.Errorf("MaxRelayBytes is %d, and has to be between 0 and %d", p.MaxRelayBytes, MaxRelayBytes)
 	case p.MaxResponseBytes < 0 || p.MaxResponseBytes > MaxResponseBytes:
 		return fmt.Errorf("MaxResponseBytes is %d, and has to be between 0 and %d", p.MaxResponseBytes, MaxResponseBytes)
 	case p.Timeout <= 0 || p.Timeout > MaxTimeout:
@@ -864,6 +914,7 @@ type policyJSON struct {
 	HTTPSOnly        bool      `json:"https_only"`
 	MaxRedirects     int       `json:"max_redirects"`
 	MaxRequestBytes  int64     `json:"max_request_bytes"`
+	MaxRelayBytes    int64     `json:"max_relay_bytes,omitempty"`
 	MaxResponseBytes int64     `json:"max_response_bytes"`
 	TimeoutMS        int64     `json:"timeout_ms"`
 	UserAgent        string    `json:"user_agent"`
@@ -876,7 +927,7 @@ func encodePolicy(p *Policy) (string, error) {
 	}
 	out := policyJSON{
 		Tries: p.Tries, Retry: p.Retry, HonorRetryAfter: p.HonorRetryAfter, HTTPSOnly: p.HTTPSOnly,
-		MaxRedirects: p.MaxRedirects, MaxRequestBytes: p.MaxRequestBytes, MaxResponseBytes: p.MaxResponseBytes,
+		MaxRedirects: p.MaxRedirects, MaxRequestBytes: p.MaxRequestBytes, MaxRelayBytes: p.MaxRelayBytes, MaxResponseBytes: p.MaxResponseBytes,
 		TimeoutMS: p.Timeout.Milliseconds(), UserAgent: p.UserAgent, DisableAfter: p.DisableAfter,
 	}
 	for _, wait := range p.Backoff {
@@ -896,7 +947,7 @@ func decodePolicy(text string) (*Policy, error) {
 	}
 	p := Policy{
 		Tries: in.Tries, Retry: in.Retry, HonorRetryAfter: in.HonorRetryAfter, HTTPSOnly: in.HTTPSOnly,
-		MaxRedirects: in.MaxRedirects, MaxRequestBytes: in.MaxRequestBytes, MaxResponseBytes: in.MaxResponseBytes,
+		MaxRedirects: in.MaxRedirects, MaxRequestBytes: in.MaxRequestBytes, MaxRelayBytes: in.MaxRelayBytes, MaxResponseBytes: in.MaxResponseBytes,
 		Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, UserAgent: in.UserAgent, DisableAfter: in.DisableAfter,
 	}
 	for _, ms := range in.Backoff {

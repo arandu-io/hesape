@@ -99,6 +99,13 @@ type shot struct {
 	dialect string
 	// body is sent exactly as it was recorded.
 	body []byte
+	// method is the request's method, POST when empty. contentType is what a
+	// relayed request says its body is; open, when set, reads a relayed body of
+	// size bytes from where it is kept, once per attempt and once per
+	// redirect that sends it again, in place of body.
+	method, contentType string
+	size                int64
+	open                func(context.Context) (io.ReadCloser, error)
 	// headers are the extra headers, set before the dialect's own.
 	headers map[string]string
 	// keys are the secrets still signing, the current one first.
@@ -161,7 +168,13 @@ func (e *engine) run(ctx context.Context, g auth.Grant, l ledger, j *jobs.Job) e
 // guarded client with no timeout of its own -- the attempt's context carries
 // it -- following as many redirects as the policy allows, each to https when
 // the policy says so.
-func (e *engine) clientFor(policy Policy) *http.Client {
+func (e *engine) clientFor(policy Policy) *http.Client { return e.clientForKind(policy, false) }
+
+// clientForKind is clientFor for a request that is relayed or not. A relayed
+// request follows a redirect only when it keeps its method, which is what 307
+// and 308 ask for: the others turn a POST into a GET that carries no body, and
+// that is not the request that was relayed.
+func (e *engine) clientForKind(policy Policy, relayed bool) *http.Client {
 	client := *e.client
 	client.Timeout = 0
 	if policy.MaxRedirects == 0 {
@@ -172,6 +185,9 @@ func (e *engine) clientFor(policy Policy) *http.Client {
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= limit {
 			return errRedirectLimit
+		}
+		if relayed && len(via) > 0 && next.Method != via[len(via)-1].Method {
+			return http.ErrUseLastResponse
 		}
 		if httpsOnly && next.URL.Scheme != "https" {
 			return httpclient.ErrUnsupportedScheme
@@ -202,20 +218,42 @@ func (e *engine) attempt(ctx context.Context, t *take) result {
 
 	attemptCtx, cancel := context.WithTimeout(ctx, policy.Timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, t.shot.url, bytes.NewReader(t.shot.body))
+	method := t.shot.method
+	if method == "" {
+		method = http.MethodPost
+	}
+	var body io.Reader = bytes.NewReader(t.shot.body)
+	if t.shot.open != nil {
+		stored, err := t.shot.open(attemptCtx)
+		if err != nil {
+			return settle(bodyVerdict(err))
+		}
+		defer func() { _ = stored.Close() }()
+		body = stored
+	}
+	request, err := http.NewRequestWithContext(attemptCtx, method, t.shot.url, body)
 	if err != nil {
 		return settle(verdict{Code: FailureUnsupportedScheme, Permanent: true})
+	}
+	if t.shot.open != nil {
+		// A body read from the disk has a length the transport cannot see:
+		// without it the request goes chunked, which a receiver written for a
+		// camera may not take.
+		request.ContentLength = t.shot.size
+		request.GetBody = func() (io.ReadCloser, error) { return t.shot.open(attemptCtx) }
 	}
 	for name, value := range t.shot.headers {
 		request.Header.Set(name, value)
 	}
-	if err := sign(request.Header, t.shot, r.signedAt, e.prefix, policy.UserAgent); err != nil {
+	if t.shot.dialect == DialectRelay {
+		relayHeader(request.Header, t.shot, policy.UserAgent)
+	} else if err := sign(request.Header, t.shot, r.signedAt, e.prefix, policy.UserAgent); err != nil {
 		return settle(verdict{Code: FailureSecretUnavailable, Permanent: true})
 	}
 
 	client := t.client
 	if client == nil {
-		client = e.clientFor(policy)
+		client = e.clientForKind(policy, t.shot.dialect == DialectRelay)
 	}
 	started := time.Now()
 	response, err := client.Do(request)
@@ -421,7 +459,7 @@ func (l nativeLedger) claim(ctx context.Context, g auth.Grant, j *jobs.Job) (*ta
 	}
 
 	t := &take{policy: policy, own: nativeTake{delivery: row, endpoint: endpoint, token: token, n: msg.Attempts + 1, trigger: msg.Trigger}}
-	t.shot, t.refused = s.prepare(row, endpoint, policy, now)
+	t.shot, t.refused = s.prepare(g, row, endpoint, policy, now)
 	return t, nil
 }
 
@@ -439,13 +477,16 @@ func (l nativeLedger) settle(ctx context.Context, g auth.Grant, t *take, r resul
 // prepare is the request a claimed delivery makes, or the failure it comes to
 // before one: its endpoint deleted, an address the policy refuses, a body the
 // policy refuses, or secrets and headers that cannot be opened.
-func (s *sender) prepare(d *Delivery, endpoint *Endpoint, policy Policy, now time.Time) (shot, *verdict) {
+func (s *sender) prepare(g auth.Grant, d *Delivery, endpoint *Endpoint, policy Policy, now time.Time) (shot, *verdict) {
 	refuse := func(code string) (shot, *verdict) { return shot{}, &verdict{Code: code, Permanent: true} }
 	if strings.HasPrefix(d.SecretRef, endpointSecretRef) && endpoint == nil {
 		return refuse(FailureEndpointDeleted)
 	}
 	if policy.HTTPSOnly && !strings.HasPrefix(strings.ToLower(d.URL), "https://") {
 		return refuse(FailureUnsupportedScheme)
+	}
+	if d.Relayed() {
+		return s.prepareRelay(g, d, policy)
 	}
 	if int64(len(d.Body)) > policy.MaxRequestBytes {
 		return refuse(FailureRequestTooLarge)
@@ -464,6 +505,31 @@ func (s *sender) prepare(d *Delivery, endpoint *Endpoint, policy Policy, now tim
 	return shot{
 		id: d.ID, url: d.URL, dialect: d.Dialect, body: []byte(d.Body), headers: extra, keys: keys,
 		signatureHeader: d.SignatureHeader, aranduHeaders: bool(d.AranduHeaders),
+	}, nil
+}
+
+// prepareRelay is the request a claimed relayed delivery makes: the method and
+// content type it arrived with, its body from the row or the disk, the headers
+// it forwarded and the endpoint's own, and no signature.
+func (s *sender) prepareRelay(g auth.Grant, d *Delivery, policy Policy) (shot, *verdict) {
+	refuse := func(code string) (shot, *verdict) { return shot{}, &verdict{Code: code, Permanent: true} }
+	if d.Size() > policy.MaxRelayBytes {
+		return refuse(FailureRequestTooLarge)
+	}
+	extra := map[string]string{}
+	if d.Headers != "" {
+		plain, err := s.sealer.open(d.TenantID, d.ID, "delivery-headers", d.Headers)
+		if err != nil || jsonInto(plain, &extra) != nil {
+			return refuse(FailureSecretUnavailable)
+		}
+	}
+	inline, open, refused := s.relayBody(g, d)
+	if refused != nil {
+		return shot{}, refused
+	}
+	return shot{
+		id: d.ID, url: d.URL, dialect: DialectRelay, method: d.Method, contentType: d.ContentType,
+		body: inline, size: d.Size(), open: open, headers: extra,
 	}, nil
 }
 
@@ -609,6 +675,9 @@ func (s *sender) resume(ctx context.Context, g auth.Grant, endpoint *Endpoint) e
 // and the attempts older than it, in the Grant's tenant.
 func (s *sender) clean(ctx context.Context, g auth.Grant, cutoff time.Time) error {
 	if err := g.Check(DeliveryClean); err != nil {
+		return err
+	}
+	if err := s.cleanBodies(ctx, g, cutoff); err != nil {
 		return err
 	}
 	if _, err := DeliveryAttempts(s.db).Where("created_at", "<", cutoff).Delete(ctx, g); err != nil {
