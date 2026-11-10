@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.104.0](https://github.com/arandu-io/hesape/compare/v0.103.0...v0.104.0) - 2026-11-10
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.103.0...v0.104.0
+
 ## Unreleased
 
 - **webhook: relay.** `Module.Relay(ctx, g, endpointID, RelayMessage{...})` forwards a request the application received to an endpoint of the new `DialectRelay` as it arrived: the same method (POST or PUT), the same `Content-Type`, the same body bytes, the allowlisted headers of the original request (never `Authorization`, `Cookie`, `Host`, `Forwarded`, `X-Forwarded-*`, `CF-*`, or a name `session.IsSecretField` calls secret) and the endpoint's own headers, with no signature and no `X-Arandu` header. An endpoint with `KeepPath` is called at its address plus the original path and query. `Relay` records a `Delivery` and queues its first attempt, in the caller's transaction when it has one, and never waits for the receiving server. The retry policy, the history, the redelivery, the guarded transport and the cleans are the delivery engine's own.
