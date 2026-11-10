@@ -27,6 +27,26 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.104.0 — a webhook relays a request as it arrived
+
+Nothing stops compiling. Two things need a line from an application that
+adopts the relay, and one needs a step in the deploy.
+
+- **Run `aru migrate` before the binary that sends.** Every delivery now
+  records its size, so an insert from this release names columns
+  (`body_size` and four more) that the two new migrations,
+  `20261110_0010_add_keep_path_to_webhook_server_endpoints` and
+  `20261110_0011_add_relay_to_webhook_server_deliveries`, add. Both have
+  defaults, so the binary of the previous release keeps writing while the
+  rollout lasts.
+- **A `Policy` written as a literal relays nothing.** `Policy.MaxRelayBytes`
+  is the limit of `Module.Relay`, and a policy is used as written, so zero is
+  zero. `DefaultPolicy()` sets 16 MiB; an application that builds its policy
+  from a literal and wants a relay sets the field. A JSON delivery is held to
+  `MaxRequestBytes` as before.
+- **`Endpoint.Receives` is false for `DialectRelay`.** No endpoint of that
+  dialect exists before this release, so no stored subscription changes.
+
 ## v0.97.0 — a sentence written beside the rules comes before the language file
 
 Nothing stops compiling. One behaviour changes.

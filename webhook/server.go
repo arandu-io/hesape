@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
 	"github.com/arandu-io/hesape/events"
+	"github.com/arandu-io/hesape/filesystem"
 	"github.com/arandu-io/hesape/queue"
 )
 
@@ -89,6 +91,12 @@ type sender struct {
 	engine     *engine
 	now        func() time.Time
 	retention  time.Duration
+	// bodies, inline and forwarded are the relay's: the disk a large body is
+	// kept on, how large a body stays in the row, and the headers forwarded
+	// beside the default ones.
+	bodies    *filesystem.Disk
+	inline    int64
+	forwarded map[string]bool
 }
 
 func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*sender, error) {
@@ -97,6 +105,10 @@ func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*send
 		named: map[string]string{}, custom: cfg.Server.HeaderPrefix,
 		policy: cfg.Server.Policy.clone(), now: cfg.Server.Now, retention: cfg.Server.Retention,
 		allowEmpty: cfg.Server.AllowEmptySubscription,
+		bodies:     cfg.Server.Bodies, inline: cfg.Server.RelayInlineBytes, forwarded: map[string]bool{},
+	}
+	for _, name := range cfg.Server.RelayHeaders {
+		s.forwarded[http.CanonicalHeaderKey(name)] = true
 	}
 	prefix := aranduPrefix
 	if s.custom != "" {
@@ -163,6 +175,8 @@ type outgoing struct {
 	aranduHeaders            bool
 	policy                   Policy
 	trigger                  string
+	// relay is set for a relayed request, which has no body of its own here.
+	relay *relayItem
 }
 
 // target is a delivery to a stored endpoint, with its headers opened.
@@ -235,7 +249,7 @@ func (s *sender) record(ctx context.Context, g auth.Grant, items []outgoing) ([]
 		if item.policy.HTTPSOnly && !strings.HasPrefix(address, "https://") {
 			return nil, ErrHTTPSRequired
 		}
-		if int64(len(item.body)) > item.policy.MaxRequestBytes {
+		if item.relay == nil && int64(len(item.body)) > item.policy.MaxRequestBytes {
 			return nil, ErrPayloadTooLarge
 		}
 		item.url = address
@@ -277,15 +291,24 @@ func (s *sender) insert(ctx context.Context, g auth.Grant, item outgoing) (*Deli
 		}
 	}
 	sum := sha256.Sum256(item.body)
-	if _, err := Deliveries(s.db).InsertOrIgnore(ctx, g, map[string]any{
+	values := map[string]any{
 		"id": item.id, "tenant_id": auth.Tenant(g), "event_id": item.eventID, "event_name": item.event,
 		"endpoint_id": item.endpointID, "url": item.url, "dialect": item.dialect,
-		"body": string(item.body), "body_sha256": hex.EncodeToString(sum[:]), "headers": headers,
-		"secret_ref": item.secretRef, "signature_header": item.signatureHeader,
+		"body": string(item.body), "body_sha256": hex.EncodeToString(sum[:]), "body_size": int64(len(item.body)),
+		"headers": headers, "secret_ref": item.secretRef, "signature_header": item.signatureHeader,
 		"include_arandu_headers": Flag(item.aranduHeaders), "status": DeliveryPending,
 		"attempts": 0, "max_attempts": item.policy.Tries, "backoff": encodeWaits(item.policy.plan()),
 		"permanent": Flag(false), "next_attempt_at": now, "created_at": now, "updated_at": now,
-	}); err != nil {
+	}
+	if r := item.relay; r != nil {
+		values["method"], values["content_type"] = r.method, r.contentType
+		values["body_sha256"], values["body_size"], values["body_key"] = r.sha256, r.size, r.key
+		values["body"], values["body_encoding"] = "", ""
+		if r.key == "" {
+			values["body"], values["body_encoding"] = base64.StdEncoding.EncodeToString(r.inline), BodyBase64
+		}
+	}
+	if _, err := Deliveries(s.db).InsertOrIgnore(ctx, g, values); err != nil {
 		return nil, err
 	}
 	row, err := Deliveries(s.db).Where("event_id", "=", item.eventID).Where("endpoint_id", "=", item.endpointID).First(ctx, g)
@@ -345,6 +368,9 @@ func (s *sender) send(ctx context.Context, g auth.Grant, endpointID string, msg 
 	}
 	if row == nil {
 		return nil, ErrNotFound
+	}
+	if row.Dialect == DialectRelay {
+		return nil, ErrRelayEndpoint
 	}
 	item, err := s.target(row)
 	if err != nil {

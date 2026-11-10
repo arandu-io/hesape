@@ -36,7 +36,7 @@ type Endpoint struct {
 	// in that list.
 	Events string `db:"events"`
 	// Dialect is how its calls are signed and which headers they carry:
-	// DialectArandu, DialectHMAC or DialectStandardWebhooks.
+	// DialectArandu, DialectHMAC, DialectStandardWebhooks or DialectRelay.
 	Dialect string `db:"dialect"`
 	// Signer is the column the dialect was read from before Dialect existed,
 	// kept in step with Dialect for a binary that still reads it during a
@@ -59,6 +59,10 @@ type Endpoint struct {
 	// Policy is the JSON of the endpoint's own delivery policy, empty when it
 	// follows Server.Policy.
 	Policy string `db:"policy"`
+	// KeepPath is whether a relayed request goes to the endpoint's address
+	// with the path and the query it arrived with appended. It means something
+	// only for DialectRelay.
+	KeepPath Flag `db:"keep_path"`
 	// Active is whether it receives events.
 	Active Flag `db:"active"`
 	// ConsecutiveFailures is how many of its deliveries in a row gave up.
@@ -160,6 +164,13 @@ const (
 	// "v1," and the base64 HMAC-SHA256 of id.timestamp.body under the key the
 	// whsec_ secret encodes, once per secret still signing, newest first.
 	DialectStandardWebhooks = "standard-webhooks"
+	// DialectRelay forwards a request received elsewhere as it arrived: the
+	// method, the Content-Type, the body and the allowlisted headers it came
+	// with, and the headers the endpoint was given. It signs nothing and
+	// writes no Arandu header. An endpoint of this dialect receives only what
+	// Module.Relay records; no event of the outbox, no Send and no test call
+	// reaches it.
+	DialectRelay = "relay"
 )
 
 // The older names of the first two dialects, which the signer column holds.
@@ -197,9 +208,25 @@ type Delivery struct {
 	// Dialect is the endpoint's, when the delivery was recorded.
 	Dialect string `db:"dialect"`
 	// Body is the request body, exactly as every attempt sends it, and
-	// BodySHA256 its hex SHA-256.
+	// BodySHA256 its hex SHA-256. A relayed body is kept as BodyEncoding says,
+	// or not here at all: see BodyKey.
 	Body       string `db:"body"`
 	BodySHA256 string `db:"body_sha256"`
+	// BodySize is the length of the body in bytes, zero on a delivery recorded
+	// before the column existed: read Size.
+	BodySize int64 `db:"body_size"`
+	// BodyKey is where a relayed body above Server.RelayInlineBytes is kept on
+	// Server.Bodies, in the delivery's tenant, and empty when Body holds it.
+	BodyKey string `db:"body_key"`
+	// BodyEncoding is how Body holds the bytes: empty for text, BodyBase64 for a
+	// relayed body kept in the row.
+	BodyEncoding string `db:"body_encoding"`
+	// Method is the HTTP method of the request: POST, or POST or PUT for a
+	// relayed one.
+	Method string `db:"method"`
+	// ContentType is the Content-Type a relayed request carries; a JSON
+	// delivery always says application/json.
+	ContentType string `db:"content_type"`
 	// Headers is the sealed JSON object of extra headers, empty when none.
 	Headers string `db:"headers"`
 	// SecretRef names where the signing secrets are read from at each
@@ -352,9 +379,11 @@ func (e Endpoint) EventList() []string {
 	return out
 }
 
-// Receives reports whether an event of this name goes to the endpoint.
+// Receives reports whether an event of this name goes to the endpoint. An
+// endpoint of DialectRelay receives none: it takes only what Module.Relay
+// records.
 func (e Endpoint) Receives(event string) bool {
-	if !e.Active {
+	if !e.Active || e.Dialect == DialectRelay {
 		return false
 	}
 	for _, name := range e.EventList() {
@@ -424,6 +453,22 @@ func (d Delivery) WaitAfter(n int64) time.Duration {
 	}
 	return 0
 }
+
+// BodyBase64 is the BodyEncoding of a relayed body kept in the row: the
+// standard base64 of the bytes, because a request body is not text and the
+// column is.
+const BodyBase64 = "base64"
+
+// Size is the length of the body every attempt sends.
+func (d Delivery) Size() int64 {
+	if d.BodySize > 0 || d.BodyKey != "" {
+		return d.BodySize
+	}
+	return int64(len(d.Body))
+}
+
+// Relayed reports whether the delivery forwards a request received elsewhere.
+func (d Delivery) Relayed() bool { return d.Dialect == DialectRelay }
 
 // Spent reports whether the delivery has no attempt left.
 func (d Delivery) Spent() bool { return d.Attempts >= d.MaxAttempts }
@@ -620,6 +665,9 @@ func (r EndpointResource) ToArray() map[string]any {
 		out["signature_header"] = r.e.SignatureHeader
 		out["include_arandu_headers"] = bool(r.e.AranduHeaders)
 	}
+	if r.e.Dialect == DialectRelay {
+		out["keep_path"] = bool(r.e.KeepPath)
+	}
 	if r.e.DisabledAt != nil {
 		out["disabled_at"] = r.e.DisabledAt.UTC().Format(time.RFC3339)
 		out["disabled_reason"] = r.e.DisabledReason
@@ -680,6 +728,9 @@ func (r DeliveryResource) ToArray() map[string]any {
 		"status": r.d.Status, "attempts": r.d.Attempts, "max_attempts": r.d.MaxAttempts,
 		"permanent": bool(r.d.Permanent), "body_sha256": r.d.BodySHA256,
 		"created_at": r.d.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if r.d.Relayed() {
+		out["method"], out["content_type"], out["body_size"] = r.d.Method, r.d.ContentType, r.d.Size()
 	}
 	if r.d.ResponseStatus != nil {
 		out["response_status"] = *r.d.ResponseStatus

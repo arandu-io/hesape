@@ -91,8 +91,12 @@ func (a *auditor) record(ctx context.Context, g auth.Grant, name, aggregate, id 
 
 // endpointFacts is what the log keeps of an endpoint: nothing sealed.
 func endpointFacts(e *Endpoint) map[string]any {
-	return map[string]any{
+	facts := map[string]any{
 		"name": e.Name, "url": e.URL, "events": strings.Join(e.EventList(), ","),
 		"dialect": e.Dialect, "active": bool(e.Active),
 	}
+	if e.Dialect == DialectRelay {
+		facts["keep_path"] = bool(e.KeepPath)
+	}
+	return facts
 }

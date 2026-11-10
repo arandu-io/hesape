@@ -102,6 +102,23 @@ func (m *Module) Send(ctx context.Context, g auth.Grant, endpointID string, msg 
 	return m.sender.send(ctx, g, endpointID, msg)
 }
 
+// Relay records one request received elsewhere to one of the tenant's
+// endpoints of DialectRelay, and queues its first attempt in the same
+// transaction as the caller's when it has one: the delivery sends the same
+// method, Content-Type and body bytes, to the endpoint's address with the
+// original path when the endpoint keeps it, signed with nothing. A body above
+// Config.Server.RelayInlineBytes is written to Config.Server.Bodies before the
+// delivery is recorded, and removed when the delivery is cleaned. g carries
+// DeliveryDispatch for the tenant: the application decided to relay, and that
+// decision is the Grant. A second message with the same EventID to the same
+// endpoint answers the first delivery and sends nothing. A read-only Grant is
+// refused with auth.ErrReadOnly before the body is read.
+//
+// The attempts run on the worker; Relay never waits for the receiving server.
+func (m *Module) Relay(ctx context.Context, g auth.Grant, endpointID string, msg RelayMessage) (*Delivery, error) {
+	return m.sender.relay(ctx, g, endpointID, msg)
+}
+
 // Outgoing starts a call built in code: an address, an event, a payload and
 // a named secret, dispatched under a Grant.
 func (m *Module) Outgoing() *Outgoing { return &Outgoing{s: m.sender} }
@@ -231,7 +248,7 @@ func (m *Module) Migrations() []foundation.Migration {
 	return []foundation.Migration{
 		createEndpoints{}, createCalls{}, extendEndpoints{}, createDeliveries{}, createAttempts{},
 		addCallReference{}, addCallRequest{},
-		widenTimePrecision, addCallDeliveryID{},
+		widenTimePrecision, addCallDeliveryID{}, addEndpointKeepPath{}, addDeliveryRelay{},
 	}
 }
 
@@ -557,6 +574,7 @@ func endpointRequest(ctx *hhttp.Context) EndpointRequest {
 		Name: ctx.Input("name"), URL: ctx.Input("url"), Events: events,
 		Dialect: ctx.Input("dialect"), Signer: ctx.Input("signer"), SignatureHeader: ctx.Input("signature_header"),
 		WithoutAranduHeaders: yes("without_arandu_headers"), Headers: ctx.Input("headers"), Active: yes("active"),
+		KeepPath: yes("keep_path"),
 	}
 }
 
