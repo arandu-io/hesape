@@ -59,6 +59,23 @@
 //   - `current_password` takes a CurrentPasswordChecker. Nothing here resolves a
 //     guard or a hasher, so without a checker the rule fails closed.
 //
+// # A password policy
+//
+// Password is the policy of one field: a length, the kinds of character it must
+// carry, and whether it is a known password. The last one asks a verifier, and
+// there are two ways to have one. A breach service is a network call that
+// belongs with whoever owns the HTTP client, so the rule takes any
+// UncompromisedVerifier and fails closed on a nil one. CommonPasswords needs no
+// client at all: it is embedded and refuses the common passwords and their
+// trivial variations offline,
+//
+//	validation.PasswordMin(12).Max(128).Uncompromised(validation.CommonPasswords())
+//
+// and says the password is too common instead of saying it leaked. A verifier
+// that refuses for a reason of its own implements UncompromisedReason.
+// AppliedRules reports uncompromised for either, which is what the checklist of
+// a sign-up form draws its line from.
+//
 // # Reading what passed
 //
 // There is no reflection and there are no struct tags. The rule set is data,

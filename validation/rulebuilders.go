@@ -876,7 +876,7 @@ func (p *Password) Max(size int) *Password {
 //
 // The verifier is a parameter because nothing here resolves one. A nil verifier
 // FAILS the check rather than passing it: "we could not ask" is not "it is
-// safe".
+// safe". CommonPasswords is a verifier that needs no network.
 func (p *Password) Uncompromised(verifier UncompromisedVerifier, threshold ...int) *Password {
 	p.uncompromised = true
 	p.verifier = verifier
@@ -1040,8 +1040,15 @@ func (p *Password) Passes(attribute string, value any) bool {
 	}
 
 	if p.uncompromised && (p.verifier == nil || !p.verifier.Verify(text, p.compromisedThreshold)) {
-		return p.fail(p.line("validation.password.uncompromised",
-			"The given :attribute has appeared in a data leak. Please choose a different :attribute."))
+		key, fallback := "validation.password.uncompromised",
+			"The given :attribute has appeared in a data leak. Please choose a different :attribute."
+		// A verifier that refuses for another reason says so: CommonPasswords
+		// is "too common", and calling it a leak would be a sentence nobody can
+		// check.
+		if reason, ok := p.verifier.(UncompromisedReason); ok {
+			key, fallback = reason.Refusal()
+		}
+		return p.fail(p.line(key, fallback))
 	}
 
 	return true
