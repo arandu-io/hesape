@@ -355,3 +355,91 @@ func TestAnIncompletePolicyIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// identityWideAt returns a throttle under LockoutPolicy with IdentityWide set.
+func identityWideAt(t *testing.T, c *testClock) *MemoryThrottle {
+	t.Helper()
+	policy := LockoutPolicy()
+	policy.IdentityWide = true
+	th, err := NewMemoryThrottleWith(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.now = func() time.Time { return c.t }
+	th.lastSweep = c.t
+	return th
+}
+
+func TestIdentityWideSharesOneBudgetAcrossEveryAddress(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)}
+	th := identityWideAt(t, c)
+	// Ten failures for one account, each from a different address: not one of
+	// the addresses came near its own budget, and the account is locked.
+	for i := 0; i < 10; i++ {
+		if _, ok := th.Attempt(context.Background(), tenant, owner, fmt.Sprintf("ip:198.51.100.%d", i)); !ok {
+			t.Fatalf("attempt %d was refused before the budget was spent", i+1)
+		}
+	}
+	retry, ok := th.Attempt(context.Background(), tenant, owner, "ip:203.0.113.200")
+	if ok || retry != 30*time.Minute {
+		t.Fatalf("an eleventh address: ok=%v retry=%v, want a refusal for 30m", ok, retry)
+	}
+	// Another account from the same addresses is not touched.
+	if _, ok := th.Attempt(context.Background(), tenant, "bia@example.com", home); !ok {
+		t.Fatal("one locked account locked another")
+	}
+}
+
+func TestWithoutIdentityWideTenAddressesLockNothing(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)}
+	th := lockoutAt(t, c)
+	for i := 0; i < 20; i++ {
+		if _, ok := th.Attempt(context.Background(), tenant, owner, fmt.Sprintf("ip:198.51.100.%d", i)); !ok {
+			t.Fatalf("attempt %d from its own address was refused: LockoutPolicy counts per address", i+1)
+		}
+	}
+}
+
+func TestIdentityWideRefusedAttemptCostsNothingAndDoesNotExtendTheLockout(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)}
+	th := identityWideAt(t, c)
+	for i := 0; i < 10; i++ {
+		th.Attempt(context.Background(), tenant, owner, home)
+	}
+	c.advance(20 * time.Minute)
+	for i := 0; i < 100; i++ {
+		if _, ok := th.Attempt(context.Background(), tenant, owner, away); ok {
+			t.Fatal("a locked identity let an attempt through")
+		}
+	}
+	c.advance(10 * time.Minute)
+	if _, ok := th.Attempt(context.Background(), tenant, owner, away); !ok {
+		t.Fatal("the lockout was extended by the attempts it refused")
+	}
+}
+
+func TestIdentityWideClearForgetsTheIdentityAndGivesTheAddressOneBack(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)}
+	th := identityWideAt(t, c)
+	for i := 0; i < 9; i++ {
+		th.Attempt(context.Background(), tenant, owner, fmt.Sprintf("ip:198.51.100.%d", i))
+	}
+	th.Attempt(context.Background(), tenant, owner, home)
+	th.Clear(context.Background(), tenant, owner, home)
+	for i := 0; i < 10; i++ {
+		if _, ok := th.Attempt(context.Background(), tenant, owner, away); !ok {
+			t.Fatalf("attempt %d was refused after a successful sign-in cleared the identity", i+1)
+		}
+	}
+}
+
+func TestIdentityWideTenantsDoNotShareABudget(t *testing.T) {
+	c := &testClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)}
+	th := identityWideAt(t, c)
+	for i := 0; i < 10; i++ {
+		th.Attempt(context.Background(), "acme", owner, home)
+	}
+	if _, ok := th.Attempt(context.Background(), "globex", owner, home); !ok {
+		t.Fatal("one tenant's lockout reached another tenant")
+	}
+}

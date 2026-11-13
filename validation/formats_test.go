@@ -308,7 +308,7 @@ func TestEveryKeyTheMessagePipelineBuildsResolvesToASentence(t *testing.T) {
 	}
 	// The password rule reports which requirement failed, and each segment is a
 	// key of its own that no rule name spells.
-	for _, segment := range []string{"letters", "mixed", "numbers", "symbols", "uncompromised"} {
+	for _, segment := range []string{"common", "letters", "mixed", "numbers", "symbols", "uncompromised"} {
 		keys = append(keys, "validation.password."+segment)
 	}
 

@@ -111,6 +111,7 @@
   "not_regex": "O formato do campo :attribute é inválido.",
   "numeric": "O campo :attribute deve ser um número.",
   "password": {
+    "common": "O valor informado para o campo :attribute é muito comum. Escolha outro valor.",
     "letters": "O campo :attribute deve conter pelo menos uma letra.",
     "mixed": "O campo :attribute deve conter pelo menos uma letra maiúscula e uma minúscula.",
     "numbers": "O campo :attribute deve conter pelo menos um número.",
