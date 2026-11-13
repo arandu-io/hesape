@@ -95,9 +95,12 @@ const (
 // go: that key is deliberately not one, because a route limit runs before
 // authentication on the routes where it matters most.
 //
-// So: a second interface, and deliberately not a second mechanism. The
-// in-memory implementation below is what the core ships; a Redis-backed one has
-// this same shape, which is what makes it an adapter rather than a mode. The
+// So: a second interface, and deliberately not a second mechanism. Two
+// implementations carry it. MemoryThrottle, below, is in process memory and is
+// what the core ships. cache.NewSignInThrottle keeps the same counters in any
+// cache store that can hold a lock -- Redis, the database, the array store -- so
+// they survive a restart and are the same on every replica; it is an adapter
+// over this shape, which is what makes it an adapter rather than a mode. The
 // context is on all three methods for that implementation's sake -- it is the
 // one that talks over a socket, and a sign-in form that cannot give up on a
 // wedged counter is a sign-in form that hangs.
@@ -140,7 +143,8 @@ const maxTrackedSignIns = 1 << 16
 //
 // It is right for development and for a single instance. Behind more than one
 // pod the budget multiplies by the number of pods, the same way the in-memory
-// route limiter's window does -- use the Redis-backed implementation there.
+// route limiter's window does, and a restart forgets every count -- use
+// cache.NewSignInThrottle over a shared store there.
 //
 // It has no background goroutine. Everything it removes, it removes on the call
 // that would have grown it, because a sweeper started by a constructor outlives
@@ -185,11 +189,20 @@ func NewMemoryThrottle() *MemoryThrottle {
 // account stays locked for a fixed time after the last allowed attempt. When it
 // is zero, a spent budget is released when its window ends, which is a rate
 // limit rather than a lockout.
+//
+// IdentityWide changes what MaxFailures is a budget of. By default it is the
+// budget of one identity from one address, so an identity named from ten
+// addresses has ten budgets and no lockout. When IdentityWide is true the
+// budget is keyed by tenant and identity alone and every address spends the same
+// one: ten wrong passwords for one account from ten addresses lock that account.
+// MaxFailuresPerClient is not affected, and still counts one address across
+// every identity it names.
 type ThrottlePolicy struct {
 	MaxFailures          int
 	MaxFailuresPerClient int
 	Window               time.Duration
 	Lockout              time.Duration
+	IdentityWide         bool
 }
 
 // DefaultThrottlePolicy is the policy of NewMemoryThrottle: MaxSignInFailures
@@ -203,6 +216,9 @@ func DefaultThrottlePolicy() ThrottlePolicy {
 // DSS 8.3.4: an identity is locked for thirty minutes after its tenth wrong
 // attempt in thirty minutes, and one address may spend fifty across every
 // identity in that time.
+//
+// The ten are counted per address. An application that wants them counted for
+// the identity from any address sets IdentityWide on the policy it gets back.
 func LockoutPolicy() ThrottlePolicy {
 	return ThrottlePolicy{MaxFailures: 10, MaxFailuresPerClient: 50, Window: 30 * time.Minute, Lockout: 30 * time.Minute}
 }
@@ -233,7 +249,7 @@ func (m *MemoryThrottle) Attempt(_ context.Context, tenant, identity, client str
 	// call that grows it, or the last entry of a flood is the one that stays.
 	m.trim(now)
 
-	pk := pairKey(tenant, identity, client)
+	pk := m.identityKey(tenant, identity, client)
 	if retry, spent := m.spent(pk, m.policy.MaxFailures, now); spent {
 		return retry, false
 	}
@@ -258,15 +274,17 @@ func (m *MemoryThrottle) Attempt(_ context.Context, tenant, identity, client str
 func (m *MemoryThrottle) Refund(_ context.Context, tenant, identity, client string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.giveBack(pairKey(tenant, identity, client))
+	m.giveBack(m.identityKey(tenant, identity, client))
 	m.giveBack(clientKey(tenant, client))
 }
 
-// Clear forgets the pair's failures and refunds the address for this attempt.
+// Clear forgets the identity's failures and refunds the address for this
+// attempt. Under IdentityWide the failures forgotten are the ones every address
+// spent on the identity.
 func (m *MemoryThrottle) Clear(_ context.Context, tenant, identity, client string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.counters, pairKey(tenant, identity, client))
+	delete(m.counters, m.identityKey(tenant, identity, client))
 	// One unit, not the whole count. Signing in successfully has to be free --
 	// otherwise a busy office behind one address spends its shared budget on
 	// people who typed their password correctly -- and it has to be no better
@@ -360,6 +378,15 @@ func (m *MemoryThrottle) dropUpTo(cut time.Time) {
 			delete(m.counters, k)
 		}
 	}
+}
+
+// identityKey is the key of the budget MaxFailures counts: the identity from one
+// address, or the identity from all of them under IdentityWide.
+func (m *MemoryThrottle) identityKey(tenant, identity, client string) string {
+	if m.policy.IdentityWide {
+		return "identity:" + tenant + ":" + fingerprint(identity)
+	}
+	return pairKey(tenant, identity, client)
 }
 
 func pairKey(tenant, identity, client string) string {

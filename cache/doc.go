@@ -43,6 +43,18 @@
 // this collection -- is hesape/redis, a separate module, so that the driver
 // ships in the binaries that use it and in no others.
 //
+// # The sign-in lockout in a shared store
+//
+// [NewSignInThrottle] is auth.SignInThrottle over any store that has [Store] and
+// [Locking]: the counters of the sign-in form live in the store, so they survive
+// a restart and are the same on every replica, which an in-process
+// auth.MemoryThrottle cannot be behind more than one pod. One attempt takes the
+// store's lock on the identity's counter and on the address's, in an order the
+// keys fix, reads both, decides and writes both, as one step; the keys are
+// hashes under a fixed prefix, so no e-mail or address is readable in the store;
+// and a store that fails degrades that call to an in-process throttle with the
+// same policy and a warning in the log, never to an uncounted attempt.
+//
 // # Shared stores are linked by import
 //
 // A store every replica sees is a [SharedStore], and its connector is linked

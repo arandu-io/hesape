@@ -11,6 +11,14 @@
 // decision it protects, not in a route limiter that knows nothing about
 // identities.
 //
+// The throttle is an interface, SignInThrottle, with two implementations.
+// MemoryThrottle counts in process memory and is what the core ships;
+// cache.NewSignInThrottle counts in a shared cache store, so the lockout survives
+// a restart and is the same on every replica. Both take a ThrottlePolicy, and
+// both honour its IdentityWide field: when it is set, an identity's budget is
+// shared by every address that tries it instead of being kept per address, which
+// is what makes ten wrong passwords from ten addresses lock the account.
+//
 // # Credential verification
 //
 // CredentialVerifier uses the same provider and timebox path as SessionGuard
