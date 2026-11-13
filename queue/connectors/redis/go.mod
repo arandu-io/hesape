@@ -7,15 +7,14 @@ go 1.26.10
 // there is no optional dependency, and this is the only shape that keeps the
 // collection's own module down to golang.org/x/crypto.
 require (
-	github.com/arandu-io/hesape v0.101.0
-	github.com/redis/go-redis/v9 v9.22.0
+	github.com/arandu-io/hesape v0.103.0
+	github.com/redis/go-redis/v9 v9.23.0
 )
 
 require github.com/arandu-io/hesape/redis v0.11.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
