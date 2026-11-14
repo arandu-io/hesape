@@ -3865,10 +3865,15 @@
 		each(root, '[data-requirement]', function (line) {
 			var key = line.getAttribute('data-requirement');
 			var ok = met[key] === true;
-            /* A maximum is a technical constraint, never a strength reward. */
+            /* A maximum is a technical constraint, never a strength reward:
+             * it is out of the count while it is out of sight. Once the box
+             * is over the limit the line is drawn, unmet, and it counts, so
+             * the summary never reads "1 of 1" over a list showing two lines
+             * with one of them unmet. */
             if (key === 'max') {
                 line.hidden = !value || ok;
                 line.classList.toggle('hidden', !value || ok);
+                if (!line.hidden) total += 1;
             } else {
                 total += 1;
             }
