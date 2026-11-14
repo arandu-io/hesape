@@ -45,8 +45,15 @@ func (*Module) Name() string { return "view" }
 // One route, one handler. The hash in the path is what makes the response
 // cacheable forever, and what makes a deploy invalidate it without anybody
 // clearing anything.
+//
+// When the application named itself with [UseBrand] the route is registered under
+// its prefix too, and the old one stays, for the pages and e-mails that point at
+// it.
 func (*Module) Routes(r *routing.Router) {
 	r.Get(AssetPath+"{hash}/{name}", http.HandlerFunc(Handler))
+	if prefix := AssetPrefix(); prefix != AssetPath {
+		r.Get(prefix+"{hash}/{name}", http.HandlerFunc(Handler))
+	}
 }
 
 // ReloadTag supplies the development live-reload tag to the kernel.

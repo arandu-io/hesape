@@ -17,7 +17,7 @@
 // stylesheet swap the icons with no script at all: the class is already on
 // <html> when the first paint happens.
 (() => {
-	const KEY = 'arandu.theme';
+	const KEY = '@app@.theme';
 	const MODES = ['auto', 'light', 'dark'];
 
 	const media = window.matchMedia('(prefers-color-scheme: dark)');

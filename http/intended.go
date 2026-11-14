@@ -8,15 +8,17 @@ import (
 	"time"
 
 	"github.com/arandu-io/hesape/encryption"
+	"github.com/arandu-io/hesape/session"
 )
 
-// IntendedCookieName carries the address somebody was going to, between the
-// request a guard turned away and the sign-in that follows it.
+// IntendedCookieName is the name of the cookie that carries the address somebody
+// was going to, between the request a guard turned away and the sign-in that
+// follows it, for an [Intended] that was not given another.
 //
-// Fixed, for the reason session.CookieName is fixed: the guard writes it and the
-// sign-in handler reads it, and two parts of a project that disagree about the
-// name is a person who signs in and lands on the front page with no explanation
-// -- which is the thing this exists to remove.
+// An application names it with session.WithCookieNames, and one value reaches
+// the guard, the sign-in handler and the session, because two parts of a project
+// that disagree about the name is a person who signs in and lands on the front
+// page with no explanation -- which is the thing this exists to remove.
 //
 // It is a cookie and not a row: there is no session yet at the moment the guard
 // fires, which is exactly why it fires, so there is nowhere on the server to put
@@ -47,6 +49,7 @@ const intendedPurpose = "session.intended"
 type Intended struct {
 	signer *encryption.Signer
 	secure bool
+	cookie string
 }
 
 // NewIntended returns an Intended over the application key.
@@ -55,9 +58,15 @@ type Intended struct {
 // the same secret: an attacker who has it does not need four. Pass secure=false
 // only in development -- without the Secure attribute the cookie travels over
 // plain HTTP, and it carries where somebody was going.
-func NewIntended(appKey []byte, secure bool) *Intended {
-	return &Intended{signer: encryption.NewSigner(appKey), secure: secure}
+//
+// The cookie is called [IntendedCookieName] unless session.WithCookieNames names
+// it.
+func NewIntended(appKey []byte, secure bool, opts ...session.CookieOption) *Intended {
+	return &Intended{signer: encryption.NewSigner(appKey), secure: secure, cookie: session.ResolveCookieNames(opts...).Intended}
 }
+
+// CookieName is the name of the cookie this Intended writes and reads.
+func (i *Intended) CookieName() string { return i.cookie }
 
 // Remember records where this request was going, so that the sign-in screen it
 // is about to be sent to can finish the journey.
@@ -134,7 +143,7 @@ func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 
 	stdhttp.SetCookie(w, &stdhttp.Cookie{
-		Name:     IntendedCookieName,
+		Name:     i.cookie,
 		Value:    i.signer.Sign(intendedPurpose, to, IntendedLifetime),
 		Path:     "/",
 		MaxAge:   int(IntendedLifetime.Seconds()),
@@ -173,7 +182,7 @@ func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // address is used once. An address left standing is one a person meets again at
 // the next sign-in from this browser, weeks later, with no idea why.
 func (i *Intended) Take(w stdhttp.ResponseWriter, r *stdhttp.Request, fallback string) string {
-	c, err := r.Cookie(IntendedCookieName)
+	c, err := r.Cookie(i.cookie)
 	if err != nil {
 		// No cookie, so nothing to clear: writing the clearing header anyway
 		// would put a Set-Cookie on every sign-in in the application, including
@@ -212,7 +221,7 @@ func (i *Intended) Take(w stdhttp.ResponseWriter, r *stdhttp.Request, fallback s
 // was refused. A sign-out handler calls it beside session.Invalidate.
 func (i *Intended) Clear(w stdhttp.ResponseWriter) {
 	stdhttp.SetCookie(w, &stdhttp.Cookie{
-		Name:     IntendedCookieName,
+		Name:     i.cookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,

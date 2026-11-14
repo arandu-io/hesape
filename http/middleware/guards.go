@@ -12,9 +12,9 @@ import (
 
 // SignInPath is where a guard sends somebody who has to sign in.
 //
-// Fixed, for the reason session.CookieName is fixed: it is the address the
-// authentication screens are registered at, and a configurable one buys nothing while giving two parts of a project a
-// way to disagree about where the sign-in screen is.
+// Fixed: it is the address the authentication screens are registered at, and a
+// configurable one buys nothing while giving two parts of a project a way to
+// disagree about where the sign-in screen is.
 //
 // It is also the pattern the sign-in screen is registered under, and the screen
 // carries the name "auth.login" -- so a path built from that name is this

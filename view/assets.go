@@ -1,6 +1,7 @@
 package view
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -9,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/arandu-io/hesape/support"
 )
 
 // The scripts are embedded, not fetched.
@@ -21,8 +24,14 @@ import (
 //go:embed assets/htmx.min.js assets/basecoat.bundle.js assets/theme.js assets/ui.js assets/app.css
 var files embed.FS
 
-// AssetPath is where assets are served from. The hash is in the path, so the
-// response can be cached forever and a new build simply has a new URL.
+// AssetPath is where assets are served from when the application has no name of
+// its own, and where they were served before it could have one. The hash is in
+// the path, so the response can be cached forever and a new build simply has a
+// new URL.
+//
+// An application that calls [UseBrand] is served under its own prefix instead,
+// and this one keeps answering: a page cached before the change, an e-mail
+// already sent and a stylesheet somebody still holds point at it.
 const AssetPath = "/_arandu/assets/"
 
 // Stylesheet is the name of the one stylesheet, and there is only one.
@@ -34,12 +43,21 @@ const Stylesheet = "app.css"
 
 const stylesheetType = "text/css; charset=utf-8"
 
+// brandToken stands for the application's slug inside the embedded scripts: the
+// key one keeps a preference under, and the address the other asks for a token
+// at. It is replaced when the asset is built, and rebuilt by [UseBrand].
+const brandToken = "@app@"
+
 // asset is one embedded file with its content hash.
 type asset struct {
 	name        string
 	contentType string
 	body        []byte
 	hash        string
+
+	// template is the body as embedded, with brandToken in it, for the scripts
+	// that name something after the application. Nil for every other asset.
+	template []byte
 }
 
 // assetsMu guards the table, which RegisterStylesheet writes to.
@@ -51,6 +69,11 @@ var (
 	assetsMu     sync.RWMutex
 	assets       = map[string]*asset{}
 	assetAliases = map[string]string{}
+
+	// assetPrefix is where the assets are served and named from, AssetPath
+	// until UseBrand says otherwise. It is written once, while the application
+	// is assembled, beside the table RegisterStylesheet writes to.
+	assetPrefix = AssetPath
 
 	// appStylesheet records that the application already replaced the default,
 	// so a second replacement is an error rather than a coin toss.
@@ -71,8 +94,69 @@ func init() {
 			// broken and there is nothing to recover from at runtime.
 			panic("view: missing embedded asset " + name + ": " + err.Error())
 		}
-		assets[name] = newAsset(name, contentType, body)
+		a := newAsset(name, contentType, body)
+		if bytes.Contains(body, []byte(brandToken)) {
+			a.template = body
+			a = brandedAsset(a, support.Brand{})
+		}
+		assets[name] = a
 	}
+}
+
+// brandedAsset returns the asset with the application's slug written into its
+// template, and its hash recomputed: the URL is a function of the bytes, so the
+// bytes a browser receives and the hash in the path it asked for stay the same
+// thing.
+func brandedAsset(a *asset, brand support.Brand) *asset {
+	body := bytes.ReplaceAll(a.template, []byte(brandToken), []byte(brand.Slug()))
+	out := newAsset(a.name, a.contentType, body)
+	out.template = a.template
+	return out
+}
+
+// UseBrand serves the assets under the application's own prefix, and writes its
+// name into the scripts that keep something under one.
+//
+// The assets are addressed by [Asset], which a compiled view calls with no
+// handle on the application, so the prefix is state of this package, as the
+// asset table already is. It is set once, from the wiring that builds the
+// application, and before the first page is drawn: a URL written earlier keeps
+// the old prefix, which still answers, but nothing is lost by it. The default
+// brand puts back what an application that never calls it has: [AssetPath], and
+// the keys the scripts have always used.
+//
+// Three things change, and they change together because they must agree. The
+// served path becomes brand.Path("assets/"), "/_perata/assets/" for Peráta. The
+// key theme.js keeps the colour scheme under becomes "perata.theme", and the one
+// ui.js keeps the sidebar state under "perata.sidebar.<id>"; a preference saved
+// under the old key is not read, so each visitor is offered the default once. And
+// the address ui.js asks a fresh CSRF token at becomes "/_perata/csrf", which
+// middleware.CSRFRefreshUnder makes the middleware answer.
+//
+// A stylesheet that names an asset by its absolute path, as the font
+// registration writes it, keeps the path it was written with, and it keeps
+// working: [Handler] answers both prefixes.
+func UseBrand(brand support.Brand) {
+	assetsMu.Lock()
+	defer assetsMu.Unlock()
+
+	assetPrefix = AssetPath
+	if !brand.IsDefault() {
+		assetPrefix = brand.Path("assets/")
+	}
+	for name, a := range assets {
+		if a.template != nil {
+			assets[name] = brandedAsset(a, brand)
+		}
+	}
+}
+
+// AssetPrefix is the path assets are served under now: [AssetPath], or the one
+// [UseBrand] chose. It ends in a slash.
+func AssetPrefix() string {
+	assetsMu.RLock()
+	defer assetsMu.RUnlock()
+	return assetPrefix
 }
 
 // newAsset hashes the body and returns the servable asset.
@@ -202,7 +286,7 @@ func Assets() []Registration {
 	out := make([]Registration, 0, len(assets))
 	for name, a := range assets {
 		out = append(out, Registration{Name: name, ContentType: a.contentType,
-			URL: AssetPath + a.hash + "/" + name})
+			URL: assetPrefix + a.hash + "/" + name})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -215,7 +299,8 @@ type Registration struct {
 	URL         string
 }
 
-// Asset returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js
+// Asset returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js,
+// or the same under the prefix [UseBrand] chose.
 // Image source names registered with RegisterImageAsset resolve to their WebP
 // derivatives; no image processing takes place during this lookup.
 //
@@ -246,7 +331,7 @@ func Asset(name string) string {
 		panic("view: " + name + " is not a registered asset -- register it with view.RegisterAsset, " +
 			"or drop the reference. Registered: " + strings.Join(registeredNames(), ", "))
 	}
-	return AssetPath + a.hash + "/" + a.name
+	return assetPrefix + a.hash + "/" + a.name
 }
 
 // registeredNames is the sorted set of names, for a message.
@@ -267,9 +352,18 @@ func registeredNames() []string {
 //
 // Anything whose path carries the right hash is immutable and cached for a year;
 // a wrong hash is served without caching, so a stale reference degrades into a
-// slow page rather than a broken one.
+// slow page rather than a broken one. It answers under [AssetPath] and under the
+// prefix [UseBrand] chose, so the address a page cached before the change points
+// at still returns the file, uncached, as a wrong hash does.
 func Handler(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, AssetPath)
+	assetsMu.RLock()
+	prefix := assetPrefix
+	assetsMu.RUnlock()
+
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	if rest == r.URL.Path {
+		rest = strings.TrimPrefix(r.URL.Path, AssetPath)
+	}
 	hash, name, ok := strings.Cut(rest, "/")
 	if !ok {
 		http.NotFound(w, r)

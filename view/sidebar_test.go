@@ -35,7 +35,7 @@ func TestTheSidebarToggleSwitchesTheModeAndRemembersIt(t *testing.T) {
 	for _, want := range []string{
 		"'[data-sidebar-toggle]'",
 		"getAttribute('data-sidebar-toggle')",
-		"'arandu.sidebar.'",
+		"'@app@.sidebar.'",
 		"getAttribute('data-breakpoint')",
 		"|| 768",
 		"window.innerWidth >= breakpoint",

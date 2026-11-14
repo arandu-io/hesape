@@ -13,14 +13,14 @@ import (
 	"github.com/arandu-io/hesape/encryption"
 )
 
-// FlashCookieName carries the messages and the typed input of a rejected
-// request, between the request that was rejected and the page it is sent back
-// to.
+// FlashCookieName is the name of the cookie that carries the messages and the
+// typed input of a rejected request, between the request that was rejected and
+// the page it is sent back to, for a [Flash] that was not given another.
 //
-// Fixed, for the reason CookieName is fixed: one half of the framework writes it
-// and another half reads it, and two parts of a project that disagree about the
-// name is a form that comes back with nothing on it -- which is the exact
-// failure this exists to remove.
+// An application names it with [WithCookieNames], and one value reaches the
+// flash, the session and the rest, because two parts of a project that disagree
+// about the name is a form that comes back with nothing on it -- which is the
+// exact failure this exists to remove.
 const FlashCookieName = "arandu_flash"
 
 // FlashLifetime is how long the messages are worth keeping.
@@ -230,6 +230,7 @@ var secretEndings = []string{
 type Flash struct {
 	signer *encryption.Signer
 	secure bool
+	cookie string
 	// withheld is the fields the application named with Withhold, each cut
 	// into its words. It is replaced whole, never changed in place, so a
 	// request reading it while Withhold runs reads one list or the other.
@@ -305,9 +306,14 @@ func containsRun(words, run []string) bool {
 // they are the same secret: an attacker who has it does not need four. Pass
 // secure=false only in development -- without the Secure attribute the cookie
 // travels over plain HTTP, and it carries what somebody typed into a form.
-func NewFlash(appKey []byte, secure bool) *Flash {
-	return &Flash{signer: encryption.NewSigner(appKey), secure: secure}
+//
+// The cookie is called [FlashCookieName] unless [WithCookieNames] names it.
+func NewFlash(appKey []byte, secure bool, opts ...CookieOption) *Flash {
+	return &Flash{signer: encryption.NewSigner(appKey), secure: secure, cookie: ResolveCookieNames(opts...).Flash}
 }
+
+// CookieName is the name of the cookie this flash writes and reads.
+func (f *Flash) CookieName() string { return f.cookie }
 
 // Write puts the messages and what was typed in the browser, for the page
 // the rejected request is about to be redirected to, on a signed cookie
@@ -406,14 +412,14 @@ func (f *Flash) setFlash(w http.ResponseWriter, value string) {
 	if set := header.Values("Set-Cookie"); len(set) > 0 {
 		kept := set[:0:0]
 		for _, line := range set {
-			if !strings.HasPrefix(line, FlashCookieName+"=") {
+			if !strings.HasPrefix(line, f.cookie+"=") {
 				kept = append(kept, line)
 			}
 		}
 		header["Set-Cookie"] = kept
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     FlashCookieName,
+		Name:     f.cookie,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   int(FlashLifetime.Seconds()),
@@ -461,7 +467,7 @@ func (f *Flash) Read(w http.ResponseWriter, r *http.Request) (Flashed, bool) {
 	if !isPageRead(r) {
 		return Flashed{}, false
 	}
-	c, err := r.Cookie(FlashCookieName)
+	c, err := r.Cookie(f.cookie)
 	if err != nil {
 		// No cookie, so nothing to clear: writing the clearing header anyway
 		// would put a Set-Cookie on every page view in the application.
@@ -509,7 +515,7 @@ func isPageRead(r *http.Request) bool {
 // read that was supposed to spend it.
 func (f *Flash) clearFlash(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     FlashCookieName,
+		Name:     f.cookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
