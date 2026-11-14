@@ -70,9 +70,10 @@ var (
 // demotion or a removal takes effect on the next one. Without one, only
 // subjects with neither roles nor actions are accepted.
 //
-// The cookie is session.CookieName, signed with the application key, so a
-// browser holding a session issued through a RecordStore over the same key is
-// signed in for this one too.
+// The cookie is session.CookieName unless session.WithCookieNames names it,
+// signed with the application key, so a browser holding a session issued through
+// a RecordStore over the same key and the same names is signed in for this one
+// too.
 type SessionStore struct {
 	store    *session.RecordStore[auth.Subject]
 	intended *Intended
@@ -118,14 +119,25 @@ func (s *SessionStore) ResolveSubjects(r SubjectResolver) {
 // ttl is how long a session lives without Remember. A nil backend keeps the
 // sessions in this process, which is right for one instance and wrong for
 // two; see MemoryBackend.
-func NewSessionStore(appKey []byte, ttl time.Duration, secure bool, b SessionBackend) *SessionStore {
+//
+// opts names the session cookie and the one the guard remembers an address in,
+// with session.WithCookieNames; the same option goes to session.NewCSRF and
+// session.NewFlash, so one set of names reaches every cookie.
+func NewSessionStore(appKey []byte, ttl time.Duration, secure bool, b SessionBackend, opts ...session.CookieOption) *SessionStore {
 	if b == nil {
 		b = NewMemoryBackend()
 	}
 	return &SessionStore{
-		store:    session.NewRecordStore[auth.Subject](appKey, ttl, secure, backendHandler{backend: b}),
-		intended: NewIntended(appKey, secure),
+		store:    session.NewRecordStore[auth.Subject](appKey, ttl, secure, backendHandler{backend: b}, opts...),
+		intended: NewIntended(appKey, secure, opts...),
 	}
+}
+
+// CookieNames are the names of the cookies this store writes: the session and the
+// remembered address. The guest and flash cookies belong to session.CSRF and
+// session.Flash.
+func (s *SessionStore) CookieNames() (sessionCookie, intendedCookie string) {
+	return s.store.CookieName(), s.intended.CookieName()
 }
 
 // Start creates a session for the subject and writes the cookie.

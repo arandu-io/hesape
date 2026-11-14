@@ -25,6 +25,11 @@
 //     submitted.
 //   - [CSRF], the double-submit token bound to the session id, or to a guest
 //     id for a visitor who has none.
+//   - [CookieNames] and [WithCookieNames], which name the four cookies after
+//     the application. They derive from one [support.Brand]: the same option
+//     goes to every constructor that writes or reads a cookie, so none of them
+//     can disagree about the name. Left out, the cookies keep the names the
+//     collection always wrote.
 //
 // [ErrTokenMismatch] is a sentinel error: no fields, no methods, checked
 // with errors.Is.

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/arandu-io/hesape/collections/arr"
-	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/support"
 	"github.com/arandu-io/hesape/view"
 )
@@ -613,7 +612,7 @@ func (r *TestResponse) flash() (map[string][]string, url.Values) {
 
 	var carried *http.Cookie
 	for _, c := range r.BaseResponse.Cookies() {
-		if c.Name == session.FlashCookieName && c.Value != "" {
+		if c.Name == r.Flash.CookieName() && c.Value != "" {
 			carried = c
 		}
 	}

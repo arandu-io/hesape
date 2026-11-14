@@ -22,8 +22,9 @@ var ErrTokenMismatch = errors.New("session: invalid or expired CSRF token")
 // nothing would be accepted from every visitor alike.
 var ErrUnboundToken = errors.New("session: a CSRF token needs a session id or a guest binding: pass what CSRF.Binding returns")
 
-// GuestCookieName is the cookie a visitor with no session carries, so that the
-// CSRF tokens issued to them are bound to them and to nobody else.
+// GuestCookieName is the name of the cookie a visitor with no session carries,
+// so that the CSRF tokens issued to them are bound to them and to nobody else,
+// for a [CSRF] that was not given another with [WithCookieNames].
 const GuestCookieName = "arandu_csrf_guest"
 
 // guestPrefix marks a binding as a guest's, so that it can never equal a
@@ -40,14 +41,20 @@ type CSRF struct {
 	key      []byte
 	ttl      time.Duration
 	insecure bool
+	cookie   string
 }
 
 // NewCSRF returns a token issuer over appKey and ttl. [Store.RegenerateToken]
 // mints a simpler random string that lives in the session; this exists for
 // a token that carries its own expiry instead.
-func NewCSRF(appKey []byte, ttl time.Duration) *CSRF {
-	return &CSRF{key: appKey, ttl: ttl}
+//
+// The guest cookie is called [GuestCookieName] unless [WithCookieNames] names it.
+func NewCSRF(appKey []byte, ttl time.Duration, opts ...CookieOption) *CSRF {
+	return &CSRF{key: appKey, ttl: ttl, cookie: ResolveCookieNames(opts...).CSRFGuest}
 }
+
+// GuestCookieName is the name of the guest cookie this issuer writes and reads.
+func (c *CSRF) GuestCookieName() string { return c.cookie }
 
 // Secure sets whether the guest cookie carries the Secure attribute. It does
 // by default; pass false only in development, over plain HTTP, where a browser
@@ -64,7 +71,7 @@ func (c *CSRF) Secure(on bool) *CSRF {
 // are submitted by somebody who has no session yet. A token bound to the empty
 // id was one token for all of them: any visitor's token passed on any other
 // visitor's form for as long as it lived. A guest is instead bound to a random
-// id carried in GuestCookieName -- signed, HttpOnly, SameSite=Lax, and Secure
+// id carried in the guest cookie -- signed, HttpOnly, SameSite=Lax, and Secure
 // unless Secure(false) was called -- so a token works only in the browser it
 // was issued to.
 //
@@ -78,7 +85,7 @@ func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string)
 	if sessionID != "" {
 		return sessionID
 	}
-	if cookie, err := r.Cookie(GuestCookieName); err == nil {
+	if cookie, err := r.Cookie(c.cookie); err == nil {
 		if id, sig, ok := strings.Cut(cookie.Value, "."); ok && id != "" && hmac.Equal([]byte(c.signGuest(id)), []byte(sig)) {
 			if w != nil {
 				// Seen again, the guest is given the cookie's life afresh. A
@@ -106,7 +113,7 @@ func (c *CSRF) Binding(w http.ResponseWriter, r *http.Request, sessionID string)
 // setGuest writes the guest cookie for id, with the life a token has.
 func (c *CSRF) setGuest(w http.ResponseWriter, id string) {
 	cookie := &http.Cookie{
-		Name:     GuestCookieName,
+		Name:     c.cookie,
 		Value:    id + "." + c.signGuest(id),
 		Path:     "/",
 		HttpOnly: true,

@@ -3922,3 +3922,31 @@ that.
 The point is not to prevent the break. It is to make it something somebody
 decided, in a diff a reviewer can see, instead of something a person finds out
 when their build stops.
+
+## Naming the cookies, the keys and the asset path after the application
+
+`support.NewBrand(name)` is the one value to pass. Hand its cookie names to every
+constructor that writes or reads one, and the brand to the asset table:
+
+```go
+brand := support.NewBrand(cfg.App.Name) // "Peráta" -> perata
+names := session.WithCookieNames(session.CookieNamesFor(brand))
+
+sessions := hhttp.NewSessionStore(key, ttl, secure, backend, names)
+csrf := session.NewCSRF(key, csrfTTL, names).Secure(secure)
+flash := session.NewFlash(key, secure, names)
+view.UseBrand(brand)
+// and, where the CSRF middleware is wired:
+middleware.CSRFProtect(csrf, sessions.IDFromRequest, middleware.CSRFRefreshUnder(brand))
+```
+
+Nothing is required: without these, the names are the ones this collection has
+always written. With them, the first request after a deploy carries cookies the
+application no longer reads, so everybody is signed out once, and the theme and
+sidebar a visitor saved are forgotten. The old asset path keeps answering.
+
+**What changes without a compiler error.** `CSRFProtect` issues the token when
+`hhttp.CSRFTokenFrom` is first called, not on every GET. A handler that reads the
+token after writing the response loses the guest cookie. A page that carries a
+token now leaves with `Cache-Control: no-store, private` when its handler set no
+policy before reading it.

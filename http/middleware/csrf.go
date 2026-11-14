@@ -10,6 +10,7 @@ import (
 
 	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/session"
+	"github.com/arandu-io/hesape/support"
 )
 
 // StatusCSRFExpired is the status returned when the token is missing, invalid or
@@ -140,6 +141,12 @@ const StatusCSRFExpired = 419
 // arrives with a token that has lapsed is refused as before: the renewal makes
 // that rare, and does not make it acceptable.
 //
+// The token is issued when the page asks for it, which view.New does while a page
+// is built, and not on every GET: the guest cookie is written by that first ask,
+// so a response that draws no form carries no cookie. The response that did ask
+// is marked Cache-Control: no-store, private unless the handler already set a
+// policy of its own.
+//
 // The guest cookie carries the Secure attribute unless the CSRF was built with
 // Secure(false), which is for development over plain HTTP only: without it the
 // browser never sends the cookie back, and every guest form answers
@@ -172,19 +179,40 @@ func CSRFProtect(c *session.CSRF, sessionIDFrom func(*http.Request) string, opts
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if safe[r.Method] {
 				if r.Method == http.MethodGet || r.Method == http.MethodHead {
-					// Issue fails only when the system has no entropy left, and
-					// then the page is drawn without a token: a form on it is
-					// refused on submit, which is the safe side of the failure.
-					if token, err := c.Issue(c.Binding(w, r, sessionIDFrom(r))); err == nil {
-						if r.Method == http.MethodGet && r.URL.Path == CSRFRefreshPath {
-							answerRefresh(w, r, token)
+					refresh := r.Method == http.MethodGet && o.refreshes(r.URL.Path)
+					// The token is made when something asks for it, because
+					// making it is what writes the guest cookie: a response
+					// that draws no form -- an API call, a stylesheet, a 401 --
+					// is given no cookie at all. Issue fails only when the
+					// system has no entropy left, and then the page is drawn
+					// without a token: a form on it is refused on submit, which
+					// is the safe side of the failure.
+					asked := r
+					issue := func() string {
+						token, err := c.Issue(c.Binding(w, asked, sessionIDFrom(asked)))
+						if err != nil {
+							return ""
+						}
+						// A page that carries a token is a page for one
+						// visitor, so it is not kept by a cache between
+						// people, nor offered again by the back button after
+						// the form was used. A handler that chose its own
+						// policy before asking keeps it.
+						if h := w.Header(); h.Get("Cache-Control") == "" {
+							h.Set("Cache-Control", "no-store, private")
+						}
+						return token
+					}
+					if refresh {
+						token := issue()
+						if token == "" {
+							http.Error(w, "no CSRF token could be issued", http.StatusServiceUnavailable)
 							return
 						}
-						r = r.WithContext(hhttp.WithCSRFToken(r.Context(), token))
-					} else if r.Method == http.MethodGet && r.URL.Path == CSRFRefreshPath {
-						http.Error(w, "no CSRF token could be issued", http.StatusServiceUnavailable)
+						answerRefresh(w, r, token)
 						return
 					}
+					r = r.WithContext(hhttp.WithCSRFTokenIssuer(r.Context(), issue))
 				}
 				next.ServeHTTP(w, r)
 				return
@@ -238,12 +266,38 @@ func CSRFProtect(c *session.CSRF, sessionIDFrom func(*http.Request) string, opts
 	}
 }
 
-// CSRFOption changes what CSRFProtect checks. CSRFExcept is the one there is.
+// CSRFOption changes what CSRFProtect checks and answers. CSRFExcept and
+// CSRFRefreshUnder are the ones there are.
 type CSRFOption func(*csrfOptions)
 
 // csrfOptions is what the options passed to CSRFProtect accumulate.
 type csrfOptions struct {
-	except []exemption
+	except  []exemption
+	refresh []string
+}
+
+// refreshes reports whether path is an address a page asks a fresh token at:
+// the one the collection has always answered, and the application's own when
+// CSRFRefreshUnder named it.
+func (o *csrfOptions) refreshes(path string) bool {
+	if path == CSRFRefreshPath {
+		return true
+	}
+	for _, p := range o.refresh {
+		if path == p {
+			return true
+		}
+	}
+	return false
+}
+
+// CSRFRefreshUnder makes the middleware answer the token refresh at the
+// application's own address as well, brand.Path("csrf"): "/_perata/csrf" for the
+// brand of "Peráta". The script the application serves asks for that address, and
+// the old one, CSRFRefreshPath, keeps answering for a page somebody still has
+// open from before the name changed.
+func CSRFRefreshUnder(brand support.Brand) CSRFOption {
+	return func(o *csrfOptions) { o.refresh = append(o.refresh, brand.Path("csrf")) }
 }
 
 // exemption is one path CSRFExcept named, split into its segments.

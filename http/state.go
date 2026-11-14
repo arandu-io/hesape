@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net/url"
+	"sync"
 
 	"github.com/arandu-io/hesape/validation"
 )
@@ -77,15 +78,28 @@ func (c *Context) Old(field string) string {
 // of an unexported type for the same reason as stateKey.
 type csrfTokenKey struct{}
 
+// csrfToken is the token a request carries, issued the first time somebody asks
+// for it and never twice.
+type csrfToken struct {
+	once  sync.Once
+	issue func() string
+	token string
+}
+
+func (t *csrfToken) get() string {
+	t.once.Do(func() { t.token = t.issue() })
+	return t.token
+}
+
 // WithCSRFToken returns a context carrying the CSRF token issued for this
 // request.
 //
 // The contract is with the middleware that protects forms: on every request
-// that may render a page, it issues the token bound to this visitor -- the
-// session id, or the guest binding for somebody who has none -- and puts it
-// here before the handler runs. view.New reads it back, so a controller that
-// renders a form never sees the issuer, the session store or the binding, and
-// a page cannot carry a token issued for another request.
+// that may render a page, it makes the token bound to this visitor -- the
+// session id, or the guest binding for somebody who has none -- available here
+// before the handler runs. view.New reads it back, so a controller that renders
+// a form never sees the issuer, the session store or the binding, and a page
+// cannot carry a token issued for another request.
 //
 // It is a key of its own rather than a field of State because the two are
 // written by different middleware that know nothing of each other's order: one
@@ -97,18 +111,47 @@ func WithCSRFToken(parent context.Context, token string) context.Context {
 	if token == "" {
 		return parent
 	}
-	return context.WithValue(parent, csrfTokenKey{}, token)
+	return WithCSRFTokenIssuer(parent, func() string { return token })
+}
+
+// WithCSRFTokenIssuer returns a context that issues the CSRF token of this
+// request the first time CSRFTokenFrom asks for it, and answers the same one
+// afterwards.
+//
+// It is what keeps a response that draws no form from carrying the cookie a
+// token is bound to. The guest binding of a visitor is a cookie, and a cookie
+// written for every request is one written for a script's API call, for an
+// image, for a 401 that a client reads and discards: it is set on the response
+// of whatever asks for the token, and on no other. issue runs at most once, on
+// the goroutine that first asks, and has to write what it writes to the response
+// before the response is committed; view.New asks while the page is built, which
+// is before.
+//
+// issue returns the empty string when no token could be made, which is what
+// CSRFTokenFrom answers as no token. A nil issue panics at wiring.
+func WithCSRFTokenIssuer(parent context.Context, issue func() string) context.Context {
+	if issue == nil {
+		panic("http: WithCSRFTokenIssuer was given a nil issuer")
+	}
+	return context.WithValue(parent, csrfTokenKey{}, &csrfToken{issue: issue})
 }
 
 // CSRFTokenFrom returns the CSRF token on a request context, and whether one
 // was issued for it.
 //
+// Asking is what issues it, when the middleware passed an issuer: the first call
+// writes the cookie the token is bound to, if the visitor has none.
+//
 // False is the answer for a request no protecting middleware ran on: an API
 // route, a test that builds its own request. A page drawn there carries an
 // empty token, and a form posted from it is refused.
 func CSRFTokenFrom(ctx context.Context) (string, bool) {
-	token, ok := ctx.Value(csrfTokenKey{}).(string)
-	return token, ok && token != ""
+	holder, ok := ctx.Value(csrfTokenKey{}).(*csrfToken)
+	if !ok {
+		return "", false
+	}
+	token := holder.get()
+	return token, token != ""
 }
 
 // appNameKey is the context key of the application name, of an unexported

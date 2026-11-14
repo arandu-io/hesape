@@ -2793,7 +2793,7 @@
 	 * would fold the strip while the overlay is what is on screen.
 	 */
 
-	var SIDEBAR_KEY = 'arandu.sidebar.';
+	var SIDEBAR_KEY = '@app@.sidebar.';
 
 	function sidebarMode(value) {
 		return value === 'full' || value === 'slim' ? value : '';
@@ -4206,7 +4206,7 @@
 	 * the page was drawn with, and a skew between the two clocks costs one
 	 * early or late renewal, after which the counts are exact.
 	 */
-	var CSRF_URL = '/_arandu/csrf';
+	var CSRF_URL = '/_@app@/csrf';
 	var CSRF_HEADER = 'X-CSRF-Token';
 	/* token is the freshest the page holds; stamp is the expiry its own text
 	 * names (the server's clock, and the only thing tokens are compared by); exp

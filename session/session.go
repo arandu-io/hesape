@@ -13,9 +13,13 @@ import (
 	"time"
 )
 
-// CookieName is the cookie the framework reads and writes. It is fixed on
-// purpose: a configurable cookie name buys nothing and breaks the CSRF binding
-// when two parts of a project disagree about it.
+// CookieName is the name of the session cookie of a store that was not given
+// another: the one the collection has always written.
+//
+// An application names its cookies after itself with [WithCookieNames], over one
+// [support.Brand] that every constructor touching a cookie receives, so the part
+// that writes the cookie and the part that reads it still agree. See
+// [CookieNames].
 const CookieName = "arandu_session"
 
 // Errors returned by Store.
@@ -254,6 +258,7 @@ type RecordStore[T any] struct {
 	ttl     time.Duration
 	secure  bool
 	handler Handler[T]
+	cookie  string
 }
 
 // NewRecordStore returns a [RecordStore] that mints and signs session ids,
@@ -261,12 +266,19 @@ type RecordStore[T any] struct {
 //
 // Pass secure=false only in development: without the Secure attribute the
 // cookie travels over plain HTTP.
-func NewRecordStore[T any](appKey []byte, ttl time.Duration, secure bool, h Handler[T]) *RecordStore[T] {
+//
+// The cookie is called [CookieName] unless [WithCookieNames] names it. The name is
+// part of what the signature covers, so a cookie copied under another name is not
+// a session.
+func NewRecordStore[T any](appKey []byte, ttl time.Duration, secure bool, h Handler[T], opts ...CookieOption) *RecordStore[T] {
 	if h == nil {
 		h = NewArrayHandler[T]()
 	}
-	return &RecordStore[T]{appKey: appKey, ttl: ttl, secure: secure, handler: h}
+	return &RecordStore[T]{appKey: appKey, ttl: ttl, secure: secure, handler: h, cookie: ResolveCookieNames(opts...).Session}
 }
+
+// CookieName is the name of the cookie this store writes and reads.
+func (s *RecordStore[T]) CookieName() string { return s.cookie }
 
 // Option adjusts how a session is started.
 //
@@ -550,7 +562,7 @@ func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, 
 		}
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     s.cookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -566,7 +578,7 @@ func (s *RecordStore[T]) Invalidate(ctx context.Context, w http.ResponseWriter, 
 // session. It is the value to hand to [CSRF], which binds its token to this
 // id.
 func (s *RecordStore[T]) ID(r *http.Request) string {
-	c, err := r.Cookie(CookieName)
+	c, err := r.Cookie(s.cookie)
 	if err != nil {
 		return ""
 	}
@@ -598,7 +610,7 @@ func (s *RecordStore[T]) Exists(ctx context.Context, id string) bool {
 // the person was signed out an hour after ticking a box that promised a month.
 func (s *RecordStore[T]) writeCookie(w http.ResponseWriter, id string, lifetime time.Duration) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     s.cookie,
 		Value:    id + "." + s.sign(id),
 		Path:     "/",
 		MaxAge:   int(lifetime.Seconds()),
@@ -610,7 +622,7 @@ func (s *RecordStore[T]) writeCookie(w http.ResponseWriter, id string, lifetime 
 
 func (s *RecordStore[T]) sign(id string) string {
 	m := hmac.New(sha256.New, s.appKey)
-	m.Write([]byte(CookieName))
+	m.Write([]byte(s.cookie))
 	m.Write([]byte{0})
 	m.Write([]byte(id))
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))

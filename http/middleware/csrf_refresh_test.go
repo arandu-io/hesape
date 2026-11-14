@@ -170,7 +170,10 @@ func TestTheScriptAsksWhereTheMiddlewareAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "var CSRF_URL = '" + middleware.CSRFRefreshPath + "';"; !strings.Contains(string(body), want) {
+	if want := "var CSRF_URL = '/_@app@/csrf';"; !strings.Contains(string(body), want) {
 		t.Fatalf("ui.js does not contain %q: the script and the route disagree about the address", want)
+	}
+	if got := (support.Brand{}).Path("csrf"); got != middleware.CSRFRefreshPath {
+		t.Fatalf("the default brand asks at %q and the middleware answers at %q", got, middleware.CSRFRefreshPath)
 	}
 }
