@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.105.1](https://github.com/arandu-io/hesape/compare/v0.105.0...v0.105.1) - 2026-11-14
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.105.0...v0.105.1
+
 ## [v0.105.0](https://github.com/arandu-io/hesape/compare/v0.104.0...v0.105.0) - 2026-11-13
 
 - **validation: `CommonPasswords()`** is an `UncompromisedVerifier` that refuses the passwords everybody tries first, with no network and no setup: `validation.PasswordMin(12).Max(128).Uncompromised(validation.CommonPasswords())`. It reads the SecLists 10k-most-common list (MIT, notice in `validation/THIRD_PARTY.md`) and a few hundred passwords common in Brazil, both embedded in the binary, and it compares the shape of the password and not only the text, because a minimum of twelve characters leaves no list entry that long: another case, a trailing or leading run of digits and symbols (`Password1234`, `Senha@2026!`), leetspeak and accents folded (`p@ssw0rd`), a word or a short unit repeated (`passwordpassword`, `abababababab`), one repeated character, an ascending or descending run (`123456789012`, `abcdefghijkl`) and a walk across the keyboard (`qwertyuiopas`, `1q2w3e4r5t6y`), alone or chained. A passphrase of unrelated words and a random password pass. The threshold is ignored. It is stateless, safe for concurrent use and allocates nothing for a password of up to 128 runes.
