@@ -1,5 +1,7 @@
 github.com/arandu-io/hesape v0.105.2 h1:t5NOKe2CfFTLfICfhfx8ea2GfbMtFYO7gtQlZDnUNBo=
 github.com/arandu-io/hesape v0.105.2/go.mod h1:wwVHND0vi2S1Fynb/47PPzKqzTmfAHNXZUMlbxNI2T4=
+github.com/arandu-io/hesape v0.106.0 h1:ZFAhj6AMwGjg75H+BifzqsKOO/8+KP53f28Sv69w72g=
+github.com/arandu-io/hesape v0.106.0/go.mod h1:wwVHND0vi2S1Fynb/47PPzKqzTmfAHNXZUMlbxNI2T4=
 github.com/fyne-io/oksvg v0.2.0 h1:mxcGU2dx6nwjJsSA9PCYZDuoAcsZ/OuJlvg/Q9Njfo8=
 github.com/fyne-io/oksvg v0.2.0/go.mod h1:dJ9oEkPiWhnTFNCmRgEze+YNprJF7YRbpjgpWS4kzoI=
 github.com/gen2brain/vpx v0.2.1 h1:UD6tibcs/zlaIOKNFXeVyZuHBEaW9GYfxKSxvAN9cc8=
