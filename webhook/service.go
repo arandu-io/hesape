@@ -13,6 +13,7 @@ import (
 
 	"github.com/arandu-io/hesape/auth"
 	"github.com/arandu-io/hesape/database"
+	httpclient "github.com/arandu-io/hesape/http/client"
 	"github.com/arandu-io/hesape/validation"
 )
 
@@ -227,6 +228,19 @@ func (s *EndpointService) validate(in EndpointRequest) (endpointInput, validatio
 	return out, e
 }
 
+// checkDestination refuses an address the module's own transport would refuse
+// to connect to: an internal address, or a name that resolves to one. It is
+// asked after the policy has authorized the call, because it may look a name up,
+// and only when the deliveries use the module's guarded transport.
+func (s *EndpointService) checkDestination(ctx context.Context, e validation.Errors, url string) {
+	if url == "" || !s.sender.guarded || e["url"] != nil {
+		return
+	}
+	if err := CheckDestination(ctx, url, s.sender.names); errors.Is(err, httpclient.ErrInternalAddress) {
+		e.Add("url", "Enter an address on the public internet: localhost and internal network addresses are refused.")
+	}
+}
+
 // checkAddress refuses an http address under a policy that is HTTPSOnly.
 func checkAddress(e validation.Errors, url string, policy Policy) {
 	if url != "" && policy.HTTPSOnly && !strings.HasPrefix(url, "https://") {
@@ -308,6 +322,9 @@ func (s *EndpointService) Create(ctx context.Context, actor auth.Subject, in End
 	if err != nil {
 		return nil, "", err
 	}
+	if s.checkDestination(ctx, errs, valid.url); errs.Any() {
+		return nil, "", errs
+	}
 	record, err := Endpoints(s.db).New()
 	if err != nil {
 		return nil, "", err
@@ -362,6 +379,9 @@ func (s *EndpointService) Update(ctx context.Context, actor auth.Subject, id str
 	g, err := auth.Authorize(ctx, s.policy, actor, EndpointUpdate, Endpoint{})
 	if err != nil {
 		return nil, err
+	}
+	if s.checkDestination(ctx, errs, valid.url); errs.Any() {
+		return nil, errs
 	}
 	record, err := Endpoints(s.db).WhereKey(id).First(ctx, g)
 	if err != nil {

@@ -158,6 +158,15 @@ type Server struct {
 	// to a local server needs.
 	HTTPClient *http.Client
 
+	// Resolver looks up the name of an endpoint's address when the endpoint is
+	// created or updated, to refuse a name that resolves to loopback, private,
+	// link-local, shared or other internal addresses (CheckDestination). Nil is
+	// net.DefaultResolver. The check runs only when HTTPClient is nil: a client
+	// given here owns where a call may connect, so it owns what may be stored.
+	// Every attempt resolves the name again and refuses it again, whatever this
+	// check saw.
+	Resolver HostResolver
+
 	// Events is the list an endpoint may subscribe to. Empty accepts any
 	// event name.
 	//
