@@ -91,6 +91,11 @@ type sender struct {
 	engine     *engine
 	now        func() time.Time
 	retention  time.Duration
+	// guarded says the deliveries go out on the module's own guarded transport,
+	// so an address that transport would refuse is refused when it is stored,
+	// asking names to resolve its host.
+	guarded bool
+	names   HostResolver
 	// bodies, inline and forwarded are the relay's: the disk a large body is
 	// kept on, how large a body stays in the row, and the headers forwarded
 	// beside the default ones.
@@ -105,7 +110,8 @@ func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*send
 		named: map[string]string{}, custom: cfg.Server.HeaderPrefix,
 		policy: cfg.Server.Policy.clone(), now: cfg.Server.Now, retention: cfg.Server.Retention,
 		allowEmpty: cfg.Server.AllowEmptySubscription,
-		bodies:     cfg.Server.Bodies, inline: cfg.Server.RelayInlineBytes, forwarded: map[string]bool{},
+		guarded:    cfg.Server.HTTPClient == nil, names: cfg.Server.Resolver,
+		bodies: cfg.Server.Bodies, inline: cfg.Server.RelayInlineBytes, forwarded: map[string]bool{},
 	}
 	for _, name := range cfg.Server.RelayHeaders {
 		s.forwarded[http.CanonicalHeaderKey(name)] = true
