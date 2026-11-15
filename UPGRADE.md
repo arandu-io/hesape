@@ -29,31 +29,89 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ## v0.107.0 — YPY replaces the hypermedia library
 
-One symbol stops compiling, and every page that carries an attribute, a header
-or an event of the old library stops working until it is converted.
+One symbol stops compiling, and every page that carries an attribute, a header,
+an event or a script of the old library stops working until it is converted.
+The page behaves the way YPY does, with nothing that brings the old behaviour
+back.
 
 - **`Context.IsYPY` replaces the method that carried the old library's name.**
   Same rule (the request carries `YPY-Request`), same `Vary` entry, new name.
   Nothing keeps the old one.
-- **The headers are `YPY-*`.** `Context` reads `YPY-Request`, `YPY-Target` and
-  friends and writes `YPY-Redirect` and `YPY-Refresh` (and `Vary: YPY-Request`).
-  A client or a proxy that matched the old names has to match these.
+- **The headers are `YPY-*`.** `Context` reads `YPY-Request` and `YPY-Target`
+  and writes `YPY-Redirect` and `YPY-Refresh` (and `Vary: YPY-Request`). A
+  client or a proxy that matched the old names has to match these. The request
+  that names what triggered it is `YPY-Source`, and `YPY-Request-Type` says
+  `partial` or `full`.
+- **`YPY-Target` is `tag#id`, not the id.** `Context.Targets(id)` compares the
+  part after the `#` with the id it is given, so `Targets("note-7")` is true for
+  `div#note-7`; given a `tag#id` it compares the whole value, so
+  `Targets("div#note-7")` is true and `Targets("section#note-7")` is not. The id
+  arrives percent-encoded and is decoded first. A value with no `#` names an
+  element with no id and targets nothing. Code that read the header itself and
+  compared it with an id compares the id part now.
 - **The attributes are `ypy-*` and `data-ypy-*`.** `view.ActiveAttribute` refuses
   that family, in any case, where it refused the old one. A map of attributes
   that carried an old-library name is no longer refused, and no longer read by
   anything either: convert it.
-- **The embedded script is `ypy-compat.min.js`.** `view.Asset("ypy-compat.min.js")`
-  replaces the old asset name, and the hash in the address changes with the
-  bytes. Pages that carry a `ypy-config` meta tag must pin the line they were
-  written for, `<meta name="ypy-config" content='{"compat":"v2"}'>`: a page with
-  that tag and no pin is read as written for the native profile, which does not
-  swap a 4xx the way the 2.x line did and does not inherit attributes
-  implicitly.
-- **`ui.js` listens to `ypy:*` events** and the indicator classes are
-  `ypy-request`, `ypy-swapping`, `ypy-settling`, `ypy-added` and `ypy-indicator`.
-  A stylesheet or a script of the application that named the old ones follows.
-- **How to convert an application:** `ypy migrate --write .` from the YPY
-  checkout, then replace the script and read what it lists as not converted.
+- **The embedded scripts are `ypy.min.js` and `ypy-csrf.min.js`.**
+  `view.Asset("ypy.min.js")` and `view.Asset("ypy-csrf.min.js")` replace the old
+  asset name, and the hash in the address changes with the bytes. Both are the
+  files YPY builds (`dist/ypy.min.js`, `dist/ext/ypy-csrf.min.js`), with native
+  behaviour only: there is no compatibility file, no profile and no setting
+  that reproduces the old behaviour. A layout loads `ypy.min.js`, then
+  `ypy-csrf.min.js`, then `ui.js`. The `ypy-config` meta tag names
+  `includeIndicatorCSS` where it named `includeIndicatorStyles`.
+- **The CSRF token is the `ypy-csrf` meta tag.** A layout puts
+  `<meta name="ypy-csrf" content="{{ .CSRFToken }}">` in the head, and the
+  `ypy-csrf` extension sends its content as `X-CSRF-Token` on every same-origin
+  request that is not a GET, whatever element sends it and without an inherited
+  header. Nothing changes on the server: `CSRFProtect` reads the same header, and
+  a hidden `_token` field still covers a form. A response that carries a
+  `YPY-CSRF` header replaces the token in the tag. `ui.js` keeps renewing the
+  page's token as before and writes the new one into the tag and the hidden
+  fields; a request that is due waits for the renewal inside the fetch. A layout
+  that carried the token in a `ypy-headers` attribute on `<body>` moves it to the
+  tag. A request that has no token fires `ypy:csrf:missing` on its element.
+- **What YPY does by itself, and an application reviews with `ypy check`:**
+  morph is the default swap (`ypy-swap="innerHTML"` where the raw replacement
+  was meant); an attribute on a container reaches its descendants only when it
+  is written `ypy-target:inherited="#out"`, so a layout boosts with
+  `<body ypy-boost:inherited="true">`; a `422` is swapped into the form, and
+  other 4xx and 5xx answers follow YPY's error rules; author code in `ypy-on`
+  and `js:` values is off unless `callbacks:"all"` is set; a request times out
+  after 60 seconds; and only same-origin requests are sent.
+- **The events are `ypy:<noun>:<verb>` and carry `{ctx}`.** `ui.js` listens to
+  `ypy:before:request`, `ypy:before:swap`, `ypy:before:settle`,
+  `ypy:after:settle`, `ypy:after:process`,
+  `ypy:after:history:push`, `ypy:before:history:update`,
+  `ypy:before:history:restore`, `ypy:response:error`, `ypy:error` and
+  `ypy:confirm`, whose detail is `{ctx, issueRequest, dropRequest}`: the
+  question is `ctx.confirm` and the element `ctx.sourceElement`. The old names
+  (`afterSettle`, `load`, `beforeSend`, `configRequest`) and `detail.elt`,
+  `detail.xhr` and `detail.target` do not exist. A script of the application that
+  listened to them follows. `ypy migrate` only changes the prefix, so after it
+  search for `ypy:[a-z]+[A-Z]` and for `ypy:load`: neither is an event YPY fires.
+  `ypy:after:swap` fires after the swap has settled, so the markup is in place
+  at `ypy:before:settle`. A behaviour is destroyed when its element leaves the
+  document, and not by `ypy:before:cleanup`, which YPY fires only for the
+  elements it powers.
+- **`ypy-boost` and `ypy-confirm` go through `ui.js` as before.** A form the
+  browser sends itself is held while its token is due, unless the form is
+  boosted, its own `ypy-boost` is `true`, or an ancestor says
+  `ypy-boost:inherited="true"`.
+- **The indicator classes are `ypy-request`, `ypy-swapping`, `ypy-settling`,
+  `ypy-added` and `ypy-indicator`.** A stylesheet or a script of the application
+  that named the old ones follows.
+- **`arandutest/browser` waits for YPY by its own events.** A request is in
+  flight from `ypy:before:request` to `ypy:finally:request`, which YPY fires for
+  every request it admitted.
+- **YPY does not send `X-Requested-With`.** `Request.Ajax` is false for a YPY
+  request, and a YPY request is recognised by `YPY-Request`, which is what
+  `IsYPY` and `WantsJSON` read.
+- **How to convert an application:** `ypy check .` lists what breaks and what
+  behaves differently, `ypy migrate --write .` converts the names, the script
+  files are replaced by the two above, and the list is worked through page by
+  page. `ypy migrate .` must then report that no file would change.
 
 ## v0.104.0 — a webhook relays a request as it arrived
 
@@ -100,12 +158,13 @@ worked around the first can take the workaround out.
   the old one's life, when the tab comes back to the front, when a page returns
   from the back/forward cache, and right before a form or a YPY request goes
   out with a token that is due. The new token is written into every
-  hidden `_token` field and every `ypy-headers` that names `X-CSRF-Token`, and
-  YPY requests to this origin carry the freshest one in the header. The ttl is
+  hidden `_token` field and every header attribute that names `X-CSRF-Token` (v0.107.0
+  moves the token to the `ypy-csrf` meta tag), and YPY requests to this origin
+  carry the freshest one in the header. The ttl is
   not longer and the check is not weaker: a request that arrives with a lapsed
   token is still refused. A layout that loads `ui.js` behind `CSRFProtect`
   needs nothing else. One that overwrites the header from a form's own field in
-  a `ypy:configRequest` listener keeps working, because the field is renewed
+  a request-configuration listener keeps working, because the field is renewed
   too.
 - **A guest's cookie lives from the latest page and not the first.**
   `CSRF.Binding`, given a writer, sets the guest cookie again when the browser

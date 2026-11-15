@@ -60,7 +60,7 @@ package stays on disk so an import that goes looking for the concept finds the
 reason instead of a path that resolves to nothing.
 
 **Assets are embedded, not fetched** — one `go:embed` directive
-(`view/assets.go:21`) bundles YPY 0.1.0-dev, Tailwind CSS 4.3.3, Basecoat 1.0.2
+(`view/assets.go:24`) bundles YPY 0.1.0-dev, Tailwind CSS 4.3.3, Basecoat 1.0.2
 and Arandu's own `theme.js` and `ui.js`, served from the application's own
 origin under `/_arandu/assets/`. Zero CDN: the Content-Security-Policy is
 `script-src 'self'`, and a test scans the embedded assets for `cdn`, `unpkg`,
