@@ -33,7 +33,7 @@ func TestTheFrameworksOwnRoutesDoNotSpendTheApplicationsBudget(t *testing.T) {
 
 	for _, path := range []string{
 		internalPrefix + "health",
-		reloadPath,
+		ReloadPath,
 		log.ConsolePath,
 	} {
 		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))

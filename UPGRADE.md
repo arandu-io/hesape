@@ -113,6 +113,12 @@ back.
   scripts and for `connect-src` (the built-in 403 page answers with
   `default-src 'none'`) is no longer given the tag, which the browser refused
   and the test kit reported as a violation; the policy is not changed.
+- **`foundation` exports the development live-reload, so a kernel above it
+  mounts it instead of copying it.** `foundation.DevReload(isDev, tag)` returns
+  the middleware, or nil outside development, and applies the rule above;
+  `foundation.HandleReload` and `foundation.ReloadPath` are the route that tells
+  the page which process is answering. The tag is an argument now: nothing reads
+  it from a package variable.
 - **How to convert an application:** `ypy check .` lists what breaks and what
   behaves differently, `ypy migrate --write .` converts the names, the script
   files are replaced by the two above, and the list is worked through page by

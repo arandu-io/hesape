@@ -81,9 +81,11 @@ import (
 // framework does not have. A full reload against a Go server that restarts in
 // under a second is a fair trade, and it is one behaviour rather than two.
 
-// reloadPath is where the browser asks. Under _arandu with health and the
-// console, so one prefix covers everything the framework mounts.
-const reloadPath = internalPrefix + "reload"
+// ReloadPath is where the browser asks which process is answering. Under
+// _arandu with health and the console, so one prefix covers everything the
+// framework mounts. The route that serves it is [HandleReload], and
+// [DevReload] never injects into a response to this path.
+const ReloadPath = internalPrefix + "reload"
 
 // bootID identifies this process to a page that was loaded by another one.
 //
@@ -104,11 +106,12 @@ func newBootID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// handleReload says which process is answering, and returns.
+// HandleReload says which process is answering, and returns. It is the handler
+// for [ReloadPath], and the answer is the same for the life of the process.
 //
 // It does NOT hold the connection. See the header of this file for why that
 // mattered enough to be rewritten.
-func handleReload(w http.ResponseWriter, r *http.Request) {
+func HandleReload(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")
 	// Never cached, by anything. The whole answer is which process this is, and
@@ -132,20 +135,15 @@ type ReloadTagger interface {
 	ReloadTag(stream string) string
 }
 
-// reloadTag is the markup injected into a document, filled at Boot from the
-// module that brought it. Empty means nothing is injected, which is every
-// arrangement outside development.
-var reloadTag []byte
-
-// liveReload injects the script into any full HTML document that leaves the
-// application.
-func liveReload(next http.Handler) http.Handler {
+// liveReload injects reloadTag into any full HTML document that leaves the
+// application. An empty tag injects nothing.
+func liveReload(reloadTag []byte, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == reloadPath {
+		if r.URL.Path == ReloadPath {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &htmlRecorder{ResponseWriter: w}
+		rec := &htmlRecorder{ResponseWriter: w, reloadTag: reloadTag}
 		next.ServeHTTP(rec, r)
 		rec.finish()
 	})
@@ -162,11 +160,12 @@ type htmlRecorder struct {
 	// run: pre-seeding this with 200 meant WriteHeader was never reached, so
 	// nothing was ever classified and an SVG containing a <body> element was
 	// handed the script.
-	status   int
-	buf      bytes.Buffer
-	passing  bool // decided: not a document, writing straight through
-	wrote    bool // the header has gone out
-	hijacked bool // the handler took the connection; nothing is sent on it
+	status    int
+	buf       bytes.Buffer
+	reloadTag []byte
+	passing   bool // decided: not a document, writing straight through
+	wrote     bool // the header has gone out
+	hijacked  bool // the handler took the connection; nothing is sent on it
 }
 
 func (h *htmlRecorder) WriteHeader(status int) {
@@ -230,10 +229,10 @@ func (h *htmlRecorder) finish() {
 	body := h.buf.Bytes()
 	// The close tag is the test for a whole document. A YPY fragment has no
 	// </body>, and injecting into one would add a listener per swap.
-	if at := bytes.LastIndex(body, []byte("</body>")); at >= 0 && len(reloadTag) > 0 && policyAllowsReload(h.Header()) {
-		out := make([]byte, 0, len(body)+len(reloadTag))
+	if at := bytes.LastIndex(body, []byte("</body>")); at >= 0 && len(h.reloadTag) > 0 && policyAllowsReload(h.Header()) {
+		out := make([]byte, 0, len(body)+len(h.reloadTag))
 		out = append(out, body[:at]...)
-		out = append(out, reloadTag...)
+		out = append(out, h.reloadTag...)
 		body = append(out, body[at:]...)
 	}
 	h.send(body)
@@ -309,10 +308,20 @@ func (h *htmlRecorder) send(body []byte) {
 	_, _ = h.ResponseWriter.Write(body)
 }
 
-// devReload is the middleware, or nothing outside development.
-func devReload(isDev bool) []pipeline.Middleware[http.Handler] {
+// DevReload is the live-reload middleware, or nothing outside development.
+//
+// In development it returns one middleware that adds reloadTag before the
+// closing body tag of every complete HTML document the application answers,
+// unless the response's Content-Security-Policy would make the browser refuse
+// the script or the request it makes. The tag is what a [ReloadTagger] module
+// returned for [ReloadPath]; an empty tag injects nothing. Outside development
+// it returns nil, so a caller can append the result to its middleware without
+// testing the mode itself.
+func DevReload(isDev bool, reloadTag []byte) []pipeline.Middleware[http.Handler] {
 	if !isDev {
 		return nil
 	}
-	return []pipeline.Middleware[http.Handler]{liveReload}
+	return []pipeline.Middleware[http.Handler]{func(next http.Handler) http.Handler {
+		return liveReload(reloadTag, next)
+	}}
 }

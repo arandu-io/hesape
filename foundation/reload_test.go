@@ -9,14 +9,20 @@ import (
 	"time"
 )
 
+// testTag is what a ReloadTagger module would return. Fixed here so these tests
+// are about the injection and not about the asset pipeline.
+const testTag = `<script src="/_arandu/assets/abc/arandu-reload.js" defer></script>`
+
+// reloaded wraps next the way an application mounts it in development: through
+// DevReload, the one way the middleware is reached.
+func reloaded(next http.Handler) http.Handler {
+	return DevReload(true, []byte(testTag))[0](next)
+}
+
 func serve(t *testing.T, handler http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
-	// What Boot fills in from the module that brought it. Fixed here so these
-	// tests are about the injection and not about the asset pipeline.
-	reloadTag = []byte(`<script src="/_arandu/assets/abc/arandu-reload.js" defer></script>`)
-	t.Cleanup(func() { reloadTag = nil })
 	rec := httptest.NewRecorder()
-	liveReload(handler).ServeHTTP(rec, req)
+	reloaded(handler).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -194,7 +200,7 @@ func TestAStreamIsNotHeld(t *testing.T) {
 
 	go func() {
 		defer close(done)
-		liveReload(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reloaded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte("<html><body>first"))
 			w.(http.Flusher).Flush()
@@ -230,10 +236,10 @@ func TestEveryProcessHasItsOwnIdentity(t *testing.T) {
 
 // Nothing is mounted or injected outside development.
 func TestProductionHasNoneOfThis(t *testing.T) {
-	if devReload(false) != nil {
+	if DevReload(false, nil) != nil {
 		t.Fatal("the injection middleware is in the production pipeline")
 	}
-	if len(devReload(true)) != 1 {
+	if len(DevReload(true, nil)) != 1 {
 		t.Fatal("development did not get the middleware")
 	}
 }
@@ -254,7 +260,7 @@ func TestAskingWhichProcessAnsweredDoesNotHoldTheConnection(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleReload(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, reloadPath, nil))
+		HandleReload(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, ReloadPath, nil))
 	}()
 
 	select {
@@ -269,7 +275,7 @@ func TestAskingWhichProcessAnsweredDoesNotHoldTheConnection(t *testing.T) {
 // never learn that the code changed.
 func TestTheAnswerIsThisProcessAndIsNeverCached(t *testing.T) {
 	rec := httptest.NewRecorder()
-	handleReload(rec, httptest.NewRequest(http.MethodGet, reloadPath, nil))
+	HandleReload(rec, httptest.NewRequest(http.MethodGet, ReloadPath, nil))
 
 	if got := strings.TrimSpace(rec.Body.String()); got != bootID {
 		t.Fatalf("the answer is %q, want the boot id %q", got, bootID)

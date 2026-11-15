@@ -23,8 +23,11 @@
 // reload -- answers to the framework rather than to the application, and
 // exceptInternal is the one place that boundary is enforced. [Observe] installs
 // the request id, the request logger and, in development or under an authorized
-// tracing header, the Collector behind that console. The live reload in
-// reload.go follows a restart in development and costs nothing anywhere else.
+// tracing header, the Collector behind that console. The live reload follows a
+// restart in development and costs nothing anywhere else: [DevReload] is its
+// middleware, and [HandleReload], at [ReloadPath], is what the page asks. They
+// are exported so that the layer that boots the application mounts this code
+// rather than keeping a copy of it.
 //
 // The boot sequence, the view renderer and the console command belong to the
 // layer above and are not declared here. This package keeps only the vocabulary

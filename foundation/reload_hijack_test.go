@@ -24,9 +24,6 @@ import (
 // Unwrap the takeover did not even get that far: the controller found nothing
 // to follow and the handler was refused.
 func TestAHijackedConnectionIsNotAnsweredAgainOnTheWayOut(t *testing.T) {
-	reloadTag = []byte(`<script></script>`)
-	t.Cleanup(func() { reloadTag = nil })
-
 	var (
 		mu     sync.Mutex
 		errlog bytes.Buffer
@@ -34,7 +31,7 @@ func TestAHijackedConnectionIsNotAnsweredAgainOnTheWayOut(t *testing.T) {
 	)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(done)
-		liveReload(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reloaded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, brw, err := http.NewResponseController(w).Hijack()
 			if err != nil {
 				t.Errorf("hijack through the recorder: %v", err)
@@ -79,7 +76,7 @@ func TestAHijackedConnectionIsNotAnsweredAgainOnTheWayOut(t *testing.T) {
 // controller, and in development that controller meets this recorder first.
 func TestTheWriteDeadlineIsReachableThroughTheRecorder(t *testing.T) {
 	errc := make(chan error, 1)
-	srv := httptest.NewServer(liveReload(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(reloaded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		errc <- http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: ping\n\n")

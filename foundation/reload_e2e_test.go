@@ -24,11 +24,9 @@ var reloadDrivers = browser.Registry{"cdp": cdp.Launch}
 // kit would fail the step for a violation the page did nothing to earn.
 func reloadServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	t.Cleanup(foundation.SetReloadTagForTest(view.ReloadTag("/_arandu/reload")))
-
 	mux := http.NewServeMux()
 	mux.HandleFunc(view.AssetPath, view.Handler)
-	mux.HandleFunc("GET /_arandu/reload", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+foundation.ReloadPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, "one-process")
 	})
@@ -40,7 +38,7 @@ func reloadServer(t *testing.T) *httptest.Server {
 		exception.WriteStatusPage(w, r, http.StatusForbidden, "This note belongs to somebody else.")
 	})
 	handler := middleware.SecurityHeaders(true)(mux)
-	server := httptest.NewServer(foundation.LiveReloadForTest(handler))
+	server := httptest.NewServer(foundation.DevReload(true, []byte(view.ReloadTag(foundation.ReloadPath)))[0](handler))
 	t.Cleanup(server.Close)
 	return server
 }
