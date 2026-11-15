@@ -44,5 +44,5 @@
 // calls from the document either, because the data a call needs -- a user that
 // exists, a tenant the session belongs to -- is the test's to arrange.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 package openapi

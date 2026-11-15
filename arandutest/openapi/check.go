@@ -21,14 +21,14 @@ import (
 // Target is where a call is sent: an application's handler, in this process,
 // or a running server.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Target interface {
 	do(r *http.Request) (*http.Response, error)
 }
 
 // Handler sends every call through h, in this process.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Handler(h http.Handler) Target { return handlerTarget{h: h} }
 
 // URL sends every call to the server at base, such as "http://127.0.0.1:8080".
@@ -41,7 +41,7 @@ func Handler(h http.Handler) Target { return handlerTarget{h: h} }
 // test passed, the application under test, which a test starts on loopback;
 // there is no address taken from a request or a user to guard against.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func URL(base string, client *http.Client) Target {
 	if client == nil {
 		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -75,7 +75,7 @@ func (t urlTarget) do(r *http.Request) (*http.Response, error) {
 
 // Call is one request to a documented operation.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Call struct {
 	// Operation names the operation, by operationId or as "GET /users/{id}".
 	Operation string
@@ -101,7 +101,7 @@ type Call struct {
 
 // Result is what came back from a call.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Result struct {
 	Status int
 	Header http.Header
@@ -110,7 +110,7 @@ type Result struct {
 
 // JSON decodes the body into v, failing the test when it cannot.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r Result) JSON(t testing.TB, v any) {
 	t.Helper()
 	if err := json.Unmarshal(r.Body, v); err != nil {
@@ -122,7 +122,7 @@ func (r Result) JSON(t testing.TB, v any) {
 // with every problem it found. The answer is returned for the test to assert
 // what only it knows about.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Document) Check(t testing.TB, target Target, call Call) Result {
 	t.Helper()
 	op, err := d.find(call.Operation)
@@ -164,7 +164,7 @@ func (d *Document) Check(t testing.TB, target Target, call Call) Result {
 // Mismatch is an answer that does not match the document: the operation, the
 // status it answered, and every problem found with it.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Mismatch struct {
 	Operation string
 	Status    int
@@ -173,7 +173,7 @@ type Mismatch struct {
 
 // Error lists every problem on its own line.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (m *Mismatch) Error() string {
 	return fmt.Sprintf("openapi: %s answered %d, which does not match the document:\n  - %s",
 		m.Operation, m.Status, strings.Join(m.Problems, "\n  - "))
@@ -183,7 +183,7 @@ func (m *Mismatch) Error() string {
 // test to fail: it returns a *Mismatch naming every problem, or nil. Check is
 // Verify with the request sent and the test failed for it.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Document) Verify(operation string, status int, header http.Header, body []byte) error {
 	op, err := d.find(operation)
 	if err != nil {

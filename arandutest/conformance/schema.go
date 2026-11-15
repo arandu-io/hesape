@@ -19,7 +19,7 @@ import (
 // SchemaFixture is what Schema is handed: the application's users migrations
 // and a way to open an empty database.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SchemaFixture struct {
 	// Users are the application's migrations of the users table, oldest
 	// first: the one that creates it and the ones that add to it. The second
@@ -99,7 +99,7 @@ var schemaRuns atomic.Int64
 //     migrations alone, runs nothing on a replay, and rolls back that batch
 //     newest first, leaving the users table.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Schema(t *testing.T, f SchemaFixture) {
 	t.Helper()
 	if len(f.Users) == 0 || f.Open == nil {

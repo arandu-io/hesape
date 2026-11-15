@@ -27,7 +27,7 @@ import (
 // hands over implements it, and so is accepted wherever the screens take
 // their users.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SessionAccounts interface {
 	PublicNames(ctx context.Context, reader auth.Subject, ids []string) (map[string]string, error)
 	VerifyCredentials(ctx context.Context, tenant, email, password, client string) (account.Account, error)
@@ -42,7 +42,7 @@ type SessionAccounts interface {
 // SessionFactors is what the sign-in screens ask of the second factor, the
 // method set of *account.Factors they call.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SessionFactors interface {
 	Required(ctx context.Context, tenant, userID string) (bool, error)
 	Begin(ctx context.Context, actor auth.Subject, issuer string) (twofactor.Provisioning, error)
@@ -58,7 +58,7 @@ type SessionFactors interface {
 // whose writes it counts, with the subject resolver installed, the
 // application key and the tenant the account belongs to.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SessionParts struct {
 	Users    SessionAccounts
 	Factors  SessionFactors
@@ -70,7 +70,7 @@ type SessionParts struct {
 // SessionPaths are the addresses and the cookie of the sign-in screens. A
 // zero field is the published screens' own.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SessionPaths struct {
 	Login         string // "/auth/login"
 	Challenge     string // "/auth/two-factor/challenge"
@@ -81,7 +81,7 @@ type SessionPaths struct {
 
 // SessionFixture is what SessionMatrix is handed.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type SessionFixture struct {
 	// Account builds the application's account that signs in, holding the
 	// given password hash: the user model, with an id, a tenant, an address
@@ -118,7 +118,7 @@ type SessionFixture struct {
 // it is stored, through the application's own subject: without one the store
 // refuses a subject with roles, and no sign-in would write a session.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func SessionMatrix(t *testing.T, f SessionFixture) {
 	t.Helper()
 	if f.Account == nil || f.Handler == nil {

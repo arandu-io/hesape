@@ -42,7 +42,7 @@ import (
 // The statements are printed on failure. "ran 21, want 2" without them is a
 // number, and the answer to which twenty-one is in the list.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func AssertQueryCount(t *testing.T, connection *database.Connection, want int, run func()) {
 	t.Helper()
 

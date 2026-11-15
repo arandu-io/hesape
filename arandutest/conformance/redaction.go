@@ -11,13 +11,13 @@ import (
 
 // RedactionMarker is what a redacted value is written as.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 const RedactionMarker = "[redacted]"
 
 // Redacted is one value Redaction checks: a request an authentication screen
 // binds, what it must never show, and what it must still show.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Redacted struct {
 	// Name names the case in the test output.
 	Name string
@@ -45,7 +45,7 @@ type Redacted struct {
 // carries a secret into either rendering fails, and so does one redacted so
 // hard the line no longer says what was sent.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Redaction(t *testing.T, cases ...Redacted) {
 	t.Helper()
 	if len(cases) == 0 {

@@ -18,7 +18,7 @@
 // that records the failure instead of failing the suite, and then reads the
 // trace the failure wrote.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 package conformance
 
 import (
@@ -43,7 +43,7 @@ import (
 // Run runs the whole suite against drivers launched by factory, with the
 // options the environment sets.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Run(t *testing.T, factory browser.Factory) {
 	t.Helper()
 	opts, err := browser.OptionsFromEnv()

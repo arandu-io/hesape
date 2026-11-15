@@ -20,7 +20,7 @@
 // The pipe is a pair of inherited descriptors, which Windows does not offer to
 // a child process the same way; there Launch returns an error.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 package cdp
 
 import (
@@ -59,7 +59,7 @@ var candidates = []string{
 // the standard locations that exists. With none it returns an error wrapping
 // browser.ErrNoBrowser that names every place it looked.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Find() (string, error) {
 	return find(os.Getenv("CHROME_PATH"), candidates)
 }
@@ -83,7 +83,7 @@ func find(explicit string, places []string) (string, error) {
 
 // Driver is one Chrome process with one page, driven over its pipe.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Driver struct {
 	conn    *conn
 	cmd     *exec.Cmd
@@ -109,7 +109,7 @@ var _ browser.Driver = (*Driver)(nil)
 // Launch starts a browser and attaches to its page. ctx bounds the start only;
 // the browser runs until Close. It matches browser.Factory.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Launch(ctx context.Context, opts browser.Options) (browser.Driver, error) {
 	switch strings.ToLower(opts.Browser) {
 	case "", "chromium", "chrome":
@@ -300,14 +300,14 @@ func (d *Driver) call(ctx context.Context, method string, params, result any) er
 
 // Info names the driver and the browser's version.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Info() browser.Info {
 	return browser.Info{Driver: "cdp", Browser: "chromium", Version: d.version}
 }
 
 // Listen hands every event from now on to fn.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Listen(fn func(browser.Event)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -530,7 +530,7 @@ func (d *Driver) slow(ctx context.Context) error {
 // Navigate loads url and waits for the main frame's load event of that
 // navigation.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Navigate(ctx context.Context, url string) error {
 	if err := d.slow(ctx); err != nil {
 		return err
@@ -582,7 +582,7 @@ var documentGone = []string{
 
 // Evaluate runs expression in the page and decodes its value into result.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Evaluate(ctx context.Context, expression string, result any) error {
 	var r struct {
 		Result struct {
@@ -626,14 +626,14 @@ func (d *Driver) Evaluate(ctx context.Context, expression string, result any) er
 
 // AddInitScript runs source in every document from now on.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) AddInitScript(ctx context.Context, source string) error {
 	return d.call(ctx, "Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": source}, nil)
 }
 
 // Click moves the mouse to x, y, presses the left button and releases it.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Click(ctx context.Context, x, y float64) error {
 	if err := d.slow(ctx); err != nil {
 		return err
@@ -652,7 +652,7 @@ func (d *Driver) Click(ctx context.Context, x, y float64) error {
 
 // InsertText types text into the focused element.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) InsertText(ctx context.Context, text string) error {
 	if err := d.slow(ctx); err != nil {
 		return err
@@ -687,7 +687,7 @@ var modifiers = map[string]int{"Alt": 1, "Control": 2, "Ctrl": 2, "Meta": 4, "Sh
 
 // Press presses and releases a key, with any modifiers named before it.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Press(ctx context.Context, name string) error {
 	if err := d.slow(ctx); err != nil {
 		return err
@@ -729,7 +729,7 @@ func (d *Driver) Press(ctx context.Context, name string) error {
 
 // SetViewport resizes the page.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) SetViewport(ctx context.Context, v browser.Viewport) error {
 	scale := v.Scale
 	if scale == 0 {
@@ -742,7 +742,7 @@ func (d *Driver) SetViewport(ctx context.Context, v browser.Viewport) error {
 
 // EmulateMedia sets the media type and the preferences media queries read.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) EmulateMedia(ctx context.Context, m browser.Media) error {
 	features := []map[string]string{}
 	if m.ColorScheme != "" {
@@ -756,7 +756,7 @@ func (d *Driver) EmulateMedia(ctx context.Context, m browser.Media) error {
 
 // Screenshot captures the viewport as PNG.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Screenshot(ctx context.Context) ([]byte, error) {
 	var shot struct {
 		Data string `json:"data"`
@@ -773,7 +773,7 @@ func (d *Driver) Screenshot(ctx context.Context) ([]byte, error) {
 
 // SetCookies stores cookies as if url had set them.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) SetCookies(ctx context.Context, url string, cookies []*http.Cookie) error {
 	list := make([]map[string]any, 0, len(cookies))
 	for _, c := range cookies {
@@ -802,7 +802,7 @@ func (d *Driver) SetCookies(ctx context.Context, url string, cookies []*http.Coo
 
 // Cookies returns the cookies the page would send to url.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Cookies(ctx context.Context, url string) ([]*http.Cookie, error) {
 	var r struct {
 		Cookies []struct {
@@ -841,7 +841,7 @@ func (d *Driver) Cookies(ctx context.Context, url string) ([]*http.Cookie, error
 // Close asks the browser to quit, kills it if it does not, and removes its
 // profile directory.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (d *Driver) Close() error {
 	d.closeOnce.Do(func() {
 		if d.conn != nil {

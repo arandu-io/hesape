@@ -22,7 +22,7 @@ import (
 // the database the test owns. The boot function, the migration and the
 // seeders are handed it, and nothing in it is shared with another test.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Env struct {
 	// URL is the address of the server, http://127.0.0.1:<port>, with no
 	// trailing slash. It is what the application is told its own address is.
@@ -44,7 +44,7 @@ type Env struct {
 // Application is what a boot function hands back: the application composed
 // and booted over the test's database.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Application struct {
 	// Handler answers every request, exactly as the binary serves it.
 	Handler http.Handler
@@ -67,12 +67,12 @@ type Application struct {
 // application's own composition -- the function its bootstrap/app.go is
 // built from -- called with what Serve made.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Boot func(ctx context.Context, env Env) (Application, error)
 
 // Option changes what Serve does.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Option func(*serveOptions)
 
 type serveOptions struct {
@@ -95,7 +95,7 @@ type serveOptions struct {
 //
 // On SQLite it runs for every test, on that test's file.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Migrate(fn func(ctx context.Context, env Env) error) Option {
 	return func(o *serveOptions) { o.migrate = fn }
 }
@@ -105,7 +105,7 @@ func Migrate(fn func(ctx context.Context, env Env) error) Option {
 // request. Several run in the order they were given. A seeder may reach the
 // application's services through what the boot function kept.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Seed(fn func(ctx context.Context, env Env) error) Option {
 	return func(o *serveOptions) { o.seeds = append(o.seeds, fn) }
 }
@@ -115,13 +115,13 @@ func Seed(fn func(ctx context.Context, env Env) error) Option {
 // asserts nothing an engine decides -- the production engine is what a
 // feature and a journey are proved on.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func SQLite() Option { return func(o *serveOptions) { o.sqlite = true } }
 
 // Database names the server the test's database is made on, in place of the
 // one the environment names.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Database(url string) Option { return func(o *serveOptions) { o.database = url } }
 
 // Setenv sets an environment variable for the test, with t.Setenv, before the
@@ -132,7 +132,7 @@ func Database(url string) Option { return func(o *serveOptions) { o.database = u
 // Configuration an application can take as an argument is better handed to
 // it from [Env].
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Setenv(key, value string) Option {
 	return func(o *serveOptions) { o.setenv = append(o.setenv, [2]string{key, value}) }
 }
@@ -143,7 +143,7 @@ func Setenv(key, value string) Option {
 // database and the server's address. It carries what [Setenv] carries -- the
 // test cannot run in parallel.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func ExportEnv() Option { return func(o *serveOptions) { o.exportEnv = true } }
 
 // ReadyRoute names the route Serve asks, over the socket, until it answers
@@ -152,7 +152,7 @@ func ExportEnv() Option { return func(o *serveOptions) { o.exportEnv = true } }
 // nothing: the socket is listening before Serve returns, so a request waits
 // for the server rather than failing.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func ReadyRoute(name string) Option { return func(o *serveOptions) { o.readyRoute = name } }
 
 // readyName is the route an application composed by the framework answers its
@@ -169,7 +169,7 @@ const (
 // Server is an application Serve booted and is serving on a socket. It stops
 // when the test ends.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Server struct {
 	// URL is the address it listens on, http://127.0.0.1:<port>, with no
 	// trailing slash.
@@ -220,7 +220,7 @@ type Server struct {
 // t.Parallel do not see each other's rows. [Setenv] and [ExportEnv] are the
 // exceptions: the environment is the process's.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Serve(t *testing.T, boot Boot, opts ...Option) *Server {
 	t.Helper()
 
@@ -368,7 +368,7 @@ func (s *Server) waitReady(name string) {
 // the socket, through the whole stack the binary serves, and the cookies the
 // server sets are kept as Client keeps them.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (s *Server) Client() *Client {
 	return &Client{t: s.t, base: s.URL, remote: s.remote}
 }
@@ -377,7 +377,7 @@ func (s *Server) Client() *Client {
 // parameters in order, and fails the test when there is no such route or the
 // parameters do not fit it. Prefix it with URL for an absolute address.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (s *Server) Route(name string, params ...string) string {
 	s.t.Helper()
 	path, err := s.routes.Route(name, params...)
@@ -390,7 +390,7 @@ func (s *Server) Route(name string, params ...string) string {
 // DB is the test's database, for arranging what a request will find and for
 // the database assertions.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (s *Server) DB() *database.DB { return s.env.DB }
 
 // migrationName identifies a migration function for the template it builds.

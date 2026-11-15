@@ -75,7 +75,7 @@ var copiedActions = map[string]bool{
 //
 // testdata directories and .kyse.go view sources are not read.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Boundaries(t *testing.T, root string) {
 	t.Helper()
 	root = applicationRoot(t, root)

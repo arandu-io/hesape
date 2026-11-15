@@ -486,9 +486,12 @@ func TestStoreContract(t *testing.T) {
 ```
 
 **`hesape/arandutest` is deprecated: moved to `github.com/arandu-io/framework/test`;
-removed in the next minor.** Every package under it carries the same notice --
+removed in v1.0.0.** Every package under it carries the same notice --
 `arandutest`, `browser`, `browser/cdp`, `browser/conformance`, `trace`,
-`openapi`, `conformance` and `servertrace` -- and keeps working until then.
+`openapi`, `conformance` and `servertrace` -- and keeps working until then. The
+framework's own `arandutest`, which forwards to the same place, is removed in
+the framework's v1.0.0; the two promises are about two modules and name the same
+release line. (This entry first said "the next minor", which no release kept.)
 Change the imports from `github.com/arandu-io/hesape/arandutest/...` to the
 same path under `github.com/arandu-io/framework/test/...`.
 
