@@ -1,13 +1,14 @@
 // Package workbench generates a Go module that an Arandu application can import.
 //
-// It is the generator behind `aru make:package`, with the console command that
-// drives it.
+// It is the generator behind the `make:package` console command, and carries
+// the command that drives it. The `aru` binary does not register it: a program
+// that wants the command adds it to its own registry.
 //
 //	creator := workbench.NewPackageCreator()
 //	config := workbench.Config{Path: "./workbench", Name: "Ada Lovelace", Email: "ada@example.com"}
 //	registry.Add(workbench.NewWorkbenchMakeCommand(creator, config, nil).Command())
 //
-//	$ aru make:package acme/invoice-manager
+//	$ mytool make:package acme/invoice-manager
 //	Package workbench created: workbench/acme/invoice-manager
 //	  module ......................... github.com/acme/invoice-manager
 //

@@ -124,6 +124,34 @@ back.
   files are replaced by the two above, and the list is worked through page by
   page. `ypy migrate .` must then report that no file would change.
 
+## v0.106.0 — the cookies, the storage keys and the asset path carry the application's name
+
+Five constructors take a new trailing argument. A call that passes nothing for it
+compiles and behaves as before; a function value assigned from one of them has a
+new type.
+
+- **`session.NewCSRF`, `session.NewFlash`, `session.NewRecordStore`,
+  `http.NewIntended` and `http.NewSessionStore` take a final
+  `opts ...session.CookieOption`.** `session.WithCookieNames` renames the
+  cookies, and `session.CookieNamesFor(brand)` spells them from a
+  `support.Brand`. Without an option the names stay `arandu_session`,
+  `arandu_csrf_guest`, `arandu_flash` and `arandu_intended`.
+
+What changes without a compiler error:
+
+- **`CSRFProtect` no longer issues a token on every GET.** It puts an issuer on
+  the request context, and the token, with the guest cookie it is bound to, is
+  issued the first time a view asks for it. A response that draws no form
+  carries no cookie. The response that does ask is marked
+  `Cache-Control: no-store, private` unless the handler set a policy first.
+  Read the token before the first byte of the response is written: a cookie set
+  afterwards is lost.
+- **An application that passes a brand changes every name once.** Sessions end
+  and visitors sign in again, and the saved theme and sidebar are forgotten,
+  because the cookies, the `localStorage` keys and the asset prefix change.
+  `/_arandu/assets/` keeps answering, uncached, so a page or an e-mail written
+  before the change still gets its file.
+
 ## v0.104.0 — a webhook relays a request as it arrived
 
 Nothing stops compiling. Two things need a line from an application that

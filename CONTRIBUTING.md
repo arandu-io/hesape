@@ -20,10 +20,15 @@ before their first patch.
 ## Before you open a pull request
 
 ```
+export GOWORK=off
 gofmt -l $(find . -name '*.go' -not -path '*/testdata/*' -not -name '*.kyse.go')   # no output
+go build ./...
 go vet ./...
 go test -race ./...
 ```
+
+`GOWORK=off` makes the run build what a consumer downloads, rather than what a
+local workspace redirects.
 
 That covers the root module and nothing else. This repository is more than one
 Go module -- `find . -name go.mod` lists them, the root included -- and `./...`
@@ -35,7 +40,7 @@ last part of the tree that should go unchecked. Run the pair in each:
 for mod in $(find . -name go.mod); do
   dir=${mod%/go.mod}
   echo "== $dir"
-  (cd "$dir" && go vet ./... && go test -race ./...) || break
+  (cd "$dir" && GOWORK=off go vet ./... && GOWORK=off go test -race ./...) || break
 done
 ```
 
