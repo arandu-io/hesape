@@ -54,17 +54,17 @@ func TestARejectedFormGoesBackToItselfWithTheMessagesAndWhatWasTyped(t *testing.
 	}
 }
 
-func TestARejectedFormUnderHTMXGetsHXRedirect(t *testing.T) {
+func TestARejectedFormUnderYPYGetsYPYRedirect(t *testing.T) {
 	req := submitted("http://example.test/posts", "http://example.test/posts/new")
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 
 	rec := httptest.NewRecorder()
 	hhttp.Reject(rec, req, flash(), failed())
 
-	// htmx does not swap a 4xx, so a body would be fetched and thrown away --
+	// YPY does not swap a 4xx, so a body would be fetched and thrown away --
 	// which is the failure this whole path exists to remove.
-	if to := rec.Header().Get("HX-Redirect"); to != "/posts/new" {
-		t.Errorf("HX-Redirect = %q, want %q", to, "/posts/new")
+	if to := rec.Header().Get("YPY-Redirect"); to != "/posts/new" {
+		t.Errorf("YPY-Redirect = %q, want %q", to, "/posts/new")
 	}
 	if rec.Code != stdhttp.StatusNoContent {
 		t.Errorf("answered %d, want %d", rec.Code, stdhttp.StatusNoContent)

@@ -153,12 +153,12 @@ func TestTheProblemDetailCarriesNothingTheCallerMayNotSee(t *testing.T) {
 	}
 }
 
-// htmx sends X-Requested-With and swaps HTML. Answering it with JSON would put
+// YPY sends X-Requested-With and swaps HTML. Answering it with JSON would put
 // a JSON document inside a div.
-func TestHTMXGetsAPageAndNotJSON(t *testing.T) {
+func TestYPYGetsAPageAndNotJSON(t *testing.T) {
 	h := exception.NewHandler(exception.Config{})
 	r := httptest.NewRequest(http.MethodGet, "/invoices", nil)
-	r.Header.Set("HX-Request", "true")
+	r.Header.Set("YPY-Request", "true")
 	r.Header.Set("X-Requested-With", "XMLHttpRequest")
 
 	rec := render(h, r, exception.Abort(http.StatusForbidden, ""))

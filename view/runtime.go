@@ -343,9 +343,9 @@ func cssIsSafe(r rune) bool {
 //     and hyphens, optionally one colon and more of the same;
 //   - "on" at the front is an event handler, and its value is JavaScript
 //     wearing an attribute's shape;
-//   - the whole HTMX family is refused, in both spellings: a verb is fetched,
-//     hx-vals and hx-headers change what is sent, and hx-swap-oob decides what
-//     of the page the answer replaces. A component that speaks HTMX takes the
+//   - the whole YPY family is refused, in both spellings: a verb is fetched,
+//     ypy-vals and ypy-headers change what is sent, and ypy-swap-oob decides what
+//     of the page the answer replaces. A component that speaks YPY takes the
 //     ones it supports as fields, where the compiler reads the position;
 //   - "x-" at the front is an Alpine directive, which this framework does not
 //     serve and whose value is an expression;
@@ -365,12 +365,12 @@ func cssIsSafe(r rune) bool {
 // HTML.
 //
 // The list of addresses overlaps the compiler's and is deliberately wider. In
-// aru/internal/kyse/generate.go the position decides, so an HTMX verb is a URL
+// aru/internal/kyse/generate.go the position decides, so a YPY verb is a URL
 // there and goes through TextURL; here the name decides and there is no
-// component behind it, so the whole HTMX family is refused rather than checked.
+// component behind it, so the whole YPY family is refused rather than checked.
 // The two lists disagreeing on purpose is fine; disagreeing by accident is how
 // the same attribute ends up under two rules, which is what the first version of
-// this function did with hx-post.
+// this function did with ypy-post.
 //
 // The refusal is an error and what comes back beside it is the empty string,
 // for the reason TextURL gives: an attribute quietly renamed or dropped is a
@@ -434,7 +434,7 @@ func attributeIsInert(name string) error {
 // answer:
 //
 //   - "on" at the front is an event handler, and its value is JavaScript;
-//   - the HTMX family, in both spellings, is a request sent with the page's
+//   - the YPY family, in both spellings, is a request sent with the page's
 //     credentials and an answer swapped into the document;
 //   - "x-", "data-x-", "@" and ":" at the front are Alpine directives, which
 //     this framework does not serve and whose values are expressions;
@@ -453,17 +453,17 @@ func ActiveAttribute(name string) error {
 		return fmt.Errorf("view: %q holds a script rather than text. "+
 			"An attribute a browser compiles is a JavaScript position wearing an "+
 			"attribute's shape, and nothing escapes a value into being data there", name)
-	case isHTMX(lower):
-		// The whole family, not the handlers and the verbs. hx-post is fetched,
-		// hx-vals and hx-headers change what is sent, hx-swap-oob decides what
-		// of the page the answer replaces -- and a component that speaks HTMX
+	case isYPY(lower):
+		// The whole family, not the handlers and the verbs. ypy-post is fetched,
+		// ypy-vals and ypy-headers change what is sent, ypy-swap-oob decides what
+		// of the page the answer replaces -- and a component that speaks YPY
 		// takes the ones it supports as fields of its own, where the compiler
 		// reads the position and puts a URL through TextURL.
 		//
 		// Written as a family for the reason the compiler writes it as one: it
 		// is open, and a list would be one name short of the page that used a
 		// new one.
-		return fmt.Errorf("view: %q is an HTMX attribute, and a component takes the ones it "+
+		return fmt.Errorf("view: %q is a YPY attribute, and a component takes the ones it "+
 			"supports as fields of its own. "+
 			"A request written here would go out with the page's own credentials, "+
 			"to an address nothing checked, and swap the answer into the document", name)
@@ -488,14 +488,14 @@ func ActiveAttribute(name string) error {
 	return nil
 }
 
-// isHTMX reports whether HTMX reads this attribute.
+// isYPY reports whether YPY reads this attribute.
 //
-// Both spellings, because HTMX resolves every one of its attributes through a
-// data- alias -- `ee(e,t)||ee(e,"data-"+t)` in the bundle -- so a check that
-// only knew the short form is six characters from being bypassed. Alpine reads
-// no such alias, which is why the case above is narrower.
-func isHTMX(name string) bool {
-	return strings.HasPrefix(name, "hx-") || strings.HasPrefix(name, "data-hx-")
+// Both spellings, because YPY resolves every one of its attributes through a
+// data- alias, so `ypy-post` and `data-ypy-post` are one attribute and a check
+// that only knew the short form is five characters from being bypassed. Alpine
+// reads no such alias, which is why the case above is narrower.
+func isYPY(name string) bool {
+	return strings.HasPrefix(name, "ypy-") || strings.HasPrefix(name, "data-ypy-")
 }
 
 // attributeNamePattern is the shape of a name this will write.

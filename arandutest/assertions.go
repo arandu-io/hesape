@@ -188,7 +188,7 @@ func (r *Response) AssertHeaderMissing(name string) *Response {
 }
 
 // AssertRedirectContains asserts the response redirects to an address that
-// contains fragment, reading HX-Redirect as [Response.AssertRedirect] does.
+// contains fragment, reading YPY-Redirect as [Response.AssertRedirect] does.
 //
 // Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
 func (r *Response) AssertRedirectContains(fragment string) *Response {
@@ -200,13 +200,13 @@ func (r *Response) AssertRedirectContains(fragment string) *Response {
 	return r
 }
 
-// redirect is where the response sends the client: Location, or HX-Redirect
-// for an HTMX request answered with a 204.
+// redirect is where the response sends the client: Location, or YPY-Redirect
+// for a YPY request answered with a 204.
 func (r *Response) redirect() string {
 	if got := r.rec.Header().Get("Location"); got != "" {
 		return got
 	}
-	return r.rec.Header().Get("HX-Redirect")
+	return r.rec.Header().Get("YPY-Redirect")
 }
 
 // AssertCookie asserts the response sets the cookie and, when a value is

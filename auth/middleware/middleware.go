@@ -69,8 +69,8 @@ func (g *guestRedirect) redirect(w http.ResponseWriter, r *http.Request, to stri
 	if g.intended != nil {
 		g.intended.Remember(w, r)
 	}
-	// hhttp.Redirect and not http.Redirect: an HTMX request is answered with
-	// HX-Redirect and a plain one with 303, decided in one place for every
+	// hhttp.Redirect and not http.Redirect: a YPY request is answered with
+	// YPY-Redirect and a plain one with 303, decided in one place for every
 	// redirect the framework writes.
 	hhttp.Redirect(w, r, to)
 }
@@ -79,5 +79,5 @@ func (g *guestRedirect) redirect(w http.ResponseWriter, r *http.Request, to stri
 //
 // It wraps rather than re-deciding, because content negotiation is one
 // definition in hesape/http and a second one here would be the copy that is
-// wrong about htmx.
+// wrong about YPY.
 func expectsJSON(r *http.Request) bool { return hhttp.NewRequest(r).ExpectsJSON() }

@@ -16,7 +16,7 @@ import (
 var sidebarDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // sidebarPage serves a page with a sidebar drawn in mode, the button that
-// names it, and a link that swaps a second sidebar in through htmx, under the
+// names it, and a link that swaps a second sidebar in through YPY, under the
 // same policy an application serves.
 func sidebarPage(t *testing.T, mode string) *httptest.Server {
 	t.Helper()
@@ -29,8 +29,8 @@ func sidebarPage(t *testing.T, mode string) *httptest.Server {
 <script src="%s"></script><script src="%s"></script><script src="%s"></script></head><body>
 <button type="button" data-sidebar-toggle="nav">Menu</button>
 <aside class="sidebar" id="nav" data-sidebar-mode="%s"><nav aria-label="Sidebar"><a href="/">Home</a></nav></aside>
-<main><button type="button" hx-get="/late" hx-target="#slot">Load</button><div id="slot"></div></main>
-</body></html>`, view.Asset("htmx.min.js"), view.Asset("basecoat.bundle.js"), view.Asset("ui.js"), mode)
+<main><button type="button" ypy-get="/late" ypy-target="#slot">Load</button><div id="slot"></div></main>
+</body></html>`, view.Asset("ypy-compat.min.js"), view.Asset("basecoat.bundle.js"), view.Asset("ui.js"), mode)
 	})
 	mux.HandleFunc("GET /late", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -108,7 +108,7 @@ func TestTheSidebarFoldsToTheStripAndComesBackThatWay(t *testing.T) {
 	}
 }
 
-// TestASidebarSwappedInComesBackInTheRememberedMode holds the htmx half: a
+// TestASidebarSwappedInComesBackInTheRememberedMode holds the YPY half: a
 // sidebar that arrives after the page loaded is restored as it lands.
 func TestASidebarSwappedInComesBackInTheRememberedMode(t *testing.T) {
 	server := sidebarPage(t, "full")

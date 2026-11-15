@@ -231,7 +231,7 @@ func (v *View) GetFactory() *Factory { return v.factory }
 func (v *View) GetEngine() *Renderer { return v.engine }
 
 // Fragment draws the whole view and hands back only the named region, which
-// is what an HTMX swap needs: the page is one template and the response is
+// is what a YPY swap needs: the page is one template and the response is
 // one piece of it.
 func (v *View) Fragment(fragment string) (string, error) {
 	if v.factory == nil {

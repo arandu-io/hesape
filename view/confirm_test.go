@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A question htmx asks with hx-confirm is drawn by the script as a dialog, and
+// A question YPY asks with ypy-confirm is drawn by the script as a dialog, and
 // the browser's own box is never reached. Each line is one promise a tidy-up
 // could take out while every page still rendered, because the page would only
 // start showing "<address> says" over a dialog nobody styled.
@@ -13,9 +13,9 @@ func TestTheConfirmationKeepsItsPromises(t *testing.T) {
 	script := code(readUI(t))
 
 	for _, want := range []struct{ code, why string }{
-		{"document.addEventListener('htmx:confirm', function (event) {", "nothing takes the question before htmx asks it with window.confirm"},
+		{"document.addEventListener('ypy:confirm', function (event) {", "nothing takes the question before YPY asks it with window.confirm"},
 		{"if (event.defaultPrevented || !detail || !detail.question", "an element with no question, or one another handler already answered, is held by a dialog"},
-		{"event.preventDefault();\n\t\tvar elt = detail.elt;", "htmx still asks the browser's box after the dialog"},
+		{"event.preventDefault();\n\t\tvar elt = detail.elt;", "YPY still asks the browser's box after the dialog"},
 		{"detail.issueRequest(true)", "the request sent after a yes asks the browser's box again"},
 		{"csrfRenew().then(function () { detail.issueRequest(true); });", "a request sent after a yes skips the renewal of a lapsed token"},
 		{"dialog.close('confirm')", "the button that goes through with it does not say so to the dialog"},

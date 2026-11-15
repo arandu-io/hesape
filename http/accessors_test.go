@@ -83,20 +83,20 @@ func TestACookieIsWrittenOnTheAnswerAndTheLineStillChains(t *testing.T) {
 	}
 }
 
-func TestHtmxAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
-	// htmx sends X-Requested-With and swaps HTML. Answering it with JSON puts a
+func TestYPYAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
+	// YPY sends X-Requested-With and swaps HTML. Answering it with JSON puts a
 	// JSON document inside a div.
 	req := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows", nil)
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Accept", "application/json")
 	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
 
-	if !ctx.IsHTMX() {
-		t.Error("IsHTMX did not recognise an htmx request")
+	if !ctx.IsYPY() {
+		t.Error("IsYPY did not recognise a YPY request")
 	}
 	if ctx.WantsJSON() {
-		t.Error("htmx was told it wanted JSON")
+		t.Error("YPY was told it wanted JSON")
 	}
 
 	asked := httptest.NewRequest(stdhttp.MethodGet, "/api/invoices", nil)
@@ -108,7 +108,7 @@ func TestHtmxAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
 	xhr := httptest.NewRequest(stdhttp.MethodGet, "/api/invoices", nil)
 	xhr.Header.Set("X-Requested-With", "XMLHttpRequest")
 	if !hhttp.NewContext(httptest.NewRecorder(), xhr, nil, nil).WantsJSON() {
-		t.Error("an XHR that is not htmx was going to get a page")
+		t.Error("an XHR that is not YPY was going to get a page")
 	}
 
 	plain := httptest.NewRequest(stdhttp.MethodGet, "/invoices", nil)
@@ -119,7 +119,7 @@ func TestHtmxAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
 }
 
 // TestWhatReadsAHeaderDeclaresItInVary: each action wrote its own Vary, and
-// one that declared only Accept was cached across HX-Request, which
+// one that declared only Accept was cached across YPY-Request, which
 // WantsJSON also reads.
 func TestWhatReadsAHeaderDeclaresItInVary(t *testing.T) {
 	answer := func(ask func(*hhttp.Context)) []string {
@@ -132,9 +132,9 @@ func TestWhatReadsAHeaderDeclaresItInVary(t *testing.T) {
 		ask  func(*hhttp.Context)
 		want []string
 	}{
-		"WantsJSON": {func(c *hhttp.Context) { c.WantsJSON() }, []string{"accept-encoding, Accept, HX-Request, X-Requested-With"}},
-		"IsHTMX":    {func(c *hhttp.Context) { c.IsHTMX(); c.IsHTMX() }, []string{"accept-encoding, Accept, HX-Request"}},
-		"Targets":   {func(c *hhttp.Context) { c.Targets("note-7") }, []string{"accept-encoding, Accept, HX-Target"}},
+		"WantsJSON": {func(c *hhttp.Context) { c.WantsJSON() }, []string{"accept-encoding, Accept, YPY-Request, X-Requested-With"}},
+		"IsYPY":     {func(c *hhttp.Context) { c.IsYPY(); c.IsYPY() }, []string{"accept-encoding, Accept, YPY-Request"}},
+		"Targets":   {func(c *hhttp.Context) { c.Targets("note-7") }, []string{"accept-encoding, Accept, YPY-Target"}},
 	} {
 		if got := answer(c.ask); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: Vary = %q, want %q", name, got, c.want)
@@ -159,8 +159,8 @@ func TestVaryIsOneHeaderWithEveryName(t *testing.T) {
 	c := hhttp.NewContext(w, httptest.NewRequest(stdhttp.MethodGet, "/", nil), nil, nil)
 	c.WantsJSON()
 	c.Targets("note-7")
-	c.IsHTMX()
-	want := []string{"Accept-Encoding, Origin, Accept, HX-Request, X-Requested-With, HX-Target"}
+	c.IsYPY()
+	want := []string{"Accept-Encoding, Origin, Accept, YPY-Request, X-Requested-With, YPY-Target"}
 	if got := w.Header().Values("Vary"); !reflect.DeepEqual(got, want) {
 		t.Errorf("Vary = %q, want %q", got, want)
 	}
@@ -174,19 +174,19 @@ func TestVaryIsOneHeaderWithEveryName(t *testing.T) {
 	}
 }
 
-// TestTargetsReadsTheElementHtmxSwaps: the fragment for one element is
+// TestTargetsReadsTheElementYPYSwaps: the fragment for one element is
 // answered only to the swap that names it.
-func TestTargetsReadsTheElementHtmxSwaps(t *testing.T) {
+func TestTargetsReadsTheElementYPYSwaps(t *testing.T) {
 	req := httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil)
-	req.Header.Set("HX-Request", "true")
-	req.Header.Set("HX-Target", "note-7")
+	req.Header.Set("YPY-Request", "true")
+	req.Header.Set("YPY-Target", "note-7")
 	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
 	if !ctx.Targets("note-7") || ctx.Targets("note-8") || ctx.Targets("") {
-		t.Fatal("Targets did not answer for the element named by HX-Target alone")
+		t.Fatal("Targets did not answer for the element named by YPY-Target alone")
 	}
 	plain := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil), nil, nil)
 	if plain.Targets("") || plain.Targets("note-7") {
-		t.Fatal("a request with no HX-Target targets an element")
+		t.Fatal("a request with no YPY-Target targets an element")
 	}
 }
 

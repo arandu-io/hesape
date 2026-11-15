@@ -11,7 +11,7 @@
  * would buy the behaviour back at the price of the policy, and building the same
  * evaluator by hand would reopen the same hole under a different name.
  *
- * Because it is delegation, markup that HTMX swaps in is live the moment it
+ * Because it is delegation, markup that YPY swaps in is live the moment it
  * lands: every behaviour this file ships needs no initialising and no tearing
  * down. The one sweep below stamps state that only the browser knows -- which
  * accent is in force -- onto attributes a stylesheet and a screen reader can
@@ -28,7 +28,7 @@
  * and arandu.ui.action, below -- and those get mounted, updated and destroyed,
  * because a behaviour somebody else wrote may take a timer or an observer and
  * has to be told when its element is going away. That is the exception, it is
- * hooked to htmx's own events, and it changes nothing about the rule: the
+ * hooked to YPY's own events, and it changes nothing about the rule: the
  * attribute holds a name that is looked up in a map, never code that is run.
  *
  * Loading this file twice is a no-op.
@@ -180,7 +180,7 @@
 	 *
 	 * The data table is a region the server draws. Searching, ordering, the
 	 * facets, the page and the page size are addresses: the search is a form,
-	 * the headers and the steps are links, and htmx swaps what the server
+	 * the headers and the steps are links, and YPY swaps what the server
 	 * answers with. This is what the browser does that an address cannot.
 	 *
 	 *   - menus: the columns menu, a facet's popover, a header's menu and a
@@ -395,11 +395,11 @@
 		items[to].focus();
 	});
 
-	/* htmx keeps a snapshot of the page as a string before it leaves it, and a
+	/* YPY keeps a snapshot of the page as a string before it leaves it, and a
 	 * panel placed with style.left is `style="left: …"` in that string -- which
 	 * the policy refuses when the snapshot is parsed again. The menus are shut
 	 * and the placement taken off before the page is saved. */
-	document.addEventListener('htmx:beforeHistorySave', function () {
+	document.addEventListener('ypy:beforeHistorySave', function () {
 		each(document, 'details[data-menu]', function (menu) {
 			menu.open = false;
 			var panel = menuPanel(menu);
@@ -599,7 +599,7 @@
 	 * the answer comes (below). */
 	var tableSent = {};
 
-	document.addEventListener('htmx:beforeSend', function (event) {
+	document.addEventListener('ypy:beforeSend', function (event) {
 		var root = tableRootOf(event.detail && event.detail.elt);
 		if (!root || !root.id) return;
 		var sent = {};
@@ -607,7 +607,7 @@
 		tableSent[root.id] = sent;
 	});
 
-	document.addEventListener('htmx:beforeSwap', function (event) {
+	document.addEventListener('ypy:beforeSwap', function (event) {
 		var target = event.detail && event.detail.target;
 		var root = tableRootOf(target);
 		if (!root || !root.id) return;
@@ -635,7 +635,7 @@
 		tableCarried[root.id] = carried;
 	});
 
-	document.addEventListener('htmx:afterSwap', function () {
+	document.addEventListener('ypy:afterSwap', function () {
 		Object.keys(tableCarried).forEach(function (id) {
 			var root = document.getElementById(id);
 			var carried = tableCarried[id];
@@ -674,14 +674,14 @@
 	/* The address bar says what the server says is on screen. The form
 	 * serialises its fields as they are -- an empty search, the size even when
 	 * it is the default -- and the server's canonical address leaves those out.
-	 * Replacing the entry htmx just pushed keeps one entry per step. Only an
-	 * entry htmx pushed is replaced: a control that forgot to ask for a push
+	 * Replacing the entry YPY just pushed keeps one entry per step. Only an
+	 * entry YPY pushed is replaced: a control that forgot to ask for a push
 	 * must not have its missing history written over the page's own. */
-	document.addEventListener('htmx:pushedIntoHistory', function () {
+	document.addEventListener('ypy:pushedIntoHistory', function () {
 		Object.keys(tableCarried).forEach(function (id) { tableCarried[id].pushed = true; });
 	});
 
-	document.addEventListener('htmx:afterSettle', function () {
+	document.addEventListener('ypy:afterSettle', function () {
 		Object.keys(tableCarried).forEach(function (id) {
 			var root = document.getElementById(id);
 			var pushed = tableCarried[id].pushed;
@@ -1060,7 +1060,7 @@
 
 			if (complete) {
 				/* The links stay links. Taking the click in the capture phase,
-				 * before htmx's own handler on the link and before the browser
+				 * before YPY's own handler on the link and before the browser
 				 * follows it, is what makes this an enhancement: with no script
 				 * the same address loads the same page from the server. */
 				ctx.click = function (event) {
@@ -1450,7 +1450,7 @@
 			};
 
 			/* choose writes the day into the input the calendar points at, and
-			 * fires the events a form and htmx are listening for -- setting
+			 * fires the events a form and YPY are listening for -- setting
 			 * .value fires neither on its own. */
 			var choose = function (date) {
 				root.setAttribute('data-value', date || '');
@@ -2010,11 +2010,11 @@
 		},
 	});
 
-	/* htmx keeps a snapshot of the page as a string before it leaves it, and a
+	/* YPY keeps a snapshot of the page as a string before it leaves it, and a
 	 * panel placed with style.left is `style="left: …"` in that string, which the
 	 * policy refuses when the snapshot is parsed again. A panel left open would
 	 * also come back open. They are shut, and the placement taken off. */
-	document.addEventListener('htmx:beforeHistorySave', function () {
+	document.addEventListener('ypy:beforeHistorySave', function () {
 		each(document, '[data-kyse-behavior="date-range"]', function (one) {
 			if (one.__dateRangeClose) one.__dateRangeClose(false);
 		});
@@ -2097,7 +2097,7 @@
 	}, true);
 
 	/* The same snapshot rule as the menus: no placement in a saved page. */
-	document.addEventListener('htmx:beforeHistorySave', function () {
+	document.addEventListener('ypy:beforeHistorySave', function () {
 		each(document, '.date-picker', function (group) {
 			var panel = pickerPanel(group);
 			if (panel) panel.removeAttribute('style');
@@ -2472,7 +2472,7 @@
 				}
 				input.files = carried.files;
 				/* change, not input: it is the event a file input fires when
-				 * files are picked, and it is what the hx-trigger listens for. */
+				 * files are picked, and it is what the ypy-trigger listens for. */
 				input.dispatchEvent(new Event('change', { bubbles: true }));
 			};
 
@@ -2538,16 +2538,16 @@
 			};
 
 			button.addEventListener('click', ctx.flip);
-			/* htmx:responseError covers a 4xx or 5xx; htmx:sendError covers the
+			/* ypy:responseError covers a 4xx or 5xx; ypy:sendError covers the
 			 * request never arriving. Both leave the control as it was drawn,
 			 * and both have to put it back. */
-			button.addEventListener('htmx:responseError', ctx.revert);
-			button.addEventListener('htmx:sendError', ctx.revert);
+			button.addEventListener('ypy:responseError', ctx.revert);
+			button.addEventListener('ypy:sendError', ctx.revert);
 		},
 		destroyed: function (ctx) {
 			ctx.element.removeEventListener('click', ctx.flip);
-			ctx.element.removeEventListener('htmx:responseError', ctx.revert);
-			ctx.element.removeEventListener('htmx:sendError', ctx.revert);
+			ctx.element.removeEventListener('ypy:responseError', ctx.revert);
+			ctx.element.removeEventListener('ypy:sendError', ctx.revert);
 		},
 	});
 
@@ -2622,7 +2622,7 @@
 
 	/* ---- combobox ----------------------------------------------------------
 	 *
-	 * The list comes from the server on every keystroke, over HTMX, and is
+	 * The list comes from the server on every keystroke, over YPY, and is
 	 * swapped into the listbox whole. Nothing here filters and nothing here
 	 * fetches: this opens and closes the popover, walks the options that are
 	 * present, and writes the chosen one into the two inputs.
@@ -2994,7 +2994,7 @@
 
 	/* justMounted holds what mounted since the last settle finished.
 	 *
-	 * htmx fires htmx:load from a settle task and htmx:afterSettle right after
+	 * YPY fires ypy:load from a settle task and ypy:afterSettle right after
 	 * the tasks run -- `se(l.tasks,…);se(l.elts,…afterSettle…)` in the bundle --
 	 * so without this every element that arrived in a swap got mounted and then
 	 * immediately updated. Two hooks that always fire together are one hook, and
@@ -3280,7 +3280,7 @@
 		mount(document);
 	}
 
-	/* htmx:load fires for markup that has just been inserted, which is where a
+	/* ypy:load fires for markup that has just been inserted, which is where a
 	 * behaviour on it is mounted. The two sweeps beside it were always
 	 * idempotent; mount is too, by the marker it writes.
 	 *
@@ -3291,17 +3291,17 @@
 	 * for.
 	 *
 	 * beforeCleanupElement is the one hook this file has that is not a sweep:
-	 * htmx calls it with an element it is about to remove, which is the last
+	 * YPY calls it with an element it is about to remove, which is the last
 	 * moment a behaviour can give back a timer, an observer or a listener it
 	 * took. Without it the only cost is a leak, which is the kind that is
 	 * invisible until a page has been open for an hour. */
-	document.addEventListener('htmx:load', function (event) {
+	document.addEventListener('ypy:load', function (event) {
 		stamp(event.target);
 		watchStagger(event.target);
 		mount(event.target);
 	});
-	document.addEventListener('htmx:afterSettle', function (event) { update(event.target); });
-	document.addEventListener('htmx:beforeCleanupElement', function (event) { destroy(event.target); });
+	document.addEventListener('ypy:afterSettle', function (event) { update(event.target); });
+	document.addEventListener('ypy:beforeCleanupElement', function (event) { destroy(event.target); });
 
 	/* The one-time code, typed one square at a time.
 	 *
@@ -4194,7 +4194,7 @@
 	 * old one lapses, when the tab comes back to the front, when a page is
 	 * restored from the back/forward cache, and right before a submission that
 	 * would otherwise carry one that is due. A new token goes into every hidden
-	 * _token field and every hx-headers that carries X-CSRF-Token, so whichever
+	 * _token field and every ypy-headers that carries X-CSRF-Token, so whichever
 	 * of them the form or the request reads is the fresh one. The token is not
 	 * made to live longer: the server still checks signature, binding and expiry
 	 * exactly as before, and a request that carries a token it refuses is still
@@ -4223,7 +4223,7 @@
 
 	function csrfHeaders(element) {
 		try {
-			var parsed = JSON.parse(element.getAttribute('hx-headers'));
+			var parsed = JSON.parse(element.getAttribute('ypy-headers'));
 			return parsed && typeof parsed === 'object' && typeof parsed[CSRF_HEADER] === 'string' ? parsed : null;
 		} catch (e) {
 			return null;
@@ -4231,20 +4231,20 @@
 	}
 
 	/* Every place the page keeps a token: the hidden fields and the elements whose
-	 * hx-headers name the header. */
+	 * ypy-headers name the header. */
 	function csrfHolders(root) {
 		var found = [];
 		each(root, 'input[name="_token"]', function (input) {
 			found.push({ token: input.value, put: function (value) { input.value = value; } });
 		});
-		each(root, '[hx-headers]', function (element) {
+		each(root, '[ypy-headers]', function (element) {
 			var headers = csrfHeaders(element);
 			if (!headers) return;
 			found.push({
 				token: headers[CSRF_HEADER],
 				put: function (value) {
 					headers[CSRF_HEADER] = value;
-					element.setAttribute('hx-headers', JSON.stringify(headers));
+					element.setAttribute('ypy-headers', JSON.stringify(headers));
 				},
 			});
 		});
@@ -4333,37 +4333,37 @@
 		}
 	}
 
-	/* A form htmx sends is held by htmx:confirm; this is for the form the browser
+	/* A form YPY sends is held by ypy:confirm; this is for the form the browser
 	 * sends itself, which is any form outside a boosted region or without an
-	 * hx- verb. */
-	function csrfHtmxForm(form) {
-		if (form.matches('[hx-get],[hx-post],[hx-put],[hx-patch],[hx-delete]')) return true;
-		var boost = form.closest('[hx-boost]');
-		return !!boost && boost.getAttribute('hx-boost') === 'true';
+	 * ypy- verb. */
+	function csrfYPYForm(form) {
+		if (form.matches('[ypy-get],[ypy-post],[ypy-put],[ypy-patch],[ypy-delete]')) return true;
+		var boost = form.closest('[ypy-boost]');
+		return !!boost && boost.getAttribute('ypy-boost') === 'true';
 	}
 
-	document.addEventListener('htmx:afterSettle', function (event) { csrfSync((event.target && event.target.querySelectorAll) ? event.target : document); });
-	document.addEventListener('htmx:historyRestore', function () { csrfCheck(); });
+	document.addEventListener('ypy:afterSettle', function (event) { csrfSync((event.target && event.target.querySelectorAll) ? event.target : document); });
+	document.addEventListener('ypy:historyRestore', function () { csrfCheck(); });
 	document.addEventListener('visibilitychange', function () { if (!document.hidden) csrfCheck(); });
 	window.addEventListener('pageshow', function (event) { if (event.persisted) csrfCheck(); });
 	window.addEventListener('online', csrfCheck);
 	window.addEventListener('focus', csrfCheck);
 
-	/* The header every htmx request that changes something carries is the freshest
+	/* The header every YPY request that changes something carries is the freshest
 	 * token the page holds, for an address of this origin only: the token is not
 	 * sent anywhere else. */
-	document.addEventListener('htmx:configRequest', function (event) {
+	document.addEventListener('ypy:configRequest', function (event) {
 		var detail = event.detail;
 		if (!detail || !detail.headers || !csrf.token || String(detail.verb).toLowerCase() === 'get') return;
 		if (!csrfSameOrigin(detail.path)) return;
 		detail.headers[CSRF_HEADER] = csrf.token;
 	});
 
-	/* A request htmx is about to send while the token is due waits for the new
+	/* A request YPY is about to send while the token is due waits for the new
 	 * one, and is then sent as it was. It listens on window, after every handler
 	 * on document: another handler that cancelled the request keeps it cancelled,
 	 * and this one never sends what it was told to stop. */
-	window.addEventListener('htmx:confirm', function (event) {
+	window.addEventListener('ypy:confirm', function (event) {
 		var detail = event.detail;
 		if (event.defaultPrevented || !detail || typeof detail.issueRequest !== 'function') return;
 		if (String(detail.verb).toLowerCase() === 'get' || !csrfDue() || !csrfSameOrigin(detail.path)) return;
@@ -4377,7 +4377,7 @@
 		var form = event.target;
 		if (event.defaultPrevented || !form || form.nodeName !== 'FORM') return;
 		if (csrf.passing === form) { csrf.passing = null; return; }
-		if (String(form.method).toLowerCase() !== 'post' || csrfHtmxForm(form) || !csrf.exp) return;
+		if (String(form.method).toLowerCase() !== 'post' || csrfYPYForm(form) || !csrf.exp) return;
 		if (!form.querySelector('input[name="_token"]') || !csrfDue()) {
 			csrfSync(form);
 			return;
@@ -4411,15 +4411,15 @@
 
 	/* ---- confirmation ----------------------------------------------------------
 	 *
-	 * htmx asks the question of an element with hx-confirm through window.confirm:
+	 * YPY asks the question of an element with ypy-confirm through window.confirm:
 	 * the browser's own box, headed with the address of the site, in the
 	 * browser's own words and colours, which no stylesheet reaches and no policy
-	 * can restyle. This takes the question before htmx does and draws it as the
+	 * can restyle. This takes the question before YPY does and draws it as the
 	 * confirmation dialog the components draw -- the same <dialog>, the same
-	 * parts, the same classes -- so no hx-confirm anywhere can reach the native
+	 * parts, the same classes -- so no ypy-confirm anywhere can reach the native
 	 * box.
 	 *
-	 *     <button hx-delete="/groups/7" hx-confirm="Delete this group?"
+	 *     <button ypy-delete="/groups/7" ypy-confirm="Delete this group?"
 	 *             data-variant="destructive">Delete</button>
 	 *
 	 * What the element can say about it, all optional:
@@ -4447,7 +4447,7 @@
 	 * It listens on document and the CSRF listener above listens on window, so
 	 * this one answers first, and the request that follows a yes is sent through
 	 * the same renewal of the token a request with no question goes through.
-	 * Where the browser has no showModal the question is left to htmx, which is
+	 * Where the browser has no showModal the question is left to YPY, which is
 	 * the one case the browser's box is the only one there is.
 	 */
 	var CONFIRM_WORDS = {
@@ -4506,7 +4506,7 @@
 	}
 
 	/* The dialog the components draw, built with the same parts. It is built
-	 * for each question and taken away when it closes: htmx swaps the body of a
+	 * for each question and taken away when it closes: YPY swaps the body of a
 	 * boosted page out from under anything left standing. */
 	function confirmPanel(question, title, label, cancel, destructive) {
 		var id = 'kyse-confirm';
@@ -4557,7 +4557,7 @@
 		});
 	}
 
-	document.addEventListener('htmx:confirm', function (event) {
+	document.addEventListener('ypy:confirm', function (event) {
 		var detail = event.detail;
 		if (event.defaultPrevented || !detail || !detail.question || typeof detail.issueRequest !== 'function') return;
 		if (typeof HTMLDialogElement === 'undefined' || typeof HTMLDialogElement.prototype.showModal !== 'function') return;

@@ -137,24 +137,24 @@ func TestAnIntendedAddressThisApplicationDidNotWriteIsIgnored(t *testing.T) {
 	}
 }
 
-// A hx-get is a piece of a page, and sending somebody to it after they sign in
+// A ypy-get is a piece of a page, and sending somebody to it after they sign in
 // leaves them looking at a partial: no layout, no navigation. It reads as a
 // broken deploy.
 //
-// A boosted navigation is a whole page and is kept -- hx-boost is how most links
+// A boosted navigation is a whole page and is kept -- ypy-boost is how most links
 // in this stack are followed, so dropping it would drop nearly everything.
 func TestAFragmentIsNotRememberedAsAPageAndABoostedNavigationIs(t *testing.T) {
 	i := intended()
 
 	fragment := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows?page=2", nil)
-	fragment.Header.Set("HX-Request", "true")
+	fragment.Header.Set("YPY-Request", "true")
 	if got := i.Take(httptest.NewRecorder(), remembered(i, fragment), "/"); got != "/" {
 		t.Errorf("after signing in they would land on the bare fragment %q, with no layout around it", got)
 	}
 
 	page := httptest.NewRequest(stdhttp.MethodGet, "/inbox?page=2", nil)
-	page.Header.Set("HX-Request", "true")
-	page.Header.Set("HX-Boosted", "true")
+	page.Header.Set("YPY-Request", "true")
+	page.Header.Set("YPY-Boosted", "true")
 	if got := i.Take(httptest.NewRecorder(), remembered(i, page), "/"); got != "/inbox?page=2" {
 		t.Errorf("a boosted link is an ordinary navigation and was forgotten: %q", got)
 	}
@@ -206,19 +206,19 @@ func TestOnlyANavigationOfTheDocumentIsRememberedAndNotABackgroundRequest(t *tes
 	}
 }
 
-// The HTMX rule holds beside the Fetch Metadata one: a browser describes an
-// hx-get as a fetch, so it is turned away on either ground, and a boosted
+// The YPY rule holds beside the Fetch Metadata one: a browser describes an
+// ypy-get as a fetch, so it is turned away on either ground, and a boosted
 // navigation is kept when the browser calls it a navigation or says nothing.
-func TestTheHTMXRuleStillHoldsBesideFetchMetadata(t *testing.T) {
+func TestTheYPYRuleStillHoldsBesideFetchMetadata(t *testing.T) {
 	i := intended()
 
 	boosted := httptest.NewRequest(stdhttp.MethodGet, "/inbox?page=2", nil)
-	boosted.Header.Set("HX-Request", "true")
-	boosted.Header.Set("HX-Boosted", "true")
+	boosted.Header.Set("YPY-Request", "true")
+	boosted.Header.Set("YPY-Boosted", "true")
 	boosted.Header.Set("Accept", "*/*")
 	boosted.Header.Set("Sec-Fetch-Mode", "cors")
 	boosted.Header.Set("Sec-Fetch-Dest", "empty")
-	// hx-boost swaps a page through XMLHttpRequest, which the browser calls a
+	// ypy-boost swaps a page through XMLHttpRequest, which the browser calls a
 	// cors fetch, so the Fetch Metadata alone would drop nearly every link in
 	// this stack: a boosted request is a page whatever the browser says it is.
 	if got := i.Take(httptest.NewRecorder(), remembered(i, boosted), "/"); got != "/inbox?page=2" {
@@ -226,7 +226,7 @@ func TestTheHTMXRuleStillHoldsBesideFetchMetadata(t *testing.T) {
 	}
 
 	fragment := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows?page=2", nil)
-	fragment.Header.Set("HX-Request", "true")
+	fragment.Header.Set("YPY-Request", "true")
 	fragment.Header.Set("Sec-Fetch-Mode", "navigate")
 	fragment.Header.Set("Sec-Fetch-Dest", "document")
 	if got := i.Take(httptest.NewRecorder(), remembered(i, fragment), "/"); got != "/" {

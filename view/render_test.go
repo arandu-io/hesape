@@ -135,7 +135,7 @@ func TestTheRenderIsOnTheTimeline(t *testing.T) {
 }
 
 // TestAFragmentCarriesItsStatus: a form that failed validation answers 422 with
-// the form fragment, and HTMX swaps it in. Answering 200 would make the browser
+// the form fragment, and YPY swaps it in. Answering 200 would make the browser
 // and the logs both believe it worked.
 func TestAFragmentCarriesItsStatus(t *testing.T) {
 	rec := httptest.NewRecorder()

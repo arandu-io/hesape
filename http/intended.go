@@ -98,10 +98,10 @@ func (i *Intended) CookieName() string { return i.cookie }
 // 405 or, on a route that also accepts GET, performs something the person did
 // not ask for a second time.
 //
-// Only a whole page, never an HTMX fragment. A hx-get that is refused would
+// Only a whole page, never a YPY fragment. A ypy-get that is refused would
 // otherwise be remembered as "/inbox/rows?page=2", and after signing in the
 // person lands on that partial: no layout, no navigation, and it reads as a
-// broken deploy. A boosted navigation is a page and is kept -- hx-boost is how
+// broken deploy. A boosted navigation is a page and is kept -- ypy-boost is how
 // most links in this stack are followed, so dropping it would drop nearly
 // everything.
 //
@@ -126,14 +126,14 @@ func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
 		return
 	}
-	boosted := r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-Boosted") == "true"
-	if r.Header.Get("HX-Request") == "true" && !boosted {
+	boosted := r.Header.Get("YPY-Request") == "true" && r.Header.Get("YPY-Boosted") == "true"
+	if r.Header.Get("YPY-Request") == "true" && !boosted {
 		return
 	}
-	// A boosted navigation is exempt from the test below: htmx follows the link
+	// A boosted navigation is exempt from the test below: YPY follows the link
 	// with XMLHttpRequest, which the browser describes as a cors fetch for an
 	// empty destination, so Fetch Metadata would drop nearly every link in this
-	// stack. The HX-Boosted header is the one thing that says it is a page.
+	// stack. The YPY-Boosted header is the one thing that says it is a page.
 	if !boosted && !asksForADocument(r) {
 		return
 	}

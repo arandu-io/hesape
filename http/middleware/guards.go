@@ -173,7 +173,7 @@ func RequireRole(sessions *hhttp.SessionStore, roles ...string) func(http.Handle
 					return
 				}
 			}
-			// Refuse and not http.Error, so that an HTMX request is answered in
+			// Refuse and not http.Error, so that a YPY request is answered in
 			// a shape that client shows somebody. See hhttp.Refuse.
 			hhttp.Refuse(w, r, http.StatusForbidden, "this area is not open to your account")
 		})
@@ -282,14 +282,14 @@ func sendToSignIn(sessions *hhttp.SessionStore, w http.ResponseWriter, r *http.R
 
 // sendTo answers the redirect a guard turns somebody away with.
 //
-// The shape of the redirect is hhttp.Redirect's decision -- HX-Redirect and 204
-// for an HTMX request, which would otherwise swap the whole sign-in page into
+// The shape of the redirect is hhttp.Redirect's decision -- YPY-Redirect and 204
+// for a YPY request, which would otherwise swap the whole sign-in page into
 // the div that asked, and 303 for everything else. This wrapper exists for the
 // one thing that is the guard's and not every redirect's, which is the header
 // below.
 //
 // A guard's answer is about who is asking, and it MUST NOT be stored by a cache
-// shared between people. 204 is heuristically cacheable, so the HTMX answer is
+// shared between people. 204 is heuristically cacheable, so the YPY answer is
 // the one a proxy will happily keep: keep the guest guard's "you are signed in,
 // go to /" and it is served to a guest, who is then bounced off the sign-in
 // screen and can never sign in at all.

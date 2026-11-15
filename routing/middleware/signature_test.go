@@ -52,7 +52,7 @@ func TestASignedLinkReachesTheHandler(t *testing.T) {
 }
 
 // TestAnUnsignedRequestIsRefused, and refused through the Refuse the caller
-// gave: a 403 written with http.Error is a 403 an HTMX request never shows.
+// gave: a 403 written with http.Error is a 403 a YPY request never shows.
 func TestAnUnsignedRequestIsRefused(t *testing.T) {
 	var refused refusal
 	h := middleware.ValidateSignature(signer(t), refused.refuse)(reached)

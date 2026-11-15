@@ -8,7 +8,7 @@ import (
 // The branch this replaces matched "CSRF", so it matched "CSRFToken" -- and the
 // one message reaching this page that carries that word is the view engine
 // asking for a CSRFToken() method. Somebody missing a method was told to go edit
-// hx-headers on their base template, which is a different failure entirely.
+// ypy-headers on their base template, which is a different failure entirely.
 func TestAMissingTokenMethodIsNotAnsweredWithSomebodyElsesFix(t *testing.T) {
 	const msg = `view: @csrf needs the page data to provide the token. Add a CSRFToken() string method to PostsIndexData.`
 
@@ -18,7 +18,7 @@ func TestAMissingTokenMethodIsNotAnsweredWithSomebodyElsesFix(t *testing.T) {
 	}
 	// And the type name alone must not trip it either.
 	if _, ok := messageHint("runtime error: invalid memory address, *session.CSRF"); ok {
-		t.Error("naming the CSRF type in a panic produces a hint about hx-headers")
+		t.Error("naming the CSRF type in a panic produces a hint about ypy-headers")
 	}
 }
 

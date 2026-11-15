@@ -217,7 +217,7 @@ func TestRequestIDIsSanitized(t *testing.T) {
 	}
 }
 
-// HTMX streams over SSE, and losing Flush behind the wrapper breaks it in a way
+// YPY streams over SSE, and losing Flush behind the wrapper breaks it in a way
 // that is very hard to trace back to a middleware.
 func TestStatusWriterSupportsFlush(t *testing.T) {
 	var flushed bool

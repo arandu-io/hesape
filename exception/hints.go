@@ -58,7 +58,7 @@ func hints(d viewData) []string {
 // it also matched "CSRFToken" -- and the one message reaching this page that
 // contains that word is the view engine saying "@csrf needs the page data to
 // provide the token. Add a CSRFToken() string method". Somebody whose page
-// struct was missing a method was told to go edit hx-headers on their base
+// struct was missing a method was told to go edit ypy-headers on their base
 // template. It fired on any panic naming the CSRF type too, and the token
 // mismatch itself never arrives here: it is classified as 419 and answered with
 // a status page, so the branch had no correct trigger at all.

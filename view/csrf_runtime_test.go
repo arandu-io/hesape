@@ -44,7 +44,7 @@ func TestCSRFWritesAnOrdinaryTokenUnchanged(t *testing.T) {
 // it does not matter here.
 func TestActiveAttributeRefusesWhatEscapingDoesNotAnswer(t *testing.T) {
 	for _, name := range []string{
-		"onclick", "ONCLICK", "onmouseover", "hx-post", "HX-GET", "data-hx-vals",
+		"onclick", "ONCLICK", "onmouseover", "ypy-post", "YPY-GET", "data-ypy-vals",
 		"x-data", "data-x-on", "@click", ":class", "style", "STYLE", "srcdoc", "http-equiv",
 	} {
 		if err := view.ActiveAttribute(name); err == nil {

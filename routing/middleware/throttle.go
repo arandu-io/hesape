@@ -16,7 +16,7 @@ import (
 // Refuse answers a request a middleware turned away.
 //
 // It is a parameter and not a call into a package, because how a refusal is
-// written is the request layer's decision -- an HTMX request needs a header
+// written is the request layer's decision -- a YPY request needs a header
 // that a plain one does not, and getting that wrong is how a 429 became a
 // button that did nothing. hesape/hhttp.Refuse is the function that fits, and
 // passing it keeps the routing layer below the layer that owns the answer.

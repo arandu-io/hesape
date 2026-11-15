@@ -1,4 +1,4 @@
-// Package view is the view layer: compiled markup, HTMX for interaction, one
+// Package view is the view layer: compiled markup, YPY for interaction, one
 // embedded script for ephemeral client state, Tailwind for style. It is a
 // binary and it is never Node.
 //
@@ -25,7 +25,7 @@
 // code calls; everything decidable at build time already was, so what is left
 // is small on purpose. Page is the chrome every screen embeds, carrying
 // the messages and the typed input of a rejected attempt without any handler
-// having to remember them. The assets -- HTMX, the client behaviours, the
+// having to remember them. The assets -- YPY, the client behaviours, the
 // stylesheet -- are embedded and served content-addressed, because the CSP is
 // script-src 'self'.
 //

@@ -101,35 +101,35 @@ func (c *Context) WithCookie(cookie *stdhttp.Cookie) *Context {
 	return c
 }
 
-// IsHTMX reports whether htmx made this request.
+// IsYPY reports whether YPY made this request.
 //
 // It is the question that decides whether an answer is a fragment or a page, and
 // it is asked in one place per decision: Redirect and Refuse already ask it for
 // themselves, so a handler needs this only when the two shapes differ in what
 // they render.
 //
-// It adds HX-Request to the Vary header of the answer, because an answer that
+// It adds YPY-Request to the Vary header of the answer, because an answer that
 // asked is one a cache must keep apart from the answer to a request that did
 // not send it.
-func (c *Context) IsHTMX() bool {
-	c.vary("HX-Request")
-	return c.Request.Header.Get("HX-Request") == "true"
+func (c *Context) IsYPY() bool {
+	c.vary("YPY-Request")
+	return c.Request.Header.Get("YPY-Request") == "true"
 }
 
-// Targets reports whether htmx made this request to swap the element whose id
-// is id, read from the HX-Target header. An empty id targets nothing.
+// Targets reports whether YPY made this request to swap the element whose id
+// is id, read from the YPY-Target header. An empty id targets nothing.
 //
 // It is how one action answers a page to a navigation and a fragment to the
-// swap of one element. It adds HX-Target to the Vary header of the answer, for
-// the reason IsHTMX adds HX-Request.
+// swap of one element. It adds YPY-Target to the Vary header of the answer, for
+// the reason IsYPY adds YPY-Request.
 func (c *Context) Targets(id string) bool {
-	c.vary("HX-Target")
-	return id != "" && c.Request.Header.Get("HX-Target") == id
+	c.vary("YPY-Target")
+	return id != "" && c.Request.Header.Get("YPY-Target") == id
 }
 
 // WantsJSON reports whether this request asked for JSON rather than a page.
 //
-// htmx is deliberately excluded even though it sends X-Requested-With: it swaps
+// YPY is deliberately excluded even though it sends X-Requested-With: it swaps
 // HTML, so answering it with JSON puts a JSON document inside a div.
 //
 // hesape/exception states the same rule as the default of its Config.RenderJSONWhen,
@@ -137,13 +137,13 @@ func (c *Context) Targets(id string) bool {
 // The two are the same three lines and must not drift; folding them into one is
 // waiting on the layer that wires the handler.
 //
-// It adds the three headers it reads -- Accept, HX-Request and X-Requested-With
+// It adds the three headers it reads -- Accept, YPY-Request and X-Requested-With
 // -- to the Vary header of the answer, so a cache never hands the JSON to a
 // browser or the page to a client that asked for JSON.
 func (c *Context) WantsJSON() bool {
-	c.vary("Accept", "HX-Request", "X-Requested-With")
+	c.vary("Accept", "YPY-Request", "X-Requested-With")
 	r := c.Request
-	if r.Header.Get("HX-Request") == "true" {
+	if r.Header.Get("YPY-Request") == "true" {
 		return false
 	}
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {

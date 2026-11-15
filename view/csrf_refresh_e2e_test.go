@@ -29,7 +29,7 @@ const renewalTTL = 6 * time.Second
 const renewalWait = renewalTTL + 1500*time.Millisecond
 
 // renewalPage serves a page with a form the browser sends itself and a form
-// htmx sends, both drawn with the page's token, behind the real check. before
+// YPY sends, both drawn with the page's token, behind the real check. before
 // is the script served ahead of ui.js, to hold back what a test needs held
 // back; withScript is false for a page that loads no behaviour at all.
 func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server {
@@ -46,22 +46,22 @@ func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server 
 		token = html.EscapeString(token)
 		scripts := ""
 		if withScript {
-			scripts = fmt.Sprintf(`<script src="/before.js"></script><script src="%s"></script><script src="%s"></script>`, view.Asset("htmx.min.js"), view.Asset("ui.js"))
+			scripts = fmt.Sprintf(`<script src="/before.js"></script><script src="%s"></script><script src="%s"></script>`, view.Asset("ypy-compat.min.js"), view.Asset("ui.js"))
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "script-src 'self'")
 		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Open page</title>%s</head><body>
-<div hx-headers='{"X-CSRF-Token": "%s"}'>
+<div ypy-headers='{"X-CSRF-Token": "%s"}'>
 <form method="post" action="/native"><input type="hidden" name="_token" value="%s"><button type="submit">Send native</button></form>
-<form hx-post="/htmx" hx-target="#out" hx-swap="innerHTML"><input type="hidden" name="_token" value="%s"><button type="submit">Send htmx</button></form>
+<form ypy-post="/ypy" ypy-target="#out" ypy-swap="innerHTML"><input type="hidden" name="_token" value="%s"><button type="submit">Send YPY</button></form>
 <div id="out"></div></div></body></html>`, scripts, token, token, token)
 	})
 	mux.HandleFunc("POST /native", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html><html><head><title>Done</title></head><body><p>native accepted</p></body></html>`)
 	})
-	mux.HandleFunc("POST /htmx", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<p>htmx accepted</p>`)
+	mux.HandleFunc("POST /ypy", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<p>YPY accepted</p>`)
 	})
 	server := httptest.NewServer(middleware.CSRFProtect(csrf, func(*http.Request) string { return "" })(mux))
 	t.Cleanup(server.Close)
@@ -89,12 +89,12 @@ func TestWithoutTheRenewalAPageLeftOpenIsRefused(t *testing.T) {
 // TestAPageLeftOpenRenewsItsTokenBeforeItLapses: the page is drawn, the token it
 // was drawn with lapses, and both forms still go through -- the timer asked for
 // a new token while the old one still worked and wrote it into the fields and
-// into the header htmx sends.
+// into the header YPY sends.
 func TestAPageLeftOpenRenewsItsTokenBeforeItLapses(t *testing.T) {
 	page := openRenewal(t, renewalPage(t, true, ""))
 	time.Sleep(renewalWait)
-	page.ClickRole("button", "Send htmx")
-	page.ExpectText("htmx accepted")
+	page.ClickRole("button", "Send YPY")
+	page.ExpectText("YPY accepted")
 	page.Visit("/")
 	time.Sleep(renewalWait)
 	page.ClickRole("button", "Send native")
@@ -109,12 +109,12 @@ const held = `(function(){var set=window.setTimeout;window.setTimeout=function(f
 
 // TestAFormSentWithADueTokenWaitsForANewOne: with the timers held back, the
 // token lapses and nothing has renewed it. The form the browser sends, and the
-// request htmx sends, each wait for the new token and are then sent as they
+// request YPY sends, each wait for the new token and are then sent as they
 // were.
 func TestAFormSentWithADueTokenWaitsForANewOne(t *testing.T) {
 	for _, tc := range []struct{ button, want string }{
 		{"Send native", "native accepted"},
-		{"Send htmx", "htmx accepted"},
+		{"Send YPY", "YPY accepted"},
 	} {
 		t.Run(tc.button, func(t *testing.T) {
 			page := openRenewal(t, renewalPage(t, true, held))

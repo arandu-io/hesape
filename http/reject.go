@@ -17,7 +17,7 @@ import (
 // validation messages, so the page that follows the redirect can show them.
 // The shape is deliberate: the answer to a rejected form is a redirect, not
 // a body. A body was tried first and is the failure that produced this
-// file. A 422 carrying the messages in the markup is thrown away by htmx
+// file. A 422 carrying the messages in the markup is thrown away by YPY
 // unless the layout has reconfigured its response handling, so the person
 // saw the form they submitted, unchanged, with nothing on it; and even
 // where it was swapped in, a reload re-posted the form. A redirect is read
@@ -66,7 +66,7 @@ func Reject(w stdhttp.ResponseWriter, r *stdhttp.Request, f *session.Flash, errs
 	// route guards give for their own answers, arrived at from the other side.
 	w.Header().Set("Cache-Control", "no-store, private")
 
-	// Redirect and not stdhttp.Redirect: an HTMX request gets HX-Redirect and a
+	// Redirect and not stdhttp.Redirect: a YPY request gets YPY-Redirect and a
 	// plain one gets 303, decided in one place for every redirect the framework
 	// answers. See Redirect.
 	Redirect(w, r, Back(r))

@@ -40,7 +40,7 @@ type Attrs map[string]string
 // `Attrs{`x"><script>`: "1"}` would be a script tag.
 //
 // A key the browser or a client library would act on is dropped too: an
-// event handler, the HTMX family, an Alpine directive, style, srcdoc and
+// event handler, the YPY family, an Alpine directive, style, srcdoc and
 // http-equiv. Escaping a value does not make any of those inert, and the list
 // is view.ActiveAttribute's, so the builders here and the view layer refuse
 // the same names. A request or a script belongs in a component that takes it

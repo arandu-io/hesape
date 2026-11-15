@@ -184,19 +184,19 @@ func TestEveryDelegatedEventReachesTheRegistry(t *testing.T) {
 	}
 }
 
-// TestTheLifecycleIsHookedToHtmx pins the three moments a behaviour is told
-// about, and that they are htmx's own events rather than a poll.
+// TestTheLifecycleIsHookedToYPY pins the three moments a behaviour is told
+// about, and that they are YPY's own events rather than a poll.
 //
 // beforeCleanupElement is the one that cannot be replaced by a sweep: it is the
 // last moment an element still exists, and a behaviour that took a timer or an
 // observer has nowhere else to give it back.
-func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
+func TestTheLifecycleIsHookedToYPY(t *testing.T) {
 	script := readUI(t)
 
 	for hook, call := range map[string]string{
-		"htmx:load":                 "mount(event.target)",
-		"htmx:afterSettle":          "update(event.target)",
-		"htmx:beforeCleanupElement": "destroy(event.target)",
+		"ypy:load":                 "mount(event.target)",
+		"ypy:afterSettle":          "update(event.target)",
+		"ypy:beforeCleanupElement": "destroy(event.target)",
 	} {
 		if !strings.Contains(script, `document.addEventListener('`+hook+`'`) {
 			t.Errorf("%s is not hooked", hook)
@@ -206,7 +206,7 @@ func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
 		}
 	}
 
-	// Mounting is idempotent by a marker on the element, because htmx:load
+	// Mounting is idempotent by a marker on the element, because ypy:load
 	// fires for the swapped element and for everything inside it, and a
 	// behaviour mounted twice takes its timer twice.
 	if !strings.Contains(script, `getAttribute('data-kyse-mounted') === 'true'`) {
@@ -217,7 +217,7 @@ func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
 // TestUpdatedDoesNotFireOnWhatJustMounted is the ordering the two hooks are
 // only distinct because of.
 //
-// htmx fires htmx:load from a settle task and htmx:afterSettle immediately
+// YPY fires ypy:load from a settle task and ypy:afterSettle immediately
 // after the tasks run -- se(l.tasks,…);se(l.elts,…afterSettle…) in the bundle --
 // so an element that arrives in a swap reaches both. Without a guard it mounted
 // and then updated in the same breath, two hooks that always fire together are

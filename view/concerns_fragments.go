@@ -1,6 +1,6 @@
 package view
 
-// Fragments let HTMX partial renders deliver only the changed portion of a
+// Fragments let YPY partial renders deliver only the changed portion of a
 // page, without re-rendering the layout. @fragment name / @endfragment
 // capture a named region; the controller requests only those that changed.
 

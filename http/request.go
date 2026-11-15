@@ -306,8 +306,8 @@ func (r *Request) SchemeAndHttpHost() string {
 // Secure reports whether the request was over TLS.
 func (r *Request) Secure() bool { return r.request.TLS != nil }
 
-// Ajax reports whether the request was made by XMLHttpRequest. htmx sends
-// this header too; see WantsJSON for why htmx is deliberately excluded
+// Ajax reports whether the request was made by XMLHttpRequest. YPY sends
+// this header too; see WantsJSON for why YPY is deliberately excluded
 // there.
 func (r *Request) Ajax() bool {
 	return r.request.Header.Get("X-Requested-With") == "XMLHttpRequest"

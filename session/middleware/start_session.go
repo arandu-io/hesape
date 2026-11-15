@@ -243,7 +243,7 @@ func (f *finisher) run() {
 // after they sign in.
 //
 // Only a GET that is a whole page: a POST is not somewhere to return to, and
-// neither is the stylesheet or the HTMX fragment that the page fires on
+// neither is the stylesheet or the YPY fragment that the page fires on
 // arrival. Remembering one of those is a sign-in that lands on a fragment.
 //
 // What is stored is the whole address, via [fullURL]. It used to be
@@ -264,7 +264,7 @@ func (m *StartSession) storeCurrentPage(r *http.Request, store *session.Store) {
 	if r.Method != http.MethodGet {
 		return
 	}
-	if r.Header.Get("HX-Request") != "" || r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
+	if r.Header.Get("YPY-Request") != "" || r.Header.Get("X-Requested-With") == "XMLHttpRequest" {
 		return
 	}
 	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
