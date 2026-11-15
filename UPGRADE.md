@@ -108,6 +108,11 @@ back.
 - **YPY does not send `X-Requested-With`.** `Request.Ajax` is false for a YPY
   request, and a YPY request is recognised by `YPY-Request`, which is what
   `IsYPY` and `WantsJSON` read.
+- **The development live-reload tag is left off a response whose policy blocks
+  it.** A page whose `Content-Security-Policy` does not admit this origin for
+  scripts and for `connect-src` (the built-in 403 page answers with
+  `default-src 'none'`) is no longer given the tag, which the browser refused
+  and the test kit reported as a violation; the policy is not changed.
 - **How to convert an application:** `ypy check .` lists what breaks and what
   behaves differently, `ypy migrate --write .` converts the names, the script
   files are replaced by the two above, and the list is worked through page by

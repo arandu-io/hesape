@@ -39,6 +39,81 @@ func TestADocumentIsGivenTheReloadScript(t *testing.T) {
 	}
 }
 
+// The tag is a script and a request to this origin, so a response whose policy
+// blocks either one is left as it is: the browser would refuse the script and
+// report a violation on a page that did nothing wrong.
+func TestAPageWhosePolicyBlocksTheScriptIsLeftAlone(t *testing.T) {
+	page := "<html><body>no</body></html>"
+	for name, policy := range map[string]string{
+		"nothing is allowed":                "default-src 'none'; style-src 'sha256-x'; img-src data:",
+		"script-src without this origin":    "default-src 'self'; script-src https://cdn.example.test",
+		"script-src none":                   "default-src 'self'; script-src 'none'",
+		"script-src-elem without it":        "script-src 'self'; script-src-elem 'none'",
+		"connect-src without it":            "default-src 'self'; connect-src https://api.example.test",
+		"a second policy that blocks":       "default-src 'self', default-src 'none'",
+		"default-src without this origin":   "default-src https://cdn.example.test",
+		"a directive name in capitals":      "DEFAULT-SRC 'none'",
+		"only the first script-src is read": "script-src 'none'; script-src 'self'",
+	} {
+		rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Security-Policy", policy)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(page))
+		}, httptest.NewRequest(http.MethodGet, "/notes/1", nil))
+
+		if rec.Code != http.StatusForbidden || rec.Body.String() != page {
+			t.Errorf("%s: the page was changed (%d) %q", name, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Content-Security-Policy"); got != policy {
+			t.Errorf("%s: the policy was rewritten to %q", name, got)
+		}
+	}
+}
+
+// A policy that admits this origin gets the script, and so does a page with no
+// policy: the tag is for development, and a project that never wrote a policy
+// is no reason to lose it.
+func TestAPageWhosePolicyAllowsTheScriptIsGivenIt(t *testing.T) {
+	for name, policy := range map[string]string{
+		"none":                         "",
+		"the default policy":           "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'",
+		"default-src alone":            "default-src 'self'",
+		"script-src with this origin":  "default-src 'none'; script-src 'self'; connect-src 'self'",
+		"script-src-elem over script":  "script-src 'none'; script-src-elem 'self'; connect-src 'self'",
+		"a policy that restricts only": "img-src 'self'",
+		"a wildcard":                   "default-src *",
+	} {
+		rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if policy != "" {
+				w.Header().Set("Content-Security-Policy", policy)
+			}
+			_, _ = w.Write([]byte("<html><body>ok</body></html>"))
+		}, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		if strings.Count(rec.Body.String(), "arandu-reload.js") != 1 {
+			t.Errorf("%s: the page was not given the script: %q", name, rec.Body.String())
+		}
+	}
+}
+
+// What the browser enforces is what the response carries when it leaves, so a
+// handler that replaces the policy after the middleware set another decides.
+func TestThePolicyThatIsReadIsTheOneTheResponseLeavesWith(t *testing.T) {
+	rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; connect-src 'self'")
+		// The error page replaces the application's policy with its own.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'sha256-x'")
+		_, _ = w.Write([]byte("<html><body>403</body></html>"))
+	}, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if strings.Contains(rec.Body.String(), "arandu-reload.js") {
+		t.Fatalf("the script was injected under the policy that replaced the application's:\n%s", rec.Body.String())
+	}
+}
+
 // The one that matters most. A YPY swap replaces a fragment, and a fragment
 // carrying the script would open one connection per interaction -- until the
 // browser's six-per-origin limit is reached and the page stops working, which

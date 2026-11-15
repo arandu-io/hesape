@@ -57,6 +57,10 @@ import (
 // middleware mounts with the route, under the same IsDev, and a project that
 // never heard of any of this gets it.
 //
+// It injects only into a document whose Content-Security-Policy lets the page
+// load the script and ask for the identity, so an error page that answers with
+// default-src 'none' is not given a tag the browser would refuse.
+//
 // It injects only into a document that has a </body>. A YPY fragment does not,
 // so a swap never receives a second listener -- which would otherwise
 // accumulate one connection per interaction until the browser's six-per-origin
@@ -226,13 +230,67 @@ func (h *htmlRecorder) finish() {
 	body := h.buf.Bytes()
 	// The close tag is the test for a whole document. A YPY fragment has no
 	// </body>, and injecting into one would add a listener per swap.
-	if at := bytes.LastIndex(body, []byte("</body>")); at >= 0 && len(reloadTag) > 0 {
+	if at := bytes.LastIndex(body, []byte("</body>")); at >= 0 && len(reloadTag) > 0 && policyAllowsReload(h.Header()) {
 		out := make([]byte, 0, len(body)+len(reloadTag))
 		out = append(out, body[:at]...)
 		out = append(out, reloadTag...)
 		body = append(out, body[at:]...)
 	}
 	h.send(body)
+}
+
+// policyAllowsReload reports whether the Content-Security-Policy the response
+// carries lets the page load the reload script and ask which process answers.
+//
+// It reads the headers as they stand when the document is complete, which is
+// the policy the browser will enforce: nothing has been sent yet, so whatever
+// the handlers beneath this middleware set, or replaced, is what is read. A
+// response with no policy allows it. One that has a policy needs it to admit
+// this origin for the script (script-src-elem, then script-src, then
+// default-src) and for the request the script makes (connect-src, then
+// default-src). A page that answers with default-src 'none', as the built-in
+// error pages do, is left without the tag rather than given one the browser
+// blocks, and its policy is not touched.
+func policyAllowsReload(h http.Header) bool {
+	for _, value := range h.Values("Content-Security-Policy") {
+		for _, policy := range strings.Split(value, ",") {
+			if !policyAllows(policy, "script-src-elem", "script-src") || !policyAllows(policy, "connect-src") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// policyAllows reports whether the one policy admits this origin for the
+// directive that governs a kind of load: the first of names the policy states,
+// else default-src, else nothing restricts it.
+func policyAllows(policy string, names ...string) bool {
+	directives := map[string][]string{}
+	for _, part := range strings.Split(policy, ";") {
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(fields[0])
+		if _, seen := directives[name]; !seen {
+			directives[name] = fields[1:]
+		}
+	}
+	for _, name := range append(names, "default-src") {
+		sources, ok := directives[name]
+		if !ok {
+			continue
+		}
+		for _, source := range sources {
+			switch strings.ToLower(source) {
+			case "'self'", "*", "http:", "https:":
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (h *htmlRecorder) send(body []byte) {
