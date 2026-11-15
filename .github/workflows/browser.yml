@@ -1,10 +1,10 @@
 name: browser
 
-# The native browser kit behind the e2e build tag. `go test ./...` in ci.yml does
-# not compile files under a build tag, so without this workflow the cdp driver
-# and the conformance suite every driver must pass would run on nobody's
-# machine but a developer's. CI is set, so a missing Chrome fails the job
-# instead of skipping it.
+# The browser tests behind the e2e build tag. `go test ./...` in ci.yml does not
+# compile files under a build tag, so without this workflow the tests of the
+# view runtime and the development reload that need a real browser would run on
+# nobody's machine but a developer's. CI is set, so a missing Chrome fails the
+# job instead of skipping it.
 
 on:
   push:
@@ -37,17 +37,7 @@ jobs:
           echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
 
       - name: vet with the e2e tag
-        run: go vet -tags e2e ./arandutest/...
+        run: go vet -tags e2e ./internal/testkit/... ./view ./foundation
 
-      - name: native driver and its conformance suite
-        env:
-          ARANDU_E2E_TRACE_DIR: ${{ runner.temp }}/arandutest-traces
-        run: go test -race -count=1 -tags e2e ./arandutest/...
-
-      - name: traces of a failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: arandutest-traces
-          path: ${{ runner.temp }}/arandutest-traces
-          if-no-files-found: ignore
+      - name: browser tests
+        run: go test -race -count=1 -tags e2e ./view ./foundation

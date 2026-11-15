@@ -10,5 +10,6 @@
 // last.
 //
 // There is no database constraint here. Asking a connection whether a row is
-// there belongs to hesape/arandutest, where the connection already is.
+// there belongs to github.com/arandu-io/framework/test, where the connection
+// already is.
 package constraints

@@ -180,16 +180,19 @@ done
 `gofmt` stays out of that loop and loses nothing: it walks paths rather than
 modules, so the `find` above already covers every module.
 
-## Two packages that are not for these tests
+## One package that is not for these tests, and one that is
 
 `testing` is the assertion vocabulary shipped *to applications*, and no `_test.go`
-in this repository imports it. `arandutest` is the older application test kit
-(a browser, a server on a free port, database assertions). It is deprecated:
-the kit applications use is `github.com/arandu-io/framework/test`, and
-`arandutest` stays only as the old names pointing at it. The tests here that
-import it are the ones that need a browser or a running server: the
-`e2e`-tagged tests in `view` and `foundation`, and the serve tests of the pgx
-and sqlite connectors. Do not reach for either in a test that needs neither.
+in this repository imports it. The kit applications test with is
+`github.com/arandu-io/framework/test` and it lives above this module, so nothing
+here can import it. The `e2e`-tagged tests in `view` and `foundation` need a
+browser, and for that they use `internal/testkit/browser`: Chrome over its
+debugging pipe, a page that waits for YPY and fails on a 5xx, a console error or
+a CSP violation, and the few locators and actions those tests call. It is
+deliberately small and it is not a second kit: a test that needs more than it
+offers adds the one function it needs, and a test that needs a server over a
+database belongs in the framework. Do not reach for it in a test that needs no
+browser.
 
 That is a rule about direction, not a slight. The application kit exists so an
 application's test drives the same code path production drives — there is no

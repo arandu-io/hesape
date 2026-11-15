@@ -24,10 +24,10 @@ import (
 //
 //	response.AssertOK().AssertSee("Invoices").AssertDontSee("Draft")
 //
-// Deprecated: use arandutest.Response, which arandutest.Client returns after
-// driving the handler through the middleware production runs. It carries the
-// status, header, redirect, cookie, download, body and JSON assertions this
-// type has; the session assertions read the deprecated session.Store, and a
+// Deprecated: use Response in github.com/arandu-io/framework/test, which its
+// Client returns after driving the handler through the middleware production
+// runs. It carries the status, header, redirect, cookie, download, body and
+// JSON assertions this type has; the session assertions read the deprecated session.Store, and a
 // page is asserted by what it renders rather than by the view behind it.
 type TestResponse struct {
 	t T
@@ -94,8 +94,9 @@ type TestResponse struct {
 // through, so an assertion that needs one says so rather than reaching for an
 // ambient request.
 //
-// Deprecated: use arandutest.Client and the arandutest.Response it returns,
-// which drive the handler through the middleware production runs.
+// Deprecated: use Client and the Response it returns in
+// github.com/arandu-io/framework/test, which drive the handler through the
+// middleware production runs.
 func NewTestResponse(t T, response *http.Response, request *http.Request) *TestResponse {
 	r := &TestResponse{t: t, BaseResponse: response, BaseRequest: request}
 
@@ -113,7 +114,8 @@ func NewTestResponse(t T, response *http.Response, request *http.Request) *TestR
 // FromBaseResponse is [NewTestResponse] under the name that reads better at a
 // call site building one from a response already in hand.
 //
-// Deprecated: use arandutest.Client and the arandutest.Response it returns.
+// Deprecated: use Client and the Response it returns in
+// github.com/arandu-io/framework/test.
 func FromBaseResponse(t T, response *http.Response, request *http.Request) *TestResponse {
 	return NewTestResponse(t, response, request)
 }

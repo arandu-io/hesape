@@ -36,8 +36,10 @@ type csrfFieldSite struct {
 	find *regexp.Regexp
 }
 
-// csrfFieldSites are the places that write or read the hidden CSRF field by
-// name. Two of them put it into HTML, and two take it back out.
+// csrfFieldSites are the places in this module that write the hidden CSRF field
+// by name: the template runtime and the form builder. The test client that
+// submits it back lives in the framework module, which proves it against the
+// middleware that reads it.
 var csrfFieldSites = []csrfFieldSite{
 	{
 		file: filepath.Join("..", "view", "runtime.go"),
@@ -50,18 +52,6 @@ var csrfFieldSites = []csrfFieldSite{
 		fn:   "Token",
 		role: "the hidden input the form builder writes",
 		find: regexp.MustCompile(`^(_[A-Za-z0-9_]+)$`),
-	},
-	{
-		file: filepath.Join("..", "arandutest", "http.go"),
-		fn:   "submit",
-		role: "the field the test client sends with a submission",
-		find: regexp.MustCompile(`^(_[A-Za-z0-9_]+)=$`),
-	},
-	{
-		file: filepath.Join("..", "arandutest", "http.go"),
-		fn:   "token",
-		role: "the field the test client scrapes off the last page it loaded",
-		find: regexp.MustCompile(`name="([^"]+)" value="`),
 	},
 }
 

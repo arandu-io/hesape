@@ -27,6 +27,21 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.108.0 — arandutest is removed
+
+One package tree stops compiling, and the change is the import path.
+
+- **`github.com/arandu-io/hesape/arandutest` is removed, with every package
+  under it** (`browser`, `browser/cdp`, `browser/conformance`, `trace`,
+  `openapi`, `conformance` and `servertrace`). It was deprecated in v0.83.0 and
+  has no replacement in this module: the kit an application tests with is
+  `github.com/arandu-io/framework/test`, and this module cannot import it. Change
+  every `github.com/arandu-io/hesape/arandutest/...` import to the same path under
+  `github.com/arandu-io/framework/test/...`, and `arandutest.` to `test.` at
+  the call. `aru imports:catalog --fix` rewrites the import path. The tests of
+  this module that need a browser keep a small kit of their own under
+  `internal/`, which nothing outside the module can import.
+
 ## v0.107.0 — YPY replaces the hypermedia library
 
 One symbol stops compiling, and every page that carries an attribute, a header,
@@ -485,15 +500,12 @@ func TestStoreContract(t *testing.T) {
 }
 ```
 
-**`hesape/arandutest` is deprecated: moved to `github.com/arandu-io/framework/test`;
-removed in v1.0.0.** Every package under it carries the same notice --
-`arandutest`, `browser`, `browser/cdp`, `browser/conformance`, `trace`,
-`openapi`, `conformance` and `servertrace` -- and keeps working until then. The
-framework's own `arandutest`, which forwards to the same place, is removed in
-the framework's v1.0.0; the two promises are about two modules and name the same
-release line. (This entry first said "the next minor", which no release kept.)
-Change the imports from `github.com/arandu-io/hesape/arandutest/...` to the
-same path under `github.com/arandu-io/framework/test/...`.
+**`hesape/arandutest` is deprecated: moved to `github.com/arandu-io/framework/test`.**
+Every package under it carries the same notice -- `arandutest`, `browser`,
+`browser/cdp`, `browser/conformance`, `trace`, `openapi`, `conformance` and
+`servertrace`. Change the imports from `github.com/arandu-io/hesape/arandutest/...`
+to the same path under `github.com/arandu-io/framework/test/...`. (The package
+is removed in v0.108.0.)
 
 ## v0.82.0 — the copied auth suites become kits, and a Collector records the request's log lines
 
