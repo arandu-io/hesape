@@ -133,7 +133,7 @@ has to satisfy:
   complete rather than named (`TestTheLicenseTextsAreComplete`).
 
 Six files sit in `view/assets/`, five of them named by the single `go:embed`
-directive at `view/assets.go:21`. Three are third party — `htmx.min.js`,
+directive at `view/assets.go:21`. Three are third party — `ypy-compat.min.js`,
 `basecoat.bundle.js` and `app.css`, which is Tailwind's output rather than its
 input. Three are ours: `app.src.css`, the Tailwind input this project wrote, and
 the only two first-party scripts there are:
