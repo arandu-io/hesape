@@ -49,11 +49,13 @@ const StatusCSRFExpired = 419
 // A form carries the hidden _token field, so a submission is covered whether it
 // posts natively or through ypy-post. What that does not cover is a request no
 // form backs -- ypy-delete on a button, ypy-patch on a toggle. Those carry the
-// token only where the markup puts it, either once on the layout
+// token only where the markup puts it: once on the layout, in the head,
 //
-//	<body ypy-headers='{"X-CSRF-Token": "{{ .CSRFToken }}"}'>
+//	<meta name="ypy-csrf" content="{{ .CSRFToken }}">
 //
-// or on the element that sends the request.
+// where the ypy-csrf extension reads it and sends it as X-CSRF-Token on every
+// same-origin request that is not a GET. A response that carries a YPY-CSRF
+// header replaces it, which is how a page keeps a token that lapses.
 //
 // Nothing verifies that the line is there. A layout that loses it keeps
 // rendering and every form goes on working; the first button that deletes

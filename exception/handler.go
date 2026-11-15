@@ -446,8 +446,8 @@ func (h *Handler) shouldReturnJSON(r *http.Request, err error) bool {
 // wantsJSON is the default of Config.RenderJSONWhen: the request said it wanted
 // JSON, either by asking for it or by being an XHR that is not YPY.
 //
-// YPY is deliberately excluded. It sends X-Requested-With and it swaps HTML;
-// answering it with JSON would put a JSON document inside a div.
+// YPY is deliberately excluded. It swaps HTML, so whatever else its request
+// says, answering it with JSON would put a JSON document inside a div.
 func wantsJSON(r *http.Request) bool {
 	if r.Header.Get("YPY-Request") == "true" {
 		return false

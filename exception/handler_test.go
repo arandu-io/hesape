@@ -153,8 +153,8 @@ func TestTheProblemDetailCarriesNothingTheCallerMayNotSee(t *testing.T) {
 	}
 }
 
-// YPY sends X-Requested-With and swaps HTML. Answering it with JSON would put
-// a JSON document inside a div.
+// YPY swaps HTML, whatever a script adds to its request. Answering it with
+// JSON would put a JSON document inside a div.
 func TestYPYGetsAPageAndNotJSON(t *testing.T) {
 	h := exception.NewHandler(exception.Config{})
 	r := httptest.NewRequest(http.MethodGet, "/invoices", nil)

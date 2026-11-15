@@ -177,7 +177,7 @@ func TestEveryVerbAResourceRegistersReachesTheHandler(t *testing.T) {
 
 // A delete has no form to hide a field in, and net/http never parses a DELETE
 // body into one. The token therefore has to arrive in the header, which is what
-// the generated markup does with ypy-headers: a client that sent it only in the
+// the generated markup does with the ypy-csrf meta tag: a client that sent it only in the
 // body would arrive at the guard carrying nothing, and the only way to make the
 // test pass would be to turn the guard off.
 func TestADeleteCarriesTheTokenWhereAGuardCanReadIt(t *testing.T) {
@@ -284,7 +284,7 @@ func TestAHeaderTheTestSetsReplacesTheOneTheClientInferred(t *testing.T) {
 }
 
 // The path the generator emits, end to end: ypy-delete on a button, the token in
-// ypy-headers because there is no form to hide it in, and a handler that answers
+// the ypy-csrf meta tag because there is no form to hide it in, and a handler that answers
 // a YPY request with YPY-Redirect and no body. AssertRedirect could already
 // read that header; until now nothing could provoke it.
 func TestTheYPYDeleteThePayloadGeneratorEmitsIsReachable(t *testing.T) {

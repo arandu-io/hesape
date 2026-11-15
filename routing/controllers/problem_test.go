@@ -136,9 +136,9 @@ func TestAnEmptyRejectionPanicsForAJSONClientToo(t *testing.T) {
 	t.Fatal("an empty rejection was answered")
 }
 
-// YPY sends X-Requested-With and swaps HTML, so it is answered as a page even
-// when it says it accepts JSON: a problem document swapped into a div is
-// neither a page nor an answer.
+// YPY swaps HTML, so it is answered as a page even when its request says it
+// accepts JSON: a problem document swapped into a div is neither a page nor an
+// answer.
 func TestYPYIsAnsweredAsAPageWhateverItAccepts(t *testing.T) {
 	ask := func(err error) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/invoices/42", nil)

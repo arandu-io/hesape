@@ -131,8 +131,8 @@ func (i *Intended) Remember(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	// A boosted navigation is exempt from the test below: YPY follows the link
-	// with XMLHttpRequest, which the browser describes as a cors fetch for an
-	// empty destination, so Fetch Metadata would drop nearly every link in this
+	// with fetch, which the browser describes as a cors fetch for an empty
+	// destination, so Fetch Metadata would drop nearly every link in this
 	// stack. The YPY-Boosted header is the one thing that says it is a page.
 	if !boosted && !asksForADocument(r) {
 		return

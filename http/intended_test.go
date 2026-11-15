@@ -218,8 +218,8 @@ func TestTheYPYRuleStillHoldsBesideFetchMetadata(t *testing.T) {
 	boosted.Header.Set("Accept", "*/*")
 	boosted.Header.Set("Sec-Fetch-Mode", "cors")
 	boosted.Header.Set("Sec-Fetch-Dest", "empty")
-	// ypy-boost swaps a page through XMLHttpRequest, which the browser calls a
-	// cors fetch, so the Fetch Metadata alone would drop nearly every link in
+	// ypy-boost swaps a page through fetch, which the browser calls a cors
+	// fetch, so the Fetch Metadata alone would drop nearly every link in
 	// this stack: a boosted request is a page whatever the browser says it is.
 	if got := i.Take(httptest.NewRecorder(), remembered(i, boosted), "/"); got != "/inbox?page=2" {
 		t.Errorf("a boosted navigation was forgotten: %q", got)
