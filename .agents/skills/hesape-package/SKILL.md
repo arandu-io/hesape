@@ -128,7 +128,8 @@ refusal that only lists the wins reads as advocacy, and gets reopened.
 
 ## What this skill is not about
 
-`workbench` and `aru make:package` generate a Go module that an *application*
+`workbench` and the `make:package` command it carries (the `aru` binary does not
+register it) generate a Go module that an *application*
 imports. That is a different thing from a package of this collection, and
 nothing in this procedure applies to it.
 
