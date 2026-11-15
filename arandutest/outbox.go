@@ -17,7 +17,7 @@ import (
 // alternatives are worse. Sleeping is flaky and slow. A synchronous publish
 // path is a second implementation that will drift from the real one.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func DrainOutbox(t *testing.T, ctx context.Context, outbox *events.Outbox, publisher events.Publisher) {
 	t.Helper()
 
@@ -29,14 +29,14 @@ func DrainOutbox(t *testing.T, ctx context.Context, outbox *events.Outbox, publi
 
 // Collected is a Publisher that keeps what it received, for a test to assert on.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Collected struct {
 	Events []events.Stored
 }
 
 // Publish stores the event.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Collected) Publish(_ context.Context, e events.Stored) error {
 	c.Events = append(c.Events, e)
 	return nil
@@ -45,7 +45,7 @@ func (c *Collected) Publish(_ context.Context, e events.Stored) error {
 // Names returns the event names in the order they arrived, which is what most
 // assertions are actually about.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Collected) Names() []string {
 	out := make([]string, 0, len(c.Events))
 	for _, e := range c.Events {

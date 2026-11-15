@@ -541,7 +541,7 @@ func (s *Store) Now(key string, value any) {
 // Reflash keeps everything flashed for this request for one more.
 //
 // It is what a request that could not draw the page calls -- a redirect in the
-// middle of a flow, an HTMX fragment that turned out to need a full navigation
+// middle of a flow, a YPY fragment that turned out to need a full navigation
 // -- so the messages survive to the page that can show them.
 func (s *Store) Reflash() {
 	s.mergeNewFlashes(s.flashKeys(flashOldKey)...)

@@ -44,7 +44,7 @@ import (
 //
 // validation.Errors is the answer rather than a failure, and a failed
 // Validate reads as one. A page gets the flash and the redirect back, because
-// a 422 with the messages in its body is thrown away by htmx and posted again
+// a 422 with the messages in its body is thrown away by YPY and posted again
 // by a reload. A client that wants JSON has no form to go back to, so it gets
 // the messages keyed by field, through exception.WriteValidationProblem. An
 // empty validation.Errors returned as an error panics, naming the fix: the

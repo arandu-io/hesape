@@ -11,7 +11,7 @@ import (
 // asked for.
 //
 // A client that wants JSON -- by Accept or X-Requested-With, the rule
-// Context.WantsJSON states and htmx is excluded from -- gets a problem document
+// Context.WantsJSON states and YPY is excluded from -- gets a problem document
 // through exception.WriteProblem, the one writer of that shape. Anything else
 // gets hhttp.Refuse, the answer the session guards give. Neither is to be kept
 // by a cache shared between people, because a refusal is one caller's.

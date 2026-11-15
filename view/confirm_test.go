@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A question htmx asks with hx-confirm is drawn by the script as a dialog, and
+// A question YPY asks with ypy-confirm is drawn by the script as a dialog, and
 // the browser's own box is never reached. Each line is one promise a tidy-up
 // could take out while every page still rendered, because the page would only
 // start showing "<address> says" over a dialog nobody styled.
@@ -13,11 +13,11 @@ func TestTheConfirmationKeepsItsPromises(t *testing.T) {
 	script := code(readUI(t))
 
 	for _, want := range []struct{ code, why string }{
-		{"document.addEventListener('htmx:confirm', function (event) {", "nothing takes the question before htmx asks it with window.confirm"},
-		{"if (event.defaultPrevented || !detail || !detail.question", "an element with no question, or one another handler already answered, is held by a dialog"},
-		{"event.preventDefault();\n\t\tvar elt = detail.elt;", "htmx still asks the browser's box after the dialog"},
-		{"detail.issueRequest(true)", "the request sent after a yes asks the browser's box again"},
-		{"csrfRenew().then(function () { detail.issueRequest(true); });", "a request sent after a yes skips the renewal of a lapsed token"},
+		{"document.addEventListener('ypy:confirm', function (event) {", "nothing takes the question before YPY asks it with window.confirm"},
+		{"if (event.defaultPrevented || !ctx || !ctx.confirm", "an element with no question, or one another handler already answered, is held by a dialog"},
+		{"event.preventDefault();\n\t\tvar elt = ctx.sourceElement;", "YPY still asks the browser's box after the dialog"},
+		{"if (yes) detail.issueRequest(); else detail.dropRequest();", "the request waits for an answer that nobody gives, or is sent without one"},
+		{"return csrfRenew().then(function () {", "a request sent after a yes skips the renewal of a lapsed token"},
 		{"dialog.close('confirm')", "the button that goes through with it does not say so to the dialog"},
 		{"dialog.returnValue === 'confirm'", "Escape and the way out are read as a yes"},
 		{"dialog.remove();", "a dialog left on the page is swapped out from under a boosted body"},

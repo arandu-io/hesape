@@ -65,5 +65,5 @@
 // assertion that matches. There is no console command runner and no
 // view-level assertion.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 package arandutest

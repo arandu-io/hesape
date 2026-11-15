@@ -9,9 +9,9 @@
 // [LoggedExceptionCollection] for what the handler recorded).
 //
 // [TestResponse] is deprecated: a response is asserted on through
-// hesape/arandutest, whose Client drives the handler through the middleware
-// production runs and whose Response carries the assertions worth keeping,
-// over [AssertableJSONString] for a JSON answer.
+// github.com/arandu-io/framework/test, whose Client drives the handler through
+// the middleware production runs and whose Response carries the assertions worth
+// keeping, over [AssertableJSONString] for a JSON answer.
 //
 // # Everything reports through T
 //

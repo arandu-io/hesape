@@ -132,10 +132,10 @@ has to satisfy:
   (`TestTheCreditedVersionsAreTheEmbeddedOnes`) and that the license texts are
   complete rather than named (`TestTheLicenseTextsAreComplete`).
 
-Six files sit in `view/assets/`, five of them named by the single `go:embed`
-directive at `view/assets.go:21`. Three are third party — `htmx.min.js`,
-`basecoat.bundle.js` and `app.css`, which is Tailwind's output rather than its
-input. Three are ours: `app.src.css`, the Tailwind input this project wrote, and
+Seven files sit in `view/assets/`, six of them named by the single `go:embed`
+directive at `view/assets.go:24`. Four are third party — `ypy.min.js`,
+`ypy-csrf.min.js`, `basecoat.bundle.js` and `app.css`, which is Tailwind's
+output rather than its input. Three are ours: `app.src.css`, the Tailwind input this project wrote, and
 the only two first-party scripts there are:
 
 - **`theme.js`** reads the theme somebody chose out of `localStorage` and

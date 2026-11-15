@@ -182,13 +182,16 @@ modules, so the `find` above already covers every module.
 
 ## Two packages that are not for these tests
 
-`arandutest` and `testing` are shipped *to applications* — a browser and
-database assertions in the first, the assertion vocabulary in the second. The
-collection's own tests use neither: `hesape/testing` is imported by no `_test.go`
-in this repository, and `arandutest` only by its own two. Do not reach for them
-here.
+`testing` is the assertion vocabulary shipped *to applications*, and no `_test.go`
+in this repository imports it. `arandutest` is the older application test kit
+(a browser, a server on a free port, database assertions). It is deprecated:
+the kit applications use is `github.com/arandu-io/framework/test`, and
+`arandutest` stays only as the old names pointing at it. The tests here that
+import it are the ones that need a browser or a running server: the
+`e2e`-tagged tests in `view` and `foundation`, and the serve tests of the pgx
+and sqlite connectors. Do not reach for either in a test that needs neither.
 
-That is a rule about direction, not a slight. `arandutest` exists so an
+That is a rule about direction, not a slight. The application kit exists so an
 application's test drives the same code path production drives — there is no
 synchronous mode and no in-memory substitute, because a second way to run
 something always leaks into production. A test inside this collection is already

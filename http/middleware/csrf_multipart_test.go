@@ -155,7 +155,7 @@ func TestCSRFAcceptedUploadIsReadableAndRemoved(t *testing.T) {
 	}
 }
 
-// TestCSRFHeaderTokenLeavesTheBodyUnread covers the htmx upload: the token is in
+// TestCSRFHeaderTokenLeavesTheBodyUnread covers the YPY upload: the token is in
 // the header, so the body reaches the handler unparsed and can be streamed.
 func TestCSRFHeaderTokenLeavesTheBodyUnread(t *testing.T) {
 	csrf := session.NewCSRF(appKey, time.Hour)

@@ -52,7 +52,7 @@ func TestTheDefaultHeadersAreOnEveryAnswer(t *testing.T) {
 		}
 	}
 
-	// The policy has no 'unsafe-inline' in it, and htmx works anyway because it
+	// The policy has no 'unsafe-inline' in it, and YPY works anyway because it
 	// operates through attributes rather than inline script.
 	csp := rec.Header().Get("Content-Security-Policy")
 	if strings.Contains(csp, "unsafe-inline") {

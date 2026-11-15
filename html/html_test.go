@@ -150,12 +150,12 @@ func TestAttributesKeepsFrameworkNames(t *testing.T) {
 }
 
 // TestAttributesDropsWhatABrowserWouldRun: an escaped value is still a script
-// in an event handler, a request in hx-post, an expression in an Alpine
+// in an event handler, a request in ypy-post, an expression in an Alpine
 // directive and a document in srcdoc. The map used to write every one of
 // them, so a builder fed a caller's attributes wrote whatever it was handed.
 func TestAttributesDropsWhatABrowserWouldRun(t *testing.T) {
 	for _, key := range []string{
-		"onclick", "ONERROR", "onmouseover", "hx-post", "hx-get", "hx-vals", "data-hx-post",
+		"onclick", "ONERROR", "onmouseover", "ypy-post", "ypy-get", "ypy-vals", "data-ypy-post",
 		"x-data", "@click", ":class", "srcdoc", "style", "http-equiv",
 	} {
 		if got := string(newBuilder().Attributes(html.Attrs{key: "alert(1)", "id": "x"})); got != ` id="x"` {

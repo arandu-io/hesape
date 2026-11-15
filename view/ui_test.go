@@ -184,19 +184,20 @@ func TestEveryDelegatedEventReachesTheRegistry(t *testing.T) {
 	}
 }
 
-// TestTheLifecycleIsHookedToHtmx pins the three moments a behaviour is told
-// about, and that they are htmx's own events rather than a poll.
+// TestTheLifecycleIsHookedToYPY pins the three moments a behaviour is told
+// about: mounting and updating are YPY's own events rather than a poll, and
+// destroying follows what leaves the document.
 //
-// beforeCleanupElement is the one that cannot be replaced by a sweep: it is the
-// last moment an element still exists, and a behaviour that took a timer or an
-// observer has nowhere else to give it back.
-func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
+// Destroying is the one that cannot be replaced by a sweep: a behaviour that
+// took a timer or an observer has nowhere else to give it back. It is hooked to
+// the document and not to ypy:before:cleanup, which reaches only the elements
+// YPY powers and a behaviour has no ypy- attribute.
+func TestTheLifecycleIsHookedToYPY(t *testing.T) {
 	script := readUI(t)
 
 	for hook, call := range map[string]string{
-		"htmx:load":                 "mount(event.target)",
-		"htmx:afterSettle":          "update(event.target)",
-		"htmx:beforeCleanupElement": "destroy(event.target)",
+		"ypy:after:process": "mount(event.target)",
+		"ypy:after:settle":  "update(event.target)",
 	} {
 		if !strings.Contains(script, `document.addEventListener('`+hook+`'`) {
 			t.Errorf("%s is not hooked", hook)
@@ -206,33 +207,35 @@ func TestTheLifecycleIsHookedToHtmx(t *testing.T) {
 		}
 	}
 
-	// Mounting is idempotent by a marker on the element, because htmx:load
-	// fires for the swapped element and for everything inside it, and a
-	// behaviour mounted twice takes its timer twice.
+	if !strings.Contains(script, "new MutationObserver(function (records) {") || !strings.Contains(script, "destroy(node)") {
+		t.Error("what leaves the document is not destroyed")
+	}
+
+	// Mounting is idempotent by a marker on the element, because
+	// ypy:after:process fires for the processed element and for what is inside
+	// it, and a behaviour mounted twice takes its timer twice.
 	if !strings.Contains(script, `getAttribute('data-kyse-mounted') === 'true'`) {
 		t.Error("mounting is not guarded, so a behaviour mounts more than once")
 	}
 }
 
-// TestUpdatedDoesNotFireOnWhatJustMounted is the ordering the two hooks are
-// only distinct because of.
+// TestAnElementThatArrivesInASwapIsMountedAndNotUpdatedByIt is the ordering the
+// two hooks are only distinct because of.
 //
-// htmx fires htmx:load from a settle task and htmx:afterSettle immediately
-// after the tasks run -- se(l.tasks,…);se(l.elts,…afterSettle…) in the bundle --
-// so an element that arrives in a swap reaches both. Without a guard it mounted
-// and then updated in the same breath, two hooks that always fire together are
-// one hook, and a behaviour that set itself up in mounted did it twice.
-func TestUpdatedDoesNotFireOnWhatJustMounted(t *testing.T) {
+// YPY fires ypy:after:settle on the target of a swap and processes what the swap
+// inserted after it, which is where ypy:after:process mounts. So an element that
+// arrives in a swap is not mounted yet when the settle that brought it runs, and
+// nothing has to remember what just mounted: updated reaches only what was
+// already there. A record kept for that would skip the first real update of
+// every element mounted at load.
+func TestAnElementThatArrivesInASwapIsMountedAndNotUpdatedByIt(t *testing.T) {
 	script := code(readUI(t))
 
-	if !strings.Contains(script, "justMounted.add(element)") {
-		t.Error("mounting records nothing, so the update that follows it cannot be told apart")
+	if strings.Contains(script, "justMounted") {
+		t.Error("mounting keeps a record to tell it from an update, and the order YPY settles in makes the record skip a real update")
 	}
-	if !strings.Contains(script, "justMounted.has(element)") {
-		t.Error("updating does not check what just mounted")
-	}
-	if !strings.Contains(script, "justMounted.delete(element)") {
-		t.Error("the record is never cleared, so the element is skipped by every later update")
+	if !strings.Contains(script, `[data-kyse-behavior][data-kyse-mounted="true"]`) {
+		t.Error("updating reaches elements that were never mounted")
 	}
 }
 

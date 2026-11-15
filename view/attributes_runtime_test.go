@@ -80,12 +80,12 @@ func TestAnAttributeThatIsNotInertIsRefused(t *testing.T) {
 		name string
 	}{
 		{"an event handler", "onclick"},
-		{"an htmx handler", "hx-on:click"},
-		{"the same handler under the alias htmx also reads", "data-hx-on-click"},
-		{"an htmx verb, which is fetched", "hx-post"},
-		{"the same verb under the alias", "data-hx-post"},
-		{"what htmx sends beside the request", "hx-headers"},
-		{"what htmx replaces with the answer", "hx-swap-oob"},
+		{"a YPY handler", "ypy-on:click"},
+		{"the same handler under the alias YPY also reads", "data-ypy-on-click"},
+		{"a YPY verb, which is fetched", "ypy-post"},
+		{"the same verb under the alias", "data-ypy-post"},
+		{"what YPY sends beside the request", "ypy-headers"},
+		{"what YPY replaces with the answer", "ypy-swap-oob"},
 		{"an Alpine directive", "x-data"},
 		{"an inline style the policy drops", "style"},
 		{"an address, which TextURL decides", "href"},

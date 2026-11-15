@@ -20,10 +20,15 @@ before their first patch.
 ## Before you open a pull request
 
 ```
+export GOWORK=off
 gofmt -l $(find . -name '*.go' -not -path '*/testdata/*' -not -name '*.kyse.go')   # no output
+go build ./...
 go vet ./...
 go test -race ./...
 ```
+
+`GOWORK=off` makes the run build what a consumer downloads, rather than what a
+local workspace redirects.
 
 That covers the root module and nothing else. This repository is more than one
 Go module -- `find . -name go.mod` lists them, the root included -- and `./...`
@@ -35,7 +40,7 @@ last part of the tree that should go unchecked. Run the pair in each:
 for mod in $(find . -name go.mod); do
   dir=${mod%/go.mod}
   echo "== $dir"
-  (cd "$dir" && go vet ./... && go test -race ./...) || break
+  (cd "$dir" && GOWORK=off go vet ./... && GOWORK=off go test -race ./...) || break
 done
 ```
 
@@ -92,7 +97,9 @@ No AI attribution of any kind: no `Co-Authored-By` for an assistant, no
 
 ## Architecture decisions
 
-The decisions this project has already made live at arandu.io/docs, and every
-one that closed a door has an ADR. If your change contradicts one, say so in the
+Every decision this project made that closed a door has an ADR. The first
+fifty-two are public in [arandu-io/docs](https://github.com/arandu-io/docs), under
+`_archive/`; the later ones are kept by the maintainers. The usage guide at
+arandu.io/docs is not where decisions are recorded. If your change contradicts one, say so in the
 pull request and argue for the change of decision — that is a normal thing to
 do, and it is better than a patch that quietly works around it.

@@ -166,7 +166,7 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Flush keeps server-sent events working through the wrapper. HTMX streams over
+// Flush keeps server-sent events working through the wrapper. YPY streams over
 // SSE, so losing Flush here would break it in a way that is very hard to trace.
 func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {

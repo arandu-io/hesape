@@ -25,20 +25,20 @@ func localized(method, path string) *http.Request {
 }
 
 // An address no route answers is refused like every other refusal: with the
-// application's sentence, and with HX-Refresh for htmx.
+// application's sentence, and with YPY-Refresh for YPY.
 func TestAnUnmatchedAddressIsRefusedWithTheApplicationsSentence(t *testing.T) {
 	r := routing.NewRouter()
 	r.Get("/invoices", ok)
 
 	rec := httptest.NewRecorder()
 	req := localized(http.MethodGet, "/nowhere")
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound || strings.TrimSpace(rec.Body.String()) != "Página não encontrada." {
 		t.Fatalf("%d %q", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Error("an htmx request was not told to reload")
+	if rec.Header().Get("YPY-Refresh") != "true" {
+		t.Error("a YPY request was not told to reload")
 	}
 
 	wrong := httptest.NewRecorder()

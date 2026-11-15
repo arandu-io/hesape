@@ -22,7 +22,7 @@ type Config struct {
 	// Fragments makes the renderer answer only the named part of a view when
 	// the request asks for a fragment.
 	//
-	// True by default: it is what makes an HTMX swap send back a piece of a page
+	// True by default: it is what makes a YPY swap send back a piece of a page
 	// rather than the whole thing, and turning it off means every interaction
 	// re-renders the chrome around the part that changed.
 	Fragments bool

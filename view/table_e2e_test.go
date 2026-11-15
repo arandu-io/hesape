@@ -36,14 +36,14 @@ func (p *tablePage) region(page int, q string) string {
 		fmt.Fprintf(&rows, `<tr><td><input type="checkbox" data-part="select" name="ids" form="t-bulk" value="%d" aria-label="Select row %d"></td><td>row %d</td></tr>`, key, key, key)
 	}
 	return fmt.Sprintf(`<div id="t" data-part="root" role="region" aria-label="T" data-kyse-behavior="table" data-total="15" data-url="/?page=%d" data-kyse-props='{"selectName":"ids","selected":"{n} of {total} row(s) selected.","selectedCount":"{n} selected"}'>
-<form id="t-query" action="/" method="get" hx-get="/" hx-trigger="submit, change" hx-target="#t" hx-swap="outerHTML" hx-select="#t" hx-push-url="true" hx-sync="closest [data-part=root]:replace">
+<form id="t-query" action="/" method="get" ypy-get="/" ypy-trigger="submit, change" ypy-target="#t" ypy-swap="outerHTML" ypy-select="#t" ypy-push-url="true" ypy-sync="closest [data-part=root]:replace">
 <label for="t-search">Search T</label><input id="t-search" data-part="search" type="text" name="q" value="%s"></form>
-<details id="t-columns" data-menu><summary>Columns</summary><div data-menu-panel data-align="end" role="menu" class="panel"><a role="menuitemcheckbox" aria-checked="true" href="/?page=2&amp;noise=1" hx-get="/?page=2&amp;noise=1" hx-target="#t" hx-swap="outerHTML" hx-select="#t" hx-push-url="true">Name</a></div></details>
+<details id="t-columns" data-menu><summary>Columns</summary><div data-menu-panel data-align="end" role="menu" class="panel"><a role="menuitemcheckbox" aria-checked="true" href="/?page=2&amp;noise=1" ypy-get="/?page=2&amp;noise=1" ypy-target="#t" ypy-swap="outerHTML" ypy-select="#t" ypy-push-url="true">Name</a></div></details>
 <form id="t-bulk" data-part="bulk" method="post" action="/bulk" hidden><button type="submit" name="do" value="archive">Archive</button></form>
 <table><tbody>%s</tbody></table>
 <div data-part="count" role="status" data-selected-template="{n} of {total} row(s) selected.">0 of 15 row(s) selected.</div>
-<a data-step="next" href="/?page=%d&amp;noise=1" hx-get="/?page=%d&amp;noise=1" hx-target="#t" hx-swap="outerHTML" hx-select="#t" hx-push-url="true">Next</a>
-<a data-step="previous" href="/?page=%d&amp;noise=1" hx-get="/?page=%d&amp;noise=1" hx-target="#t" hx-swap="outerHTML" hx-select="#t" hx-push-url="true">Previous</a>
+<a data-step="next" href="/?page=%d&amp;noise=1" ypy-get="/?page=%d&amp;noise=1" ypy-target="#t" ypy-swap="outerHTML" ypy-select="#t" ypy-push-url="true">Next</a>
+<a data-step="previous" href="/?page=%d&amp;noise=1" ypy-get="/?page=%d&amp;noise=1" ypy-target="#t" ypy-swap="outerHTML" ypy-select="#t" ypy-push-url="true">Previous</a>
 </div>`, page, q, rows.String(), min(page+1, 3), min(page+1, 3), max(page-1, 1), max(page-1, 1))
 }
 
@@ -71,13 +71,13 @@ func newTablePage(t *testing.T) *tablePage {
 		fmt.Sscan(r.URL.Query().Get("page"), &page)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
+		if r.Header.Get("YPY-Request") == "true" && r.Header.Get("YPY-History-Restore-Request") != "true" {
 			fmt.Fprint(w, p.region(page, r.URL.Query().Get("q")))
 			return
 		}
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="htmx-config" content='{"includeIndicatorStyles":false}'><title>T</title><link rel="stylesheet" href="/t.css">
-<script src="%s"></script><script src="%s"></script></head><body hx-boost="true">%s</body></html>`,
-			view.Asset("htmx.min.js"), view.Asset("ui.js"), p.region(page, r.URL.Query().Get("q")))
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>T</title><link rel="stylesheet" href="/t.css">
+<script src="%s"></script><script src="%s"></script></head><body ypy-boost:inherited="true">%s</body></html>`,
+			view.Asset("ypy.min.js"), view.Asset("ui.js"), p.region(page, r.URL.Query().Get("q")))
 	})
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")

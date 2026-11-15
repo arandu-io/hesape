@@ -1,9 +1,12 @@
 // Package database is the data access contract: one connection, one repository
-// shape, and no ORM.
+// shape, and no generic ORM.
 //
-// Queries are plain parameterized SQL, written by hand in the templates
-// `aru make:module` emits, which keeps the query plan predictable and the value
-// always in a placeholder. What this package adds on top is:
+// An entity's rows are read and written through the Model and query Builder in
+// the model subpackage, which `aru model:build` generates per entity, with a
+// Grant on every terminal. A Repository is where a complex query, a read model
+// or a report lives, and plain parameterized SQL stays reachable as the declared
+// escape hatch, with the value always in a placeholder. What this package adds
+// on top is:
 //
 //  1. an auth.Grant required by every operation (the mandatory path);
 //  2. tenant scoping taken from the Grant, never from a parameter;

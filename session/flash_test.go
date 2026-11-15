@@ -294,10 +294,10 @@ func TestFlashIsNotConsumedByAnAssetRequest(t *testing.T) {
 			r.Header.Set("Accept", "text/css,*/*;q=0.1")
 			return r
 		}},
-		{name: "an HTMX fragment", build: func() *http.Request {
+		{name: "a YPY fragment", build: func() *http.Request {
 			r := httptest.NewRequest(http.MethodGet, "/inbox/rows", nil)
 			r.Header.Set("Accept", "*/*")
-			r.Header.Set("HX-Request", "true")
+			r.Header.Set("YPY-Request", "true")
 			return r
 		}},
 		{name: "a JSON call", build: func() *http.Request {

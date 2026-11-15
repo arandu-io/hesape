@@ -7,7 +7,7 @@ import (
 )
 
 // Errors maps a field to its messages. It is what a view draws its inline errors
-// from, and it serializes straight into the HTMX partial that re-renders the
+// from, and it serializes straight into the YPY partial that re-renders the
 // form.
 type Errors map[string][]string
 

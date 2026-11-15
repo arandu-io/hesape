@@ -23,7 +23,7 @@ import (
 // share one frame: the layout asks for behaviour, and Page below is the
 // implementation a page embeds to get it.
 type Layout interface {
-	// PageTitle is the document title, and what HTMX swaps on navigation.
+	// PageTitle is the document title, and what YPY swaps on navigation.
 	PageTitle() string
 	// PageDescription is the meta description. Empty writes no tag, because a
 	// missing description outranks an empty one.
@@ -38,8 +38,8 @@ type Layout interface {
 	// configuration, the same on every request, which is why Page takes it from
 	// the request context rather than from the controller -- see New.
 	BrandName() string
-	// CSRFToken is what @csrf reads, and what <body> carries into every HTMX
-	// request.
+	// CSRFToken is what @csrf reads, and what the ypy-csrf meta tag carries
+	// into every YPY request that changes something.
 	CSRFToken() string
 
 	// SignedIn decides which half of the navigation is drawn, and SignedInName
@@ -122,8 +122,8 @@ type Page struct {
 	AppName string
 
 	// Token is the CSRF token issued for this session. It reaches the markup
-	// twice: as the hidden field @csrf writes, and as the hx-headers attribute
-	// on <body> that makes every HTMX request carry it.
+	// twice: as the hidden field @csrf writes, and as the content of the
+	// ypy-csrf meta tag in <head> that makes every YPY request carry it.
 	//
 	// New fills it from the request context, where the middleware that
 	// protects forms put it (see hhttp.WithCSRFToken), so a controller never
@@ -244,7 +244,7 @@ func (p Page) BrandName() string { return p.AppName }
 // CSRFToken is what @csrf reads to write the hidden field.
 //
 // It is a method rather than the field itself because the field is also
-// interpolated into hx-headers, and one name cannot be both.
+// interpolated into the ypy-csrf meta tag, and one name cannot be both.
 func (p Page) CSRFToken() string { return p.Token }
 
 // Translator is the application's catalogue, or nil when the request carried

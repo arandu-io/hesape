@@ -173,9 +173,9 @@ func TestThePreviousURLIsOnlyRememberedForAPageSomebodyNavigatedTo(t *testing.T)
 	}
 
 	fragment := pageRequest(http.MethodGet, "/invoices/row")
-	fragment.Header.Set("HX-Request", "true")
+	fragment.Header.Set("YPY-Request", "true")
 	if got := remembered(fragment); got != "" {
-		t.Fatalf("an HTMX fragment was remembered: %q", got)
+		t.Fatalf("a YPY fragment was remembered: %q", got)
 	}
 
 	asset := httptest.NewRequest(http.MethodGet, "/app.css", nil)
@@ -234,14 +234,14 @@ func TestThePreviousRouteIsRememberedBesideTheAddress(t *testing.T) {
 // name and not the address would leave a name pointing at a page nobody was on.
 func TestThePreviousRouteIsFilteredExactlyAsTheAddressIs(t *testing.T) {
 	fragment := pageRequest(http.MethodGet, "/invoices")
-	fragment.Header.Set("HX-Request", "true")
+	fragment.Header.Set("YPY-Request", "true")
 
 	for _, c := range []struct {
 		name    string
 		request *http.Request
 	}{
 		{"a submission", pageRequest(http.MethodPost, "/invoices")},
-		{"an HTMX fragment", fragment},
+		{"a YPY fragment", fragment},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			store := servedThroughRoute(t, "invoices.index", c.request)

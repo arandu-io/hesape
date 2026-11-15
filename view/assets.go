@@ -17,11 +17,11 @@ import (
 // The scripts are embedded, not fetched.
 //
 // This is not preference. The SecurityHeaders middleware sets
-// "script-src 'self'", so loading HTMX from a CDN would mean loosening the CSP
+// "script-src 'self'", so loading YPY from a CDN would mean loosening the CSP
 // -- paying in security for convenience. It also means the deploy stays one
 // binary: no asset publishing step, no CDN to invalidate, no storage:link.
 //
-//go:embed assets/htmx.min.js assets/basecoat.bundle.js assets/theme.js assets/ui.js assets/app.css
+//go:embed assets/ypy.min.js assets/ypy-csrf.min.js assets/basecoat.bundle.js assets/theme.js assets/ui.js assets/app.css
 var files embed.FS
 
 // AssetPath is where assets are served from when the application has no name of
@@ -82,7 +82,8 @@ var (
 
 func init() {
 	for name, contentType := range map[string]string{
-		"htmx.min.js":        "application/javascript; charset=utf-8",
+		"ypy.min.js":         "application/javascript; charset=utf-8",
+		"ypy-csrf.min.js":    "application/javascript; charset=utf-8",
 		"basecoat.bundle.js": "application/javascript; charset=utf-8",
 		"theme.js":           "application/javascript; charset=utf-8",
 		"ui.js":              "application/javascript; charset=utf-8",
@@ -299,12 +300,12 @@ type Registration struct {
 	URL         string
 }
 
-// Asset returns the versioned path of an asset: /_arandu/assets/<hash>/htmx.min.js,
+// Asset returns the versioned path of an asset: /_arandu/assets/<hash>/ypy.min.js,
 // or the same under the prefix [UseBrand] chose.
 // Image source names registered with RegisterImageAsset resolve to their WebP
 // derivatives; no image processing takes place during this lookup.
 //
-// The hash comes from the content, so upgrading HTMX changes the URL and no
+// The hash comes from the content, so upgrading YPY changes the URL and no
 // browser serves a stale script -- without anyone remembering to bump a version.
 //
 // A name nobody registered panics. It used to answer AssetPath+"missing/"+name,
@@ -399,7 +400,7 @@ func Version() string {
 	defer assetsMu.RUnlock()
 
 	var b strings.Builder
-	for _, name := range []string{Stylesheet, "htmx.min.js", "ui.js"} {
+	for _, name := range []string{Stylesheet, "ypy.min.js", "ypy-csrf.min.js", "ui.js"} {
 		fmt.Fprintf(&b, "%s %s (%d bytes)\n", name, assets[name].hash, len(assets[name].body))
 	}
 	return b.String()

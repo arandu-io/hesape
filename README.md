@@ -35,12 +35,12 @@ nothing stops a project from importing a package here directly.
 
 | area | packages | what it does |
 |---|---|---|
-| authorization & session | `auth`, `session`, `cookie`, `hashing`, `encryption`, `oauth` | `Grant` — unexported fields, issued only by `Authorize` or the named `SystemGrant` escape hatch — plus the session store, CSRF token, password hashing and signed tokens |
-| data & storage | `database`, `cache`, `redis`, `filesystem`, `pagination` | one repository shape with no ORM, a cache with pluggable stores, a Redis/RESP adapter for both, tenant-scoped file storage, three paginators (offset, simple, keyset) |
-| HTTP & views | `http`, `routing`, `view`, `html` | request/response context over `net/http`, a router with named routes and URL generation, the kyse-to-Go view compiler with HTMX and the delegated client behaviours wired in, an escaped HTML/form builder |
+| authorization & session | `auth`, `session`, `cookie`, `hashing`, `encryption`, `oauth`, `2fa`, `otp`, `onetime` | `Grant` — unexported fields, issued only by `Authorize` or the named `SystemGrant` escape hatch — plus the session store, CSRF token, password hashing and signed tokens, the second factor (`2fa`, a package named `twofactor`), one-time codes computed from a secret (`otp`) and the short code mailed to somebody and spent once (`onetime`) |
+| data & storage | `database`, `cache`, `redis`, `filesystem`, `pagination` | one repository shape and the Model and query Builder `aru model:build` generates per entity (`database/model`), no generic ORM, a cache with pluggable stores, a Redis/RESP adapter for both, tenant-scoped file storage, three paginators (offset, simple, keyset) |
+| HTTP & views | `http`, `routing`, `view`, `html`, `requestscope`, `geo` | request/response context over `net/http`, a router with named routes and URL generation, the view runtime (the registry, the renderer, `Page` and the embedded assets, YPY among them — the compiler that turns a `.kyse.go` file into Go lives in `aru`), an escaped HTML/form builder, what one request has already read remembered for the rest of it, and the metadata and public catalogue that search and generative engines read |
 | background work | `queue`, `bus`, `events`, `webhook`, `console/scheduling`, `broadcasting`, `notifications`, `mail` | a job queue where every push carries a `Grant`, batches and chains of jobs, domain events with an outbox, signed webhooks sent through the queue, received, or relayed as they arrived, an in-process scheduler (a goroutine, not a system crontab), channel broadcasting over Redis, multi-channel notifications, mail |
-| diagnostics & quality | `log`, `exception`, `validation`, `console`, `testing`, `arandutest` (deprecated: moved to `github.com/arandu-io/framework/test`) | the request Collector this framework exists for, the handler a failed request stops at (and the development error page), a form validator with 108 rules, the vocabulary a project's own commands are written against, a test client with assertions and outbox helpers |
-| foundation & utilities | `foundation`, `config`, `collections`, `str`, `support`, `number`, `image`, `jsonschema`, `process`, `pipeline`, `translation` | process composition run once at boot, typed configuration, generic collections, the string transforms a generator, a router and a validator all need, number/currency formatting, declarative image transforms, typed JSON Schema, external process execution, a value piped through a chain of steps, translated strings |
+| diagnostics & quality | `log`, `exception`, `validation`, `console`, `testing`, `arandutest` (deprecated: moved to `github.com/arandu-io/framework/test`) | the request Collector this framework exists for, the handler a failed request stops at (and the development error page), a form validator with over a hundred rules, the vocabulary a project's own commands are written against, a test client with assertions and outbox helpers |
+| foundation & utilities | `foundation`, `config`, `collections`, `str`, `support`, `number`, `image`, `jsonschema`, `process`, `pipeline`, `translation`, `concurrency`, `enum`, `faker`, `mask`, `qr`, `toon`, `publish`, `workbench` | process composition run once at boot, typed configuration, generic collections, the string transforms a generator, a router and a validator all need, number/currency formatting, declarative image transforms, typed JSON Schema, external process execution, a value piped through a chain of steps, translated strings, tasks run at the same time, closed sets of values, seeded fake data, input masks, QR symbols as inline SVG, TOON encoding, a module's files written into a project, and the generator of a module an application can import |
 
 Seven of the top-level packages export nothing at all, on purpose, and hold only
 a doc comment explaining why: a dependency-injection container (`container` —
@@ -60,7 +60,7 @@ package stays on disk so an import that goes looking for the concept finds the
 reason instead of a path that resolves to nothing.
 
 **Assets are embedded, not fetched** — one `go:embed` directive
-(`view/assets.go:21`) bundles HTMX 2.0.4, Tailwind CSS 4.3.3, Basecoat 1.0.2
+(`view/assets.go:24`) bundles YPY 0.1.0-dev, Tailwind CSS 4.3.3, Basecoat 1.0.2
 and Arandu's own `theme.js` and `ui.js`, served from the application's own
 origin under `/_arandu/assets/`. Zero CDN: the Content-Security-Policy is
 `script-src 'self'`, and a test scans the embedded assets for `cdn`, `unpkg`,
@@ -103,19 +103,23 @@ The API reference is generated from the doc comments and lives on
 symbol carries one, and that is deliberate: it is the documentation that cannot
 drift from the code, because it sits in the same file.
 
-A guide and a website do not exist yet, and that is a decision rather than a
-gap: a guide written against an API that still moves is work done twice, and the
-second time is worse — there is wrong documentation published.
+The guide is published at [arandu.io/docs](https://arandu.io/docs), and the
+site is itself an Arandu application. Where the guide and a doc comment
+disagree, the doc comment sits next to the code and is the one to trust.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Every commit carries a `Signed-off-by`
-line, and before a pull request opens the three commands in that file — `gofmt`,
-`go vet ./...`, `go test -race ./...` — have to pass in the root module and in
-each module beside it. CI runs those three and three gates on top of them:
-the exported surface diffed against the last release, which fails an
-incompatible change that `UPGRADE.md` does not record; `govulncheck`; and a
-check that `go.mod` still declares the one dependency.
+line, and before a pull request opens the commands in that file — `gofmt`,
+`go build ./...`, `go vet ./...`, `go test -race ./...` — have to pass in the
+root module and in each module beside it. CI runs those and the gates on top of
+them:
+the exported surface diffed against the last release, in the root and in each
+nested module, which fails an incompatible change that `UPGRADE.md` does not
+record; `govulncheck`; a check that `go.mod` still declares the one dependency;
+and, for the nested modules, that the generated RPC contract is current, that
+each manifest names the latest release, that none carries a `replace`, and that
+each builds and tests both pinned and against the tree.
 
 ## Security Vulnerabilities
 

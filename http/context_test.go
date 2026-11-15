@@ -124,7 +124,7 @@ func TestARedirectToANamedRouteFallsBackToTheFrontPageRatherThanNowhere(t *testi
 	}
 }
 
-func TestARedirectIsThreeHundredAndThreeAndUnderHTMXIsAHeader(t *testing.T) {
+func TestARedirectIsThreeHundredAndThreeAndUnderYPYIsAHeader(t *testing.T) {
 	// 303 after a POST is what tells the browser to GET the next address
 	// instead of posting the body to it again.
 	rec := httptest.NewRecorder()
@@ -133,25 +133,25 @@ func TestARedirectIsThreeHundredAndThreeAndUnderHTMXIsAHeader(t *testing.T) {
 		t.Errorf("answered %d, want 303", rec.Code)
 	}
 
-	// An HTMX request that gets a 302 follows it inside the fragment, so the
+	// A YPY request that gets a 302 follows it inside the fragment, so the
 	// whole page ends up nested in a div.
 	req := request(stdhttp.MethodPost, "/invoices")
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 	rec = httptest.NewRecorder()
 	hhttp.Redirect(rec, req, "/invoices/42")
 
-	if to := rec.Header().Get("HX-Redirect"); to != "/invoices/42" {
-		t.Errorf("HX-Redirect = %q", to)
+	if to := rec.Header().Get("YPY-Redirect"); to != "/invoices/42" {
+		t.Errorf("YPY-Redirect = %q", to)
 	}
-	// A body alongside HX-Redirect is swapped in before the browser navigates.
+	// A body alongside YPY-Redirect is swapped in before the browser navigates.
 	if rec.Code != stdhttp.StatusNoContent || rec.Body.Len() != 0 {
 		t.Errorf("answered %d with %d bytes, want 204 and nothing", rec.Code, rec.Body.Len())
 	}
 }
 
-func TestARefusalKeepsItsStatusAndUnderHTMXAsksForAReload(t *testing.T) {
+func TestARefusalKeepsItsStatusAndUnderYPYAsksForAReload(t *testing.T) {
 	// The status and the sentence are the caller's: logs, monitoring and every
-	// non-HTMX client see exactly what they saw before.
+	// non-YPY client see exactly what they saw before.
 	rec := httptest.NewRecorder()
 	hhttp.Refuse(rec, request(stdhttp.MethodGet, "/admin"), stdhttp.StatusForbidden, "this account may not open that")
 
@@ -161,18 +161,18 @@ func TestARefusalKeepsItsStatusAndUnderHTMXAsksForAReload(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "may not open") {
 		t.Errorf("the sentence was lost: %q", rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "" {
+	if rec.Header().Get("YPY-Refresh") != "" {
 		t.Error("a plain request was asked to reload, which it would do twice")
 	}
 
-	// htmx does not swap a 4xx, so without the reload the person clicks and
+	// YPY does not swap a 4xx, so without the reload the person clicks and
 	// nothing at all happens.
 	req := request(stdhttp.MethodGet, "/admin")
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 	rec = httptest.NewRecorder()
 	hhttp.Refuse(rec, req, stdhttp.StatusForbidden, "this account may not open that")
 
-	if rec.Header().Get("HX-Refresh") != "true" {
+	if rec.Header().Get("YPY-Refresh") != "true" {
 		t.Error("the refusal was invisible: no swap, and no reload asked for")
 	}
 	if rec.Code != stdhttp.StatusForbidden {

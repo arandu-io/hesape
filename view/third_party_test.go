@@ -55,9 +55,9 @@ func TestEveryEmbeddedAssetIsCredited(t *testing.T) {
 func TestTheCreditedVersionsAreTheEmbeddedOnes(t *testing.T) {
 	notice := readNotice(t)
 
-	// HTMX states its version in its minified build: a `version:"x.y.z"`
-	// property on the object it exports.
-	declared := regexp.MustCompile(`version:"([0-9][0-9a-zA-Z.\-]*)"`)
+	// YPY states its version in its minified build: a `this.version="x.y.z"`
+	// assignment in the constructor of the object it exports.
+	declared := regexp.MustCompile(`\.version="([0-9][0-9a-zA-Z.\-]*)"`)
 	// Tailwind writes a banner instead, and the compiler preserves it.
 	banner := regexp.MustCompile(`tailwindcss v([0-9][0-9a-zA-Z.\-]*)`)
 
@@ -65,8 +65,8 @@ func TestTheCreditedVersionsAreTheEmbeddedOnes(t *testing.T) {
 	// version, because there is nothing to compare an upstream release to:
 	// they are in this repository and they move with it.
 	for file, pattern := range map[string]*regexp.Regexp{
-		"htmx.min.js": declared,
-		"app.css":     banner,
+		"ypy.min.js": declared,
+		"app.css":    banner,
 	} {
 		body, err := os.ReadFile(filepath.Join("assets", file))
 		if err != nil {
@@ -98,7 +98,7 @@ func TestTheLicenseTextsAreComplete(t *testing.T) {
 		"the MIT notice clause":    "The above copyright notice and this permission notice shall be included",
 		"the Tailwind copyright":   "Tailwind Labs, Inc.",
 		"the Basecoat copyright":   "Ronan Berder",
-		"the 0BSD grant":           "Permission to use, copy, modify, and/or distribute this software",
+		"the YPY copyright":        "HYZIS - SERVICOS DIGITAIS LTDA - EPP",
 	}
 
 	for what, text := range required {

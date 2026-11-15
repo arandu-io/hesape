@@ -41,7 +41,7 @@ type Config struct {
 	Host string
 }
 
-// WorkbenchMakeCommand builds `aru make:package`.
+// WorkbenchMakeCommand builds the `make:package` command.
 //
 // It lives in this package rather than a console subpackage: nothing scans a
 // directory for commands here, and the one file is easier to find beside the

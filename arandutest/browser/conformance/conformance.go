@@ -7,7 +7,7 @@
 //
 // It serves a small site from the test and drives it through browser.Page,
 // the way an application's tests do, so what it proves is what those tests
-// rely on: the page waits for htmx to settle, for the network to go idle and
+// rely on: the page waits for YPY to settle, for the network to go idle and
 // for animations to end; it fails by itself on an exception, a console.error,
 // a 5xx and a Content-Security-Policy violation, and writes the trace when it
 // does; a modal is found by its name; the viewport, the colour scheme, the
@@ -18,7 +18,7 @@
 // that records the failure instead of failing the suite, and then reads the
 // trace the failure wrote.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 package conformance
 
 import (
@@ -43,7 +43,7 @@ import (
 // Run runs the whole suite against drivers launched by factory, with the
 // options the environment sets.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func Run(t *testing.T, factory browser.Factory) {
 	t.Helper()
 	opts, err := browser.OptionsFromEnv()
@@ -55,7 +55,7 @@ func Run(t *testing.T, factory browser.Factory) {
 	s := &suite{factory: factory, opts: opts, base: srv.URL}
 
 	t.Run("navigation and events", s.navigation)
-	t.Run("htmx settles before an action returns", s.htmx)
+	t.Run("YPY settles before an action returns", s.ypy)
 	t.Run("network idle and animations", s.idle)
 	t.Run("form input", s.form)
 	t.Run("keyboard", s.keyboard)
@@ -122,18 +122,18 @@ func (s *suite) navigation(t *testing.T) {
 	}
 }
 
-func (s *suite) htmx(t *testing.T) {
+func (s *suite) ypy(t *testing.T) {
 	p := s.open(t)
-	p.Visit("/htmx")
+	p.Visit("/ypy")
 
 	p.ClickRole("button", "Load")
 	var state struct {
 		Text     string `json:"text"`
 		Settling bool   `json:"settling"`
 	}
-	p.Evaluate(`({text: document.getElementById('out').textContent, settling: !!document.querySelector('.htmx-settling')})`, &state)
+	p.Evaluate(`({text: document.getElementById('out').textContent, settling: !!document.querySelector('.ypy-settling')})`, &state)
 	if state.Text != "Loaded" || state.Settling {
-		t.Fatalf("the click returned before htmx swapped and settled: %+v", state)
+		t.Fatalf("the click returned before YPY swapped and settled: %+v", state)
 	}
 
 	p.ClickRole("button", "Replace me")
@@ -145,7 +145,7 @@ func (s *suite) htmx(t *testing.T) {
 
 	p.ClickRole("button", "Ping")
 	var quiet bool
-	p.Evaluate(`!document.querySelector('.htmx-request')`, &quiet)
+	p.Evaluate(`!document.querySelector('.ypy-request')`, &quiet)
 	if !quiet {
 		t.Fatal("the click returned while a request with nothing to swap was in flight")
 	}

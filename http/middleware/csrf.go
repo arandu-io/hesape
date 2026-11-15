@@ -14,14 +14,14 @@ import (
 )
 
 // StatusCSRFExpired is the status returned when the token is missing, invalid or
-// expired. 419 is the conventional status for it, kept on purpose: HTMX can be told to
+// expired. 419 is the conventional status for it, kept on purpose: YPY can be told to
 // reload the page on 419, which is the only useful reaction to an expired token.
 const StatusCSRFExpired = 419
 
 // CSRFProtect refuses a state-changing request the browser reports as
 // cross-origin, then validates the token on the ones that are left.
 //
-// THE TRAP THIS SOLVES: with HTMX the token does not always arrive in a form
+// THE TRAP THIS SOLVES: with YPY the token does not always arrive in a form
 // field, it arrives in a header. Both sources are read, the X-CSRF-Token header
 // first and the _token form field after it.
 //
@@ -47,13 +47,15 @@ const StatusCSRFExpired = 419
 // by nothing here and the request is refused as though it carried no token.
 //
 // A form carries the hidden _token field, so a submission is covered whether it
-// posts natively or through hx-post. What that does not cover is a request no
-// form backs -- hx-delete on a button, hx-patch on a toggle. Those carry the
-// token only where the markup puts it, either once on the layout
+// posts natively or through ypy-post. What that does not cover is a request no
+// form backs -- ypy-delete on a button, ypy-patch on a toggle. Those carry the
+// token only where the markup puts it: once on the layout, in the head,
 //
-//	<body hx-headers='{"X-CSRF-Token": "{{ .CSRFToken }}"}'>
+//	<meta name="ypy-csrf" content="{{ .CSRFToken }}">
 //
-// or on the element that sends the request.
+// where the ypy-csrf extension reads it and sends it as X-CSRF-Token on every
+// same-origin request that is not a GET. A response that carries a YPY-CSRF
+// header replaces it, which is how a page keeps a token that lapses.
 //
 // Nothing verifies that the line is there. A layout that loses it keeps
 // rendering and every form goes on working; the first button that deletes
@@ -245,13 +247,13 @@ func CSRFProtect(c *session.CSRF, sessionIDFrom func(*http.Request) string, opts
 			// different sentences. "Session expired" sends the developer to
 			// look at session lifetimes, when the form simply never carried the
 			// field -- which is the first thing that happens to anybody wiring a
-			// form or an HTMX request by hand.
+			// form or a YPY request by hand.
 			//
 			// Both answers go through hhttp.Refuse rather than http.Error, and
-			// the role guard's 403 does too: htmx swaps neither status, so on
+			// the role guard's 403 does too: YPY swaps neither status, so on
 			// http.Error the message reaches a person as nothing at all -- they
 			// press the button, and the screen does not change. Doing it in only
-			// one of the two would leave this package refusing an HTMX request
+			// one of the two would leave this package refusing a YPY request
 			// in two different ways.
 			if token == "" {
 				hhttp.Refuse(w, r, StatusCSRFExpired, "this request carried no CSRF token: add the hidden _token field to the form, or send it as the X-CSRF-Token header")

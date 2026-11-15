@@ -233,8 +233,8 @@ func (r *Router) Routes() []*Route { return r.table.All() }
 // A request no route matches -- an address nobody registered, a method the
 // address does not answer -- is answered by the mux's own 404 or 405. When the
 // application's exception.Sentences has a sentence for that status, the answer
-// goes through hhttp.Refuse with it, like every other refusal, and an htmx
-// request gets HX-Refresh; otherwise it is the mux's own text. The status and
+// goes through hhttp.Refuse with it, like every other refusal, and a YPY
+// request gets YPY-Refresh; otherwise it is the mux's own text. The status and
 // the mux's headers, Allow among them, are kept either way.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	h, pattern := r.mux.Handler(req)

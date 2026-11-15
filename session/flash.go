@@ -455,7 +455,7 @@ func (f *Flash) Take(w http.ResponseWriter, r *http.Request) (map[string][]strin
 // reading it has no way to tell it is stale.
 //
 // ok is false, and nothing is cleared, when this request is not a page somebody
-// is reading: an asset fetch, a POST, an HTMX fragment or a JSON call would
+// is reading: an asset fetch, a POST, a YPY fragment or a JSON call would
 // spend the flash on a response that draws none of it, and the person would land
 // on the form with nothing on it. That is the same failure as not having a flash
 // at all, reached through a stylesheet.
@@ -498,7 +498,7 @@ func (f *Flash) Read(w http.ResponseWriter, r *http.Request) (Flashed, bool) {
 // A GET, because the flash is drawn by the page the redirect landed on and every
 // redirect from a rejected form is followed with a GET. And an Accept that asks
 // for HTML, which is what separates the navigation from the stylesheet, the
-// image and the HTMX fragment that the same page fires on arrival: XHR sends
+// image and the YPY fragment that the same page fires on arrival: XHR sends
 // */*, and a browser navigating sends text/html.
 func isPageRead(r *http.Request) bool {
 	if r.Method != http.MethodGet {

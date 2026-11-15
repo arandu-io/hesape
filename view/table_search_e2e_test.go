@@ -28,7 +28,7 @@ type searchServer struct {
 
 func (s *searchServer) region(q string) string {
 	return fmt.Sprintf(`<div id="s" data-part="root" role="region" aria-label="S" data-kyse-behavior="table" data-total="1" data-url="/?q=%s" data-kyse-props='{}'>
-<form id="s-query" action="/" method="get" hx-get="/" hx-trigger="submit, change" hx-target="#s" hx-swap="outerHTML" hx-select="#s" hx-push-url="true" hx-sync="closest [data-part=root]:replace">
+<form id="s-query" action="/" method="get" ypy-get="/" ypy-trigger="submit, change" ypy-target="#s" ypy-swap="outerHTML" ypy-select="#s" ypy-push-url="true" ypy-sync="closest [data-part=root]:replace">
 <label for="s-search">Search S</label><input id="s-search" data-part="search" type="text" name="q" value="%s">
 <div data-part="control" data-control="text"><label for="s-code">Code</label><input id="s-code" type="search" name="code" value=""></div>
 </form><table><tbody><tr><td>row for %s</td></tr></tbody></table></div>`, q, q, q)
@@ -43,18 +43,18 @@ func newSearchServer(t *testing.T, delay time.Duration) *searchServer {
 		s.mu.Lock()
 		s.queries = append(s.queries, r.URL.Query().Get("q"))
 		s.mu.Unlock()
-		if r.Header.Get("HX-Request") == "true" {
+		if r.Header.Get("YPY-Request") == "true" {
 			time.Sleep(s.delay)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
+		if r.Header.Get("YPY-Request") == "true" && r.Header.Get("YPY-History-Restore-Request") != "true" {
 			fmt.Fprint(w, s.region(r.URL.Query().Get("q")))
 			return
 		}
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="htmx-config" content='{"includeIndicatorStyles":false}'><title>S</title>
-<script src="%s"></script><script src="%s"></script></head><body hx-boost="true">%s</body></html>`,
-			view.Asset("htmx.min.js"), view.Asset("ui.js"), s.region(r.URL.Query().Get("q")))
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>S</title>
+<script src="%s"></script><script src="%s"></script></head><body ypy-boost:inherited="true">%s</body></html>`,
+			view.Asset("ypy.min.js"), view.Asset("ui.js"), s.region(r.URL.Query().Get("q")))
 	})
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")
@@ -186,7 +186,7 @@ func TestAComposedLetterIsAskedForWhenTheCompositionEnds(t *testing.T) {
 // a dialog drawn in its cell and a span the markup marks as not searchable, a
 // page-size menu, and the controls of the toolbar.
 const completeRows = `<div id="c" data-part="root" role="region" aria-label="C" data-kyse-behavior="table" data-complete="true" data-total="3" data-kyse-props='{"complete":true,"pageSize":10,"rows":"{total} rows.","rowsOne":"{total} row."}'>
-<form id="c-query" data-part="query" action="/" method="get" hx-boost="false">
+<form id="c-query" data-part="query" action="/" method="get" ypy-boost="false">
 <label for="c-search">Search C</label><input id="c-search" data-part="search" type="text" name="q">
 <div data-part="control" data-control="select"><label for="c-kind">Kind</label><select id="c-kind" name="kind"><option value="">All</option><option value="open">Open</option><option value="paid">Paid</option></select></div>
 <div data-part="control" data-control="text"><label for="c-code">Code</label><input id="c-code" type="search" name="code"></div>
@@ -209,8 +209,8 @@ func completeOpen(t *testing.T) *browser.Page {
 	mux.HandleFunc(view.AssetPath, view.Handler)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="htmx-config" content='{"includeIndicatorStyles":false}'><title>C</title><script src="%s"></script><script src="%s"></script></head><body>%s</body></html>`,
-			view.Asset("htmx.min.js"), view.Asset("ui.js"), completeRows)
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>C</title><script src="%s"></script><script src="%s"></script></head><body>%s</body></html>`,
+			view.Asset("ypy.min.js"), view.Asset("ui.js"), completeRows)
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")

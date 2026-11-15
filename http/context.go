@@ -206,12 +206,12 @@ func (c *Context) View(name string, data any) error {
 // and 304, which carry no body. Any other is a mistake in the program and is
 // returned as an error before anything is written.
 //
-// # Asked for by htmx
+// # Asked for by YPY
 //
-// htmx does not swap a 4xx or a 5xx in the copy this framework embeds, so a
-// page with one of those statuses, answered to an htmx request, would be
+// YPY does not swap a 4xx or a 5xx in the copy this framework embeds, so a
+// page with one of those statuses, answered to a YPY request, would be
 // thrown away and the click would do nothing. It is answered the way Refuse
-// answers a refusal: with HX-Refresh, so the browser reloads the page it is on
+// answers a refusal: with YPY-Refresh, so the browser reloads the page it is on
 // as an ordinary navigation, and Refuse says what that reload can and cannot
 // show. The status and the page are written either way, so logs and every
 // other client see them unchanged.
@@ -220,13 +220,13 @@ func (c *Context) ViewStatus(status int, name string, data any) error {
 		status == stdhttp.StatusNoContent || status == stdhttp.StatusResetContent || status == stdhttp.StatusNotModified {
 		return fmt.Errorf("http: ViewStatus cannot answer %q with %d, which is not a status a page is answered with", name, status)
 	}
-	if status >= stdhttp.StatusBadRequest && c.Request != nil && c.IsHTMX() {
-		c.Response.Header().Set("HX-Refresh", "true")
+	if status >= stdhttp.StatusBadRequest && c.Request != nil && c.IsYPY() {
+		c.Response.Header().Set("YPY-Refresh", "true")
 	}
 	return c.renderWith(status, name, data)
 }
 
-// Fragment renders a partial with a status, for HTMX.
+// Fragment renders a partial with a status, for YPY.
 //
 // It is for a fragment the page asked for and will draw: a row after an
 // inline edit, a panel that loads on scroll, a list re-rendered after a
@@ -242,20 +242,20 @@ func (c *Context) ViewStatus(status int, name string, data any) error {
 // field instead. Neither goes through Fragment.
 //
 // A 422 fragment carrying the messages was tried, and it is the failure that
-// produced Reject. htmx's default response handling, in the copy this
+// produced Reject. YPY's default response handling, in the copy this
 // framework embeds (2.0.4), is
 //
 //	[{code:"204", swap:false}, {code:"[23]..", swap:true}, {code:"[45]..", swap:false, error:true}]
 //
 // and a 422 matches the third entry: the fragment is fetched, the status is
 // right, the body is correct -- and it is thrown away, so the person sees the
-// form they submitted, unchanged, with no message on it. Neither HX-Retarget
-// nor HX-Reswap rescues it, because both are read after the decision to swap
+// form they submitted, unchanged, with no message on it. Neither YPY-Retarget
+// nor YPY-Reswap rescues it, because both are read after the decision to swap
 // is made. Reconfiguring that table in the layout makes the swap happen, and
 // still leaves a reload that posts the form again; it is also a second way to
 // answer a rejected form beside the one the router already gives.
 //
-// The same holds for any 4xx or 5xx status passed here: htmx discards it
+// The same holds for any 4xx or 5xx status passed here: YPY discards it
 // unless the layout says otherwise. A refusal -- 403, 419, 429 -- is not a
 // fragment at all, and answers through [Refuse].
 func (c *Context) Fragment(status int, name string, data any) error {
@@ -363,10 +363,10 @@ func (c *Context) writeViewData(status int, name string, data any) error {
 	return err
 }
 
-// Redirect answers a redirect, and does the right thing under HTMX.
+// Redirect answers a redirect, and does the right thing under YPY.
 //
-// An HTMX request that gets a 302 follows it inside the fragment, so the whole
-// page ends up nested in a div. HX-Redirect is the header that makes the browser
+// A YPY request that gets a 302 follows it inside the fragment, so the whole
+// page ends up nested in a div. YPY-Redirect is the header that makes the browser
 // navigate instead. Handling it here means no application has to remember.
 func (c *Context) Redirect(to string) error {
 	Redirect(c.Response, c.Request, to)
@@ -393,7 +393,7 @@ func (c *Context) RedirectRoute(name string, params ...string) error {
 //
 // It is one function and not one per caller. The branch below existed in three
 // copies -- here, in the auth module's handlers, and in the route guards -- and
-// the middle one had already been wrong once, answering HX-Redirect with 200 to
+// the middle one had already been wrong once, answering YPY-Redirect with 200 to
 // every client including the ones that do not read the header, which left a
 // browser with scripts off on a blank page after signing in. Three copies of a
 // six-line decision is three chances to be the copy that is wrong.
@@ -401,10 +401,10 @@ func (c *Context) RedirectRoute(name string, params ...string) error {
 // 303 and not 302: after a POST, 303 is what tells the browser to GET the next
 // address instead of posting the body to it again.
 func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
-	if r.Header.Get("HX-Request") == "true" {
-		// A body alongside HX-Redirect is swapped in before the browser
+	if r.Header.Get("YPY-Request") == "true" {
+		// A body alongside YPY-Redirect is swapped in before the browser
 		// navigates, so there is deliberately none: 204.
-		w.Header().Set("HX-Redirect", to)
+		w.Header().Set("YPY-Redirect", to)
 		w.WriteHeader(stdhttp.StatusNoContent)
 		return
 	}
@@ -414,16 +414,16 @@ func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 // Refuse answers a refusal that the person in front of the browser can see.
 //
 // The status and the sentence are the caller's and are unchanged: 403 stays 403
-// and 419 stays 419, so logs, monitoring and every non-HTMX client see exactly
+// and 419 stays 419, so logs, monitoring and every non-YPY client see exactly
 // what they saw before.
 //
-// What it adds is the HTMX half. htmx does not swap a 4xx -- its response
+// What it adds is the YPY half. YPY does not swap a 4xx -- its response
 // handling is configured `{code:"[45]..", swap:false, error:true}` in the copy
 // this framework embeds -- so a guard's 403 and an expired CSRF token both
 // arrived as a fired event and a blank screen: the person clicked, nothing at
 // all happened, and the sentence explaining why was in a response body that was
-// thrown away. HX-Refresh makes the browser reload the page as an ordinary
-// navigation, and that request is not an HTMX one, so the same middleware
+// thrown away. YPY-Refresh makes the browser reload the page as an ordinary
+// navigation, and that request is not a YPY one, so the same middleware
 // answers the same refusal and the browser renders it. Nothing loops: a reload
 // is a GET, which CSRF verification does not check, and which a role guard
 // answers as a plain page.
@@ -448,7 +448,7 @@ func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 // copies, one of them was wrong.
 //
 // A browser that asked for a page (an Accept that lists text/html) and was not
-// sent by htmx is answered with the built-in status page, carrying the
+// sent by YPY is answered with the built-in status page, carrying the
 // sentence, and the answer varies with Accept; every other client is answered
 // with the sentence as plain text. The status is the same either way.
 //
@@ -456,8 +456,8 @@ func Redirect(w stdhttp.ResponseWriter, r *stdhttp.Request, to string) {
 // the status, and message otherwise.
 func Refuse(w stdhttp.ResponseWriter, r *stdhttp.Request, status int, message string) {
 	sentence := exception.Sentence(r, status, message)
-	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("HX-Refresh", "true")
+	if r.Header.Get("YPY-Request") == "true" {
+		w.Header().Set("YPY-Refresh", "true")
 		stdhttp.Error(w, sentence, status)
 		return
 	}

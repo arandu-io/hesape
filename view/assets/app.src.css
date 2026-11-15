@@ -31,20 +31,20 @@
     color-scheme: light dark;
   }
 
-  /* HTMX swaps content in place, and without this the page jumps to whatever the
+  /* YPY swaps content in place, and without this the page jumps to whatever the
    * browser considers the top. */
   html {
     scroll-behavior: smooth;
   }
 
-  /* The indicator is how a user knows a request is in flight. HTMX toggles the
+  /* The indicator is how a user knows a request is in flight. YPY toggles the
    * class; without a rule for it, every request looks like nothing happened. */
-  .htmx-indicator {
+  .ypy-indicator {
     opacity: 0;
     transition: opacity 150ms ease-in;
   }
-  .htmx-request .htmx-indicator,
-  .htmx-request.htmx-indicator {
+  .ypy-request .ypy-indicator,
+  .ypy-request.ypy-indicator {
     opacity: 1;
   }
 }

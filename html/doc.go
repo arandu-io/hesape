@@ -71,7 +71,7 @@
 // from a person goes through a check before it reaches the form.
 //
 // The attribute maps refuse what escaping does not answer: an event handler,
-// the HTMX family, an Alpine directive, style, srcdoc and http-equiv. The list
+// the YPY family, an Alpine directive, style, srcdoc and http-equiv. The list
 // is view.ActiveAttribute's, so these builders and the view layer refuse the
 // same names.
 //

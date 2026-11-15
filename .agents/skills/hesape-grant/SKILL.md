@@ -61,12 +61,12 @@ tenant into a namespace. Skipping it was a real defect in `filesystem`: tenant
 `acme/reports` with key `q1.pdf` and tenant `acme` with key `reports/q1.pdf`
 resolved to the same object, each holding a valid Grant and violating no Policy,
 because the path is built after the Policy runs. The argument is written at
-`filesystem/key.go:34-41`.
+`filesystem/key.go:34-42`.
 
 **5. Build the key with the tenant in it.**
 
 ```
-cache:<tenant>:<namespace>:<key>      cache/repository.go:988-999
+cache:<tenant>:<namespace>:<key>      cache/repository.go:1026
 <tenant>/<key>                        filesystem/key.go:19
 ```
 
@@ -93,31 +93,31 @@ the thesis.
 Three things in this collection deliberately have no tenant prefix. Each carries
 its reason next to the code, and none of them is an oversight to be fixed.
 
-**The session.** `SessionHandler` (`session/store.go:59`) and the `Cache`
-interface it uses (`session/handlers.go:431-438`) are keyed by the session id
+**The session.** `SessionHandler` (`session/store.go:101`) and the `Cache`
+interface it uses (`session/handlers.go:466`) are keyed by the session id
 alone — `Read(ctx, sessionID)`, `Get(ctx, key)` — with no Grant anywhere in
 either signature. The session id is what *tells you*
 which tenant: the tenant is a field on the record you get back
-(`session/session.go:102-104`), and prefixing the lookup would mean knowing the
+(`Record.Tenant`, `session/session.go:106-108`), and prefixing the lookup would mean knowing the
 answer before asking the question. Where the tenant does become part of the
 question it is required: `RecordStore.DestroyOthers` refuses a record with an
 empty tenant or an empty subject id, because "every session of subject 1" with
-no tenant reaches every customer (`session/session.go:40-51`).
+no tenant reaches every customer (`errNoSubjectScope`, `session/session.go:44-55`).
 
 **The rate limit.** `cache.Limit.Key` identifies the caller being limited — an
 IP, a session id, an account — and its doc comment states the rest:
-`cache/ratelimiter.go:24-26`. Rate limiting runs *before* authentication on the
+`cache/ratelimiter.go:41-44`. Rate limiting runs *before* authentication on the
 routes where it matters most, so there is no Grant to take a tenant from. The
 `RateLimiter` therefore takes a key rather than a Grant.
 
 **The scheduler lock.** `lockKey` is `"lock:" + name`, and
-`cache/lock.go:322-329` argues the case: a scheduler lock covers the whole
+`cache/lock.go:324-338` argues the case: a scheduler lock covers the whole
 instance, and a lock that existed per tenant would let N replicas each run the
 task for a different tenant at the same time — which is the problem, not the
 solution. A lock that really is about one tenant puts the tenant in its own
 name, which is what `Repository.WithoutOverlapping` does.
 
-`cache/doc.go:18-21` states the last two of these as the exceptions they are, in
+`cache/doc.go:18-23` states the last two of these as the exceptions they are, in
 the package that owns both, and says why the signatures differ: locks and the
 `RateLimiter` take a name and a key, and everything else in `cache` takes a
 `Grant`.

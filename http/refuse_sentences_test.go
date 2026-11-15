@@ -81,15 +81,15 @@ func TestARefusedBrowserIsShownAPageAndAnAPIClientTheSentence(t *testing.T) {
 	}
 }
 
-// htmx is told to reload and never shown a page of its own: the reload is the
+// YPY is told to reload and never shown a page of its own: the reload is the
 // navigation that draws it.
-func TestARefusedHTMXRequestKeepsThePlainAnswerEvenWhenItAcceptsHTML(t *testing.T) {
+func TestARefusedYPYRequestKeepsThePlainAnswerEvenWhenItAcceptsHTML(t *testing.T) {
 	req := httptest.NewRequest(stdhttp.MethodPost, "/x", nil)
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("YPY-Request", "true")
 	req.Header.Set("Accept", "text/html")
 	rec := httptest.NewRecorder()
 	hhttp.Refuse(rec, req, 419, "expired")
-	if rec.Header().Get("HX-Refresh") != "true" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
-		t.Fatalf("htmx got HX-Refresh=%q Content-Type=%q, want the reload and plain text", rec.Header().Get("HX-Refresh"), rec.Header().Get("Content-Type"))
+	if rec.Header().Get("YPY-Refresh") != "true" || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("YPY got YPY-Refresh=%q Content-Type=%q, want the reload and plain text", rec.Header().Get("YPY-Refresh"), rec.Header().Get("Content-Type"))
 	}
 }

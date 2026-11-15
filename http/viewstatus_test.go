@@ -26,8 +26,8 @@ func TestAPageIsAnsweredWithTheStatusItSays(t *testing.T) {
 		if rec.Code != status || view.status != status || view.name != "invoices/missing" {
 			t.Errorf("ViewStatus(%d) drew %q at %d and answered %d", status, view.name, view.status, rec.Code)
 		}
-		if rec.Header().Get("HX-Refresh") != "" {
-			t.Errorf("ViewStatus(%d) told a browser that is not htmx to refresh", status)
+		if rec.Header().Get("YPY-Refresh") != "" {
+			t.Errorf("ViewStatus(%d) told a browser that is not YPY to refresh", status)
 		}
 	}
 }
@@ -49,24 +49,24 @@ func TestAStatusAPageCannotCarryIsRefusedBeforeAnythingIsWritten(t *testing.T) {
 	}
 }
 
-// TestAnErrorPageAskedForByHtmxReloadsTheScreen: htmx throws a 4xx or 5xx
-// away, so the click did nothing at all. HX-Refresh is how Refuse already
+// TestAnErrorPageAskedForByYPYReloadsTheScreen: YPY throws a 4xx or 5xx
+// away, so the click did nothing at all. YPY-Refresh is how Refuse already
 // makes a refusal visible, and a page with that status gets the same answer.
-func TestAnErrorPageAskedForByHtmxReloadsTheScreen(t *testing.T) {
+func TestAnErrorPageAskedForByYPYReloadsTheScreen(t *testing.T) {
 	cases := map[int]string{stdhttp.StatusNotFound: "true", stdhttp.StatusServiceUnavailable: "true", stdhttp.StatusCreated: ""}
 	for status, want := range cases {
 		rec := httptest.NewRecorder()
 		r := request(stdhttp.MethodGet, "/invoices/1")
-		r.Header.Set("HX-Request", "true")
+		r.Header.Set("YPY-Request", "true")
 		ctx := hhttp.NewContext(rec, r, &renderer{}, nil)
 		if err := ctx.ViewStatus(status, "invoices/missing", nil); err != nil {
 			t.Fatalf("ViewStatus(%d): %v", status, err)
 		}
-		if got := rec.Header().Get("HX-Refresh"); got != want {
-			t.Errorf("ViewStatus(%d) to htmx set HX-Refresh %q, want %q", status, got, want)
+		if got := rec.Header().Get("YPY-Refresh"); got != want {
+			t.Errorf("ViewStatus(%d) to YPY set YPY-Refresh %q, want %q", status, got, want)
 		}
 		if rec.Code != status {
-			t.Errorf("ViewStatus(%d) to htmx answered %d: the status is the same for every client", status, rec.Code)
+			t.Errorf("ViewStatus(%d) to YPY answered %d: the status is the same for every client", status, rec.Code)
 		}
 	}
 }

@@ -67,9 +67,8 @@
 // 422 and the messages by field in the errors member, through the same code
 // and with the same headers.
 //
-// htmx is not that client. It sends X-Requested-With and swaps HTML, so
-// wantsJSON excludes it: a problem document swapped into a div is a JSON
-// document on the page.
+// YPY is not that client. It swaps HTML, so wantsJSON excludes it: a problem
+// document swapped into a div is a JSON document on the page.
 //
 // # What a test writes instead of a global fake
 //

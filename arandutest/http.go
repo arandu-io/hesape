@@ -20,7 +20,7 @@ import (
 // same words on it, and "it redirected me to the sign-in screen" is the most
 // common way a feature test passes while proving the opposite of what it says.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Client struct {
 	t       *testing.T
 	handler http.Handler
@@ -49,7 +49,7 @@ type Client struct {
 
 // NewClient returns a client over a handler.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func NewClient(t *testing.T, h http.Handler) *Client {
 	t.Helper()
 	return &Client{t: t, handler: h}
@@ -85,8 +85,8 @@ func NewClient(t *testing.T, h http.Handler) *Client {
 // session store or the resolver, so roles written in the test are roles nobody
 // re-reads and a demotion never takes effect. Use [As], which starts a real
 // session for the account and lets the application's guards load it. The
-// package moved to github.com/arandu-io/framework/test and is removed in the
-// next minor.
+// package moved to github.com/arandu-io/framework/test and is removed in
+// v1.0.0.
 func (c *Client) ActingAs(s auth.Subject) *Client {
 	c.t.Helper()
 	if c.remote != nil {
@@ -109,18 +109,18 @@ func (c *Client) ActingAs(s auth.Subject) *Client {
 // WithHeader makes every request from here on carry the header, and returns the
 // client so it reads as one line:
 //
-//	arandutest.NewClient(t, app).WithHeader("HX-Request", "true").Delete("/invoices/1", nil)
+//	arandutest.NewClient(t, app).WithHeader("YPY-Request", "true").Delete("/invoices/1", nil)
 //
 // It is sticky rather than an argument for the same reason the cookie jar is a
 // field: the headers a test needs to set describe the client, not the call. A
-// page that boosts sends HX-Request on everything it fires, and the token a
-// generated view puts in hx-headers sits on the body element, so every request
-// leaving that page carries it. Passed per call it would have to be repeated on
+// page that boosts sends YPY-Request on everything it fires, and the token a
+// generated view puts in the ypy-csrf meta tag is sent by the page on every
+// request that changes something. Passed per call it would have to be repeated on
 // every line, and the line that forgot it would be exercising a different
 // client than the ones around it.
 //
 // An empty value removes the header, which is how a test says "and this one is
-// not an HTMX request" after saying the others were.
+// not a YPY request" after saying the others were.
 //
 // What is set here wins over what the client would send itself -- the
 // Content-Type of a form and the X-CSRF-Token read off the last page are both
@@ -128,7 +128,7 @@ func (c *Client) ActingAs(s auth.Subject) *Client {
 // that is not the shape it claims are both behaviour a test has to be able to
 // provoke, and neither can be provoked by a client that always knows better.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) WithHeader(name, value string) *Client {
 	if value == "" {
 		c.headers.Del(name)
@@ -143,13 +143,13 @@ func (c *Client) WithHeader(name, value string) *Client {
 
 // Get sends a GET.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Get(path string) *Response { return c.do(http.MethodGet, path, nil, "", "") }
 
 // Options sends an OPTIONS, which carries no body for the same reason a GET
 // does not: it asks what may be done with the address rather than doing it.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Options(path string) *Response {
 	return c.do(http.MethodOptions, path, nil, "", "")
 }
@@ -160,7 +160,7 @@ func (c *Client) Options(path string) *Response {
 // request, because that is what a browser does -- and a test that skips it is a
 // test that proves the form works with protection disabled.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Post(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPost, path, form)
 }
@@ -172,7 +172,7 @@ func (c *Client) Post(path string, form map[string]string) *Response {
 // a route of every generated module unreachable -- and a test that reaches for
 // POST instead proves something about a route the application does not have.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Put(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPut, path, form)
 }
@@ -180,7 +180,7 @@ func (c *Client) Put(path string, form map[string]string) *Response {
 // Patch sends a form as a PATCH: the part of what is at the address that
 // changed. It carries the token and the cookies exactly as [Client.Post] does.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Patch(path string, form map[string]string) *Response {
 	return c.submit(http.MethodPatch, path, form)
 }
@@ -193,7 +193,7 @@ func (c *Client) Patch(path string, form map[string]string) *Response {
 // refused, and a client that could not send one would need the guard turned off
 // to pass.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Delete(path string, form map[string]string) *Response {
 	return c.submit(http.MethodDelete, path, form)
 }
@@ -206,7 +206,8 @@ func (c *Client) Delete(path string, form map[string]string) *Response {
 // POST, PUT and PATCH -- a DELETE body is never parsed, whatever it holds -- so
 // a delete that carried the token only in the body would arrive at the guard
 // carrying nothing. That is the same reason the generated markup puts the token
-// in hx-headers rather than in a field: the request that deletes has no form.
+// in the ypy-csrf meta tag rather than in a field: the request that deletes has
+// no form.
 func (c *Client) submit(method, path string, form map[string]string) *Response {
 	c.t.Helper()
 
@@ -236,7 +237,7 @@ func (c *Client) submit(method, path string, form map[string]string) *Response {
 // the server last set them. They are what a browser is handed to be signed in
 // as the same person.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (c *Client) Cookies() []*http.Cookie {
 	out := make([]*http.Cookie, len(c.cookies))
 	for i, ck := range c.cookies {
@@ -359,7 +360,7 @@ func (c *Client) keep(ck *http.Cookie) {
 
 // Response is what came back, with the assertions worth having.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 type Response struct {
 	t    *testing.T
 	rec  *httptest.ResponseRecorder
@@ -371,7 +372,7 @@ type Response struct {
 // The body is printed on failure, because the answer to "why is this a 500" is
 // in it and finding out otherwise means running the test again with a print.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) AssertStatus(want int) *Response {
 	r.t.Helper()
 	if r.rec.Code != want {
@@ -382,12 +383,12 @@ func (r *Response) AssertStatus(want int) *Response {
 
 // AssertOk asserts a 200 status. It is [Response.AssertStatus] with that code.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) AssertOk() *Response { return r.AssertStatus(http.StatusOK) }
 
 // AssertSee fails unless the text is in the body.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) AssertSee(text string) *Response {
 	r.t.Helper()
 	if !strings.Contains(r.rec.Body.String(), text) {
@@ -402,7 +403,7 @@ func (r *Response) AssertSee(text string) *Response {
 // public listing, an address in a page that should not name one, a button
 // somebody without the permission can see.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) AssertDontSee(text string) *Response {
 	r.t.Helper()
 	if strings.Contains(r.rec.Body.String(), text) {
@@ -413,17 +414,17 @@ func (r *Response) AssertDontSee(text string) *Response {
 
 // AssertRedirect fails unless the response sends the client to that address.
 //
-// It reads HX-Redirect as well as Location, because a handler answering an HTMX
+// It reads YPY-Redirect as well as Location, because a handler answering a YPY
 // request redirects with a header and a 204 -- and a test that only reads
 // Location says "redirected to \"\"" for a response that is correct.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) AssertRedirect(want string) *Response {
 	r.t.Helper()
 
 	got := r.rec.Header().Get("Location")
 	if got == "" {
-		got = r.rec.Header().Get("HX-Redirect")
+		got = r.rec.Header().Get("YPY-Redirect")
 	}
 	if got != want {
 		r.t.Errorf("%s redirected to %q, want %q", r.path, got, want)
@@ -434,12 +435,12 @@ func (r *Response) AssertRedirect(want string) *Response {
 // GetContent returns the response body, for an assertion this package does not
 // have.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) GetContent() string { return r.rec.Body.String() }
 
 // Header reads one response header.
 //
-// Deprecated: moved to github.com/arandu-io/framework/test; removed in the next minor.
+// Deprecated: moved to github.com/arandu-io/framework/test; removed in v1.0.0.
 func (r *Response) Header(name string) string { return r.rec.Header().Get(name) }
 
 func (r *Response) body() string {

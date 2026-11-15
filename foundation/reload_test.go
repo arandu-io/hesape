@@ -9,14 +9,20 @@ import (
 	"time"
 )
 
+// testTag is what a ReloadTagger module would return. Fixed here so these tests
+// are about the injection and not about the asset pipeline.
+const testTag = `<script src="/_arandu/assets/abc/arandu-reload.js" defer></script>`
+
+// reloaded wraps next the way an application mounts it in development: through
+// DevReload, the one way the middleware is reached.
+func reloaded(next http.Handler) http.Handler {
+	return DevReload(true, []byte(testTag))[0](next)
+}
+
 func serve(t *testing.T, handler http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
-	// What Boot fills in from the module that brought it. Fixed here so these
-	// tests are about the injection and not about the asset pipeline.
-	reloadTag = []byte(`<script src="/_arandu/assets/abc/arandu-reload.js" defer></script>`)
-	t.Cleanup(func() { reloadTag = nil })
 	rec := httptest.NewRecorder()
-	liveReload(handler).ServeHTTP(rec, req)
+	reloaded(handler).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -39,11 +45,86 @@ func TestADocumentIsGivenTheReloadScript(t *testing.T) {
 	}
 }
 
-// The one that matters most. An HTMX swap replaces a fragment, and a fragment
+// The tag is a script and a request to this origin, so a response whose policy
+// blocks either one is left as it is: the browser would refuse the script and
+// report a violation on a page that did nothing wrong.
+func TestAPageWhosePolicyBlocksTheScriptIsLeftAlone(t *testing.T) {
+	page := "<html><body>no</body></html>"
+	for name, policy := range map[string]string{
+		"nothing is allowed":                "default-src 'none'; style-src 'sha256-x'; img-src data:",
+		"script-src without this origin":    "default-src 'self'; script-src https://cdn.example.test",
+		"script-src none":                   "default-src 'self'; script-src 'none'",
+		"script-src-elem without it":        "script-src 'self'; script-src-elem 'none'",
+		"connect-src without it":            "default-src 'self'; connect-src https://api.example.test",
+		"a second policy that blocks":       "default-src 'self', default-src 'none'",
+		"default-src without this origin":   "default-src https://cdn.example.test",
+		"a directive name in capitals":      "DEFAULT-SRC 'none'",
+		"only the first script-src is read": "script-src 'none'; script-src 'self'",
+	} {
+		rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Security-Policy", policy)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(page))
+		}, httptest.NewRequest(http.MethodGet, "/notes/1", nil))
+
+		if rec.Code != http.StatusForbidden || rec.Body.String() != page {
+			t.Errorf("%s: the page was changed (%d) %q", name, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Content-Security-Policy"); got != policy {
+			t.Errorf("%s: the policy was rewritten to %q", name, got)
+		}
+	}
+}
+
+// A policy that admits this origin gets the script, and so does a page with no
+// policy: the tag is for development, and a project that never wrote a policy
+// is no reason to lose it.
+func TestAPageWhosePolicyAllowsTheScriptIsGivenIt(t *testing.T) {
+	for name, policy := range map[string]string{
+		"none":                         "",
+		"the default policy":           "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'",
+		"default-src alone":            "default-src 'self'",
+		"script-src with this origin":  "default-src 'none'; script-src 'self'; connect-src 'self'",
+		"script-src-elem over script":  "script-src 'none'; script-src-elem 'self'; connect-src 'self'",
+		"a policy that restricts only": "img-src 'self'",
+		"a wildcard":                   "default-src *",
+	} {
+		rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if policy != "" {
+				w.Header().Set("Content-Security-Policy", policy)
+			}
+			_, _ = w.Write([]byte("<html><body>ok</body></html>"))
+		}, httptest.NewRequest(http.MethodGet, "/", nil))
+
+		if strings.Count(rec.Body.String(), "arandu-reload.js") != 1 {
+			t.Errorf("%s: the page was not given the script: %q", name, rec.Body.String())
+		}
+	}
+}
+
+// What the browser enforces is what the response carries when it leaves, so a
+// handler that replaces the policy after the middleware set another decides.
+func TestThePolicyThatIsReadIsTheOneTheResponseLeavesWith(t *testing.T) {
+	rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; connect-src 'self'")
+		// The error page replaces the application's policy with its own.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'sha256-x'")
+		_, _ = w.Write([]byte("<html><body>403</body></html>"))
+	}, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if strings.Contains(rec.Body.String(), "arandu-reload.js") {
+		t.Fatalf("the script was injected under the policy that replaced the application's:\n%s", rec.Body.String())
+	}
+}
+
+// The one that matters most. A YPY swap replaces a fragment, and a fragment
 // carrying the script would open one connection per interaction -- until the
 // browser's six-per-origin limit is reached and the page stops working, which
 // looks like anything except a dev-server feature.
-func TestAnHTMXFragmentIsLeftAlone(t *testing.T) {
+func TestAYPYFragmentIsLeftAlone(t *testing.T) {
 	rec := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<li id="comment-4">Said something</li>`))
@@ -119,7 +200,7 @@ func TestAStreamIsNotHeld(t *testing.T) {
 
 	go func() {
 		defer close(done)
-		liveReload(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reloaded(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte("<html><body>first"))
 			w.(http.Flusher).Flush()
@@ -155,10 +236,10 @@ func TestEveryProcessHasItsOwnIdentity(t *testing.T) {
 
 // Nothing is mounted or injected outside development.
 func TestProductionHasNoneOfThis(t *testing.T) {
-	if devReload(false) != nil {
+	if DevReload(false, nil) != nil {
 		t.Fatal("the injection middleware is in the production pipeline")
 	}
-	if len(devReload(true)) != 1 {
+	if len(DevReload(true, nil)) != 1 {
 		t.Fatal("development did not get the middleware")
 	}
 }
@@ -179,7 +260,7 @@ func TestAskingWhichProcessAnsweredDoesNotHoldTheConnection(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		handleReload(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, reloadPath, nil))
+		HandleReload(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, ReloadPath, nil))
 	}()
 
 	select {
@@ -194,7 +275,7 @@ func TestAskingWhichProcessAnsweredDoesNotHoldTheConnection(t *testing.T) {
 // never learn that the code changed.
 func TestTheAnswerIsThisProcessAndIsNeverCached(t *testing.T) {
 	rec := httptest.NewRecorder()
-	handleReload(rec, httptest.NewRequest(http.MethodGet, reloadPath, nil))
+	HandleReload(rec, httptest.NewRequest(http.MethodGet, ReloadPath, nil))
 
 	if got := strings.TrimSpace(rec.Body.String()); got != bootID {
 		t.Fatalf("the answer is %q, want the boot id %q", got, bootID)

@@ -27,6 +27,131 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.107.0 — YPY replaces the hypermedia library
+
+One symbol stops compiling, and every page that carries an attribute, a header,
+an event or a script of the old library stops working until it is converted.
+The page behaves the way YPY does, with nothing that brings the old behaviour
+back.
+
+- **`Context.IsYPY` replaces the method that carried the old library's name.**
+  Same rule (the request carries `YPY-Request`), same `Vary` entry, new name.
+  Nothing keeps the old one.
+- **The headers are `YPY-*`.** `Context` reads `YPY-Request` and `YPY-Target`
+  and writes `YPY-Redirect` and `YPY-Refresh` (and `Vary: YPY-Request`). A
+  client or a proxy that matched the old names has to match these. The request
+  that names what triggered it is `YPY-Source`, and `YPY-Request-Type` says
+  `partial` or `full`.
+- **`YPY-Target` is `tag#id`, not the id.** `Context.Targets(id)` compares the
+  part after the `#` with the id it is given, so `Targets("note-7")` is true for
+  `div#note-7`; given a `tag#id` it compares the whole value, so
+  `Targets("div#note-7")` is true and `Targets("section#note-7")` is not. The id
+  arrives percent-encoded and is decoded first. A value with no `#` names an
+  element with no id and targets nothing. Code that read the header itself and
+  compared it with an id compares the id part now.
+- **The attributes are `ypy-*` and `data-ypy-*`.** `view.ActiveAttribute` refuses
+  that family, in any case, where it refused the old one. A map of attributes
+  that carried an old-library name is no longer refused, and no longer read by
+  anything either: convert it.
+- **The embedded scripts are `ypy.min.js` and `ypy-csrf.min.js`.**
+  `view.Asset("ypy.min.js")` and `view.Asset("ypy-csrf.min.js")` replace the old
+  asset name, and the hash in the address changes with the bytes. Both are the
+  files YPY builds (`dist/ypy.min.js`, `dist/ext/ypy-csrf.min.js`), with native
+  behaviour only: there is no compatibility file, no profile and no setting
+  that reproduces the old behaviour. A layout loads `ypy.min.js`, then
+  `ypy-csrf.min.js`, then `ui.js`. The `ypy-config` meta tag names
+  `includeIndicatorCSS` where it named `includeIndicatorStyles`.
+- **The CSRF token is the `ypy-csrf` meta tag.** A layout puts
+  `<meta name="ypy-csrf" content="{{ .CSRFToken }}">` in the head, and the
+  `ypy-csrf` extension sends its content as `X-CSRF-Token` on every same-origin
+  request that is not a GET, whatever element sends it and without an inherited
+  header. Nothing changes on the server: `CSRFProtect` reads the same header, and
+  a hidden `_token` field still covers a form. A response that carries a
+  `YPY-CSRF` header replaces the token in the tag. `ui.js` keeps renewing the
+  page's token as before and writes the new one into the tag and the hidden
+  fields; a request that is due waits for the renewal inside the fetch. A layout
+  that carried the token in a `ypy-headers` attribute on `<body>` moves it to the
+  tag. A request that has no token fires `ypy:csrf:missing` on its element.
+- **What YPY does by itself, and an application reviews with `ypy check`:**
+  morph is the default swap (`ypy-swap="innerHTML"` where the raw replacement
+  was meant); an attribute on a container reaches its descendants only when it
+  is written `ypy-target:inherited="#out"`, so a layout boosts with
+  `<body ypy-boost:inherited="true">`; a `422` is swapped into the form, and
+  other 4xx and 5xx answers follow YPY's error rules; author code in `ypy-on`
+  and `js:` values is off unless `callbacks:"all"` is set; a request times out
+  after 60 seconds; and only same-origin requests are sent.
+- **The events are `ypy:<noun>:<verb>` and carry `{ctx}`.** `ui.js` listens to
+  `ypy:before:request`, `ypy:before:swap`, `ypy:before:settle`,
+  `ypy:after:settle`, `ypy:after:process`,
+  `ypy:after:history:push`, `ypy:before:history:update`,
+  `ypy:before:history:restore`, `ypy:response:error`, `ypy:error` and
+  `ypy:confirm`, whose detail is `{ctx, issueRequest, dropRequest}`: the
+  question is `ctx.confirm` and the element `ctx.sourceElement`. The old names
+  (`afterSettle`, `load`, `beforeSend`, `configRequest`) and `detail.elt`,
+  `detail.xhr` and `detail.target` do not exist. A script of the application that
+  listened to them follows. `ypy migrate` only changes the prefix, so after it
+  search for `ypy:[a-z]+[A-Z]` and for `ypy:load`: neither is an event YPY fires.
+  `ypy:after:swap` fires after the swap has settled, so the markup is in place
+  at `ypy:before:settle`. A behaviour is destroyed when its element leaves the
+  document, and not by `ypy:before:cleanup`, which YPY fires only for the
+  elements it powers.
+- **`ypy-boost` and `ypy-confirm` go through `ui.js` as before.** A form the
+  browser sends itself is held while its token is due, unless the form is
+  boosted, its own `ypy-boost` is `true`, or an ancestor says
+  `ypy-boost:inherited="true"`.
+- **The indicator classes are `ypy-request`, `ypy-swapping`, `ypy-settling`,
+  `ypy-added` and `ypy-indicator`.** A stylesheet or a script of the application
+  that named the old ones follows.
+- **`arandutest/browser` waits for YPY by its own events.** A request is in
+  flight from `ypy:before:request` to `ypy:finally:request`, which YPY fires for
+  every request it admitted.
+- **YPY does not send `X-Requested-With`.** `Request.Ajax` is false for a YPY
+  request, and a YPY request is recognised by `YPY-Request`, which is what
+  `IsYPY` and `WantsJSON` read.
+- **The development live-reload tag is left off a response whose policy blocks
+  it.** A page whose `Content-Security-Policy` does not admit this origin for
+  scripts and for `connect-src` (the built-in 403 page answers with
+  `default-src 'none'`) is no longer given the tag, which the browser refused
+  and the test kit reported as a violation; the policy is not changed.
+- **`foundation` exports the development live-reload, so a kernel above it
+  mounts it instead of copying it.** `foundation.DevReload(isDev, tag)` returns
+  the middleware, or nil outside development, and applies the rule above;
+  `foundation.HandleReload` and `foundation.ReloadPath` are the route that tells
+  the page which process is answering. The tag is an argument now: nothing reads
+  it from a package variable.
+- **How to convert an application:** `ypy check .` lists what breaks and what
+  behaves differently, `ypy migrate --write .` converts the names, the script
+  files are replaced by the two above, and the list is worked through page by
+  page. `ypy migrate .` must then report that no file would change.
+
+## v0.106.0 — the cookies, the storage keys and the asset path carry the application's name
+
+Five constructors take a new trailing argument. A call that passes nothing for it
+compiles and behaves as before; a function value assigned from one of them has a
+new type.
+
+- **`session.NewCSRF`, `session.NewFlash`, `session.NewRecordStore`,
+  `http.NewIntended` and `http.NewSessionStore` take a final
+  `opts ...session.CookieOption`.** `session.WithCookieNames` renames the
+  cookies, and `session.CookieNamesFor(brand)` spells them from a
+  `support.Brand`. Without an option the names stay `arandu_session`,
+  `arandu_csrf_guest`, `arandu_flash` and `arandu_intended`.
+
+What changes without a compiler error:
+
+- **`CSRFProtect` no longer issues a token on every GET.** It puts an issuer on
+  the request context, and the token, with the guest cookie it is bound to, is
+  issued the first time a view asks for it. A response that draws no form
+  carries no cookie. The response that does ask is marked
+  `Cache-Control: no-store, private` unless the handler set a policy first.
+  Read the token before the first byte of the response is written: a cookie set
+  afterwards is lost.
+- **An application that passes a brand changes every name once.** Sessions end
+  and visitors sign in again, and the saved theme and sidebar are forgotten,
+  because the cookies, the `localStorage` keys and the asset prefix change.
+  `/_arandu/assets/` keeps answering, uncached, so a page or an e-mail written
+  before the change still gets its file.
+
 ## v0.104.0 — a webhook relays a request as it arrived
 
 Nothing stops compiling. Two things need a line from an application that
@@ -70,14 +195,15 @@ worked around the first can take the workaround out.
   (`GET /_arandu/csrf`, answered by `CSRFProtect` itself, so no route is
   registered and none can be forgotten) for a new token at three quarters of
   the old one's life, when the tab comes back to the front, when a page returns
-  from the back/forward cache, and right before a form or an htmx request goes
+  from the back/forward cache, and right before a form or a YPY request goes
   out with a token that is due. The new token is written into every
-  hidden `_token` field and every `hx-headers` that names `X-CSRF-Token`, and
-  htmx requests to this origin carry the freshest one in the header. The ttl is
+  hidden `_token` field and every header attribute that names `X-CSRF-Token` (v0.107.0
+  moves the token to the `ypy-csrf` meta tag), and YPY requests to this origin
+  carry the freshest one in the header. The ttl is
   not longer and the check is not weaker: a request that arrives with a lapsed
   token is still refused. A layout that loads `ui.js` behind `CSRFProtect`
   needs nothing else. One that overwrites the header from a form's own field in
-  a `htmx:configRequest` listener keeps working, because the field is renewed
+  a request-configuration listener keeps working, because the field is renewed
   too.
 - **A guest's cookie lives from the latest page and not the first.**
   `CSRF.Binding`, given a writer, sets the guest cookie again when the browser
@@ -85,7 +211,7 @@ worked around the first can take the workaround out.
   renewed token by token, and the cookie the tokens are bound to no longer
   lapses under the newest of them.
 - **`Refuse` answers a browser with a page.** A request that lists `text/html`
-  in `Accept` and is not sent by htmx now gets the built-in status page
+  in `Accept` and is not sent by YPY now gets the built-in status page
   (`exception.WriteStatusPage`) carrying the sentence, where it got a line of
   plain text. The status and the sentence are unchanged, the answer varies with
   `Accept`, and every client that did not ask for HTML (`*/*`, JSON, curl) keeps
@@ -231,7 +357,7 @@ because `data-column-toggle` is now a link and not a checkbox. No Go API changes
   again after each swap; the header checkbox shows the page's state.
 - **The swap** keeps the focus and text of the search box, an open menu and the table's sideways scroll, and the history
   entry it leaves is the canonical address of the state, without duplicated parameters.
-- **A complete list** (everything in the page) takes the click before htmx, so a boosted layout no longer sends a sort or a
+- **A complete list** (everything in the page) takes the click before YPY, so a boosted layout no longer sends a sort or a
   page to the server.
 
 An application that embeds its own bundle rebuilds it with `aru view:build`.
@@ -305,7 +431,7 @@ above the sidebar's `data-breakpoint` (768 pixels without one), a sidebar
 drawn with a mode (`data-sidebar-mode`, which kyse's `SidebarProps.Mode`
 writes) switches between `full` and `slim`, and the choice is kept in
 `localStorage` under `arandu.sidebar.<id>` and put back on the next page and
-on every htmx swap; below it, or with no mode, the button opens and closes
+on every YPY swap; below it, or with no mode, the button opens and closes
 the overlay. The button gets `aria-expanded`. A project that wrote this action
 itself should delete it and draw the button with the attribute:
 
@@ -360,9 +486,12 @@ func TestStoreContract(t *testing.T) {
 ```
 
 **`hesape/arandutest` is deprecated: moved to `github.com/arandu-io/framework/test`;
-removed in the next minor.** Every package under it carries the same notice --
+removed in v1.0.0.** Every package under it carries the same notice --
 `arandutest`, `browser`, `browser/cdp`, `browser/conformance`, `trace`,
-`openapi`, `conformance` and `servertrace` -- and keeps working until then.
+`openapi`, `conformance` and `servertrace` -- and keeps working until then. The
+framework's own `arandutest`, which forwards to the same place, is removed in
+the framework's v1.0.0; the two promises are about two modules and name the same
+release line. (This entry first said "the next minor", which no release kept.)
 Change the imports from `github.com/arandu-io/hesape/arandutest/...` to the
 same path under `github.com/arandu-io/framework/test/...`.
 
@@ -447,7 +576,7 @@ the browser harness each application wrote for itself, which the kit replaces.
 |---|---|
 | a CDP client of its own, over `--remote-debugging-pipe` or a WebSocket | `browser.Open(t, tests.Drivers, browser.BaseURL(srv.URL))`, with `var Drivers = browser.Registry{"cdp": cdp.Launch}` once in `tests/TestCase.go` |
 | `//go:build browser` and a `tests/Browser` directory | `//go:build e2e` and `tests/E2E` |
-| `time.Sleep` after a click, a polling loop on `Runtime.evaluate` | nothing: every action waits for its element and for the page to settle (htmx settled, network idle, animations over), every expectation retries under the step timeout |
+| `time.Sleep` after a click, a polling loop on `Runtime.evaluate` | nothing: every action waits for its element and for the page to settle (YPY settled, network idle, animations over), every expectation retries under the step timeout |
 | `document.querySelector` and a class name | `browser.Role`, `browser.Label`, `browser.Text`, `browser.TestID`; `browser.CSS(selector, reason)` when nothing else can say it |
 | `panic` in each check and a `recover` around the journey | the step fails the test with `t.Fatalf`, naming what it was still waiting for |
 | counting `Runtime.exceptionThrown`, a `securitypolicyviolation` listener, nothing for a 5xx | automatic: an exception, a `console.error`, a response of 500 or more and a CSP violation fail the step they happen in; `page.Allow(fragment)` accepts one a test is about |
@@ -533,10 +662,10 @@ The account rules write only under the Grants of `ActionUserCreate` and
 A policy that does not implement `auth.Writes` is returned as a
 `PolicyFunc`, as before.
 
-**`Context.WantsJSON`, `Context.IsHTMX` and `Context.Targets` write `Vary` as
+**`Context.WantsJSON`, `Context.IsYPY` and `Context.Targets` write `Vary` as
 one line.** Each header they read went on a `Vary` line of its own, so
 `Header().Get("Vary")` saw the first and lost the rest. The names already on
-the answer and the ones added are joined into one line, `Accept, HX-Request,
+the answer and the ones added are joined into one line, `Accept, YPY-Request,
 X-Requested-With`, each once whatever its case, and a `Vary` that says `*` on
 any line is left alone. A test that read `Header().Values("Vary")` as one
 entry per name reads one entry with every name.
@@ -590,12 +719,12 @@ Remember under a Grant that writes, or a `SystemGrant`, when the value has to
 be kept. A Policy that does not implement `Writes`, `SystemGrant` and
 `SystemGrantActing` issue Grants that write, as before.
 
-**`Context.WantsJSON` and `Context.IsHTMX` add the headers they read to
-`Vary`.** `WantsJSON` adds `Accept`, `HX-Request` and `X-Requested-With`,
-`IsHTMX` adds `HX-Request`, each once and none when `Vary` already says `*`.
+**`Context.WantsJSON` and `Context.IsYPY` add the headers they read to
+`Vary`.** `WantsJSON` adds `Accept`, `YPY-Request` and `X-Requested-With`,
+`IsYPY` adds `YPY-Request`, each once and none when `Vary` already says `*`.
 An action that wrote `Vary` by hand for those headers can drop the line; one
-that reads `HX-Target` asks the new `Context.Targets(id)`, which adds
-`HX-Target`. An answer that asked either now carries the header, so a cache in
+that reads `YPY-Target` asks the new `Context.Targets(id)`, which adds
+`YPY-Target`. An answer that asked either now carries the header, so a cache in
 front of the application keeps the page, the fragment and the JSON apart.
 
 **A nil `*translation.Translator` answers instead of panicking.** `Get` and
@@ -1233,8 +1362,8 @@ return ctx.ViewStatus(http.StatusConflict, "invoices/already-paid", data)
 Replace a whole page answered through `ctx.Fragment(status, ...)` with it, and
 a page written with `w.WriteHeader` and a render by hand. A form whose input
 failed the rules is still answered by returning the `validation.Errors`, which
-the router turns into a redirect back. A 4xx or 5xx answered to an htmx
-request carries `HX-Refresh`, as `Refuse` does.
+the router turns into a redirect back. A 4xx or 5xx answered to a YPY
+request carries `YPY-Refresh`, as `Refuse` does.
 
 **Text bound as typed.** `Bind` trims every value but a password's. A field
 that stores text as typed -- a message, a Markdown body, a summary -- is tagged
@@ -2193,7 +2322,7 @@ No signature changed. What a page receives did:
   becomes `&amp;amp;`. A value escaped once and passed in again now shows its
   entities as text; pass the raw text instead. `Mailto` is unaffected.
 - `HtmlBuilder.Attributes`, and every builder that takes `Attrs`, drops the names
-  `view.ActiveAttribute` refuses, in any case: `on*`, `hx-*`, `data-hx-*`, `x-*`,
+  `view.ActiveAttribute` refuses, in any case: `on*`, `ypy-*`, `data-ypy-*`, `x-*`,
   `data-x-*`, `@*`, `:*`, `style`, `srcdoc` and `http-equiv`. A page that set one
   of them through these builders loses it; write it in the view's markup, or in
   a component that takes it as a field.
@@ -2669,7 +2798,7 @@ Hesape's writers; the matching reader is Framework v0.42.0. Do not combine
 Hesape v0.21.0 with Framework v0.41.0: an `@csrf` form from that pair carries
 `_token` to a reader still looking for `_csrf` and is refused with 419.
 
-A view that uses the `@csrf` directive needs no change. A form or an HTMX
+A view that uses the `@csrf` directive needs no change. A form or a YPY
 request that writes the field by hand does:
 
 ```html
