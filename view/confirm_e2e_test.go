@@ -10,12 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var confirmDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // nativeConfirm replaces the browser's confirm box with one that counts the
 // times it was asked and says yes. A box that said no, or hung, would hide the
@@ -76,7 +73,7 @@ func newConfirmPage(t *testing.T, lang string) *confirmPage {
 
 func confirmOpen(t *testing.T, p *confirmPage) *browser.Page {
 	t.Helper()
-	page := browser.Open(t, confirmDrivers, browser.BaseURL(p.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
+	page := browser.Open(t, browser.BaseURL(p.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
 	page.Visit("/")
 	return page
 }

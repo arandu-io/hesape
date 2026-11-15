@@ -8,12 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var lifecycleDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // lifecyclePage serves a behaviour that writes down every hook it is told about,
 // in a region a button swaps with the default swap and with an explicit one.
@@ -53,7 +50,7 @@ arandu.ui.define('probe', {
 // swap that brought it, and the element outside the swap is left alone.
 func TestABehaviourIsMountedWhereItArrivesAndDestroyedWhereItLeaves(t *testing.T) {
 	server := lifecyclePage(t)
-	page := browser.Open(t, lifecycleDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
 	page.Visit("/")
 	page.ClickRole("button", "Swap")
 	page.ExpectText("new")

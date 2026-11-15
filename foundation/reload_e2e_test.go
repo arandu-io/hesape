@@ -8,15 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
 	"github.com/arandu-io/hesape/exception"
 	"github.com/arandu-io/hesape/foundation"
 	"github.com/arandu-io/hesape/http/middleware"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var reloadDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // A development server with the application's own policy. The page that answers
 // 403 is the built-in status page, which carries a policy of its own with
@@ -48,7 +45,7 @@ func reloadServer(t *testing.T) *httptest.Server {
 // left alone and opens clean.
 func TestAForbiddenPageInDevelopmentIsOpenedWithoutAPolicyViolation(t *testing.T) {
 	server := reloadServer(t)
-	page := browser.Open(t, reloadDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
 
 	page.Visit("/")
 	page.ExpectText("Home")

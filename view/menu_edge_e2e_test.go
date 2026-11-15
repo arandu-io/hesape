@@ -9,12 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var menuEdgeDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // menuEdgePage serves a row's menu the way a card draws it on a narrow screen:
 // the button sits at the left edge of a size container, the panel is
@@ -51,7 +48,7 @@ func menuEdgePage(t *testing.T, gap int) *httptest.Server {
 func menuEdgeOpen(t *testing.T, gap int) *browser.Page {
 	t.Helper()
 	srv := menuEdgePage(t, gap)
-	page := browser.Open(t, menuEdgeDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 390, Height: 640}))
+	page := browser.Open(t, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 390, Height: 640}))
 	page.Visit("/")
 	page.Click(browser.CSS("#m > summary", "a summary has no role the locators name"))
 	time.Sleep(50 * time.Millisecond)

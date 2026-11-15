@@ -10,12 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var rangeDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // rangePage serves the markup the Kyse DateRangePicker draws -- only the
 // attributes the behaviour reads and the little CSS it needs to be visible --
@@ -78,7 +75,7 @@ func rangeOpen(t *testing.T, attrs string) *browser.Page {
 	// and on the current month by default; these tests draw September 2026.
 	t.Helper()
 	srv := rangePage(t, attrs)
-	page := browser.Open(t, rangeDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	// Count the changes the form receives: a period is one request.
 	page.Evaluate(`(function () { window.changes = 0; document.getElementById('f').addEventListener('change', function () { window.changes++; }); return true; })()`, nil)
@@ -260,7 +257,7 @@ func pickerPage(t *testing.T) *httptest.Server {
 // the field, so what is at its centre is the panel, and choosing a day closes it.
 func TestADayPickersPanelIsNotCutByItsContainer(t *testing.T) {
 	srv := pickerPage(t)
-	page := browser.Open(t, rangeDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	page.Click(browser.CSS("[data-part=open]", "the button that opens the panel"))
 	page.ExpectVisible(browser.CSS("#p", "the panel"))

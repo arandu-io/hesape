@@ -8,12 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var sidebarDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // sidebarPage serves a page with a sidebar drawn in mode, the button that
 // names it, and a link that swaps a second sidebar in through YPY, under the
@@ -60,7 +57,7 @@ const (
 // the two modes is ignored.
 func TestTheSidebarFoldsToTheStripAndComesBackThatWay(t *testing.T) {
 	server := sidebarPage(t, "full")
-	page := browser.Open(t, sidebarDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	page.Evaluate(`localStorage.clear()`, nil)
 	page.Visit("/")
@@ -112,11 +109,11 @@ func TestTheSidebarFoldsToTheStripAndComesBackThatWay(t *testing.T) {
 // sidebar that arrives after the page loaded is restored as it lands.
 func TestASidebarSwappedInComesBackInTheRememberedMode(t *testing.T) {
 	server := sidebarPage(t, "full")
-	page := browser.Open(t, sidebarDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	page.Evaluate(`localStorage.setItem('arandu.sidebar.late', 'slim')`, nil)
 	page.ClickRole("button", "Load")
-	page.Find(browser.CSS("#late", "the swapped sidebar is located by id")).ExpectVisible()
+	page.ExpectVisible(browser.CSS("#late", "the swapped sidebar is located by id"))
 	if got := evalString(t, page, `document.getElementById('late').getAttribute('data-sidebar-mode')`); got != "slim" {
 		t.Fatalf("swapped sidebar mode = %q, want the remembered slim", got)
 	}
@@ -126,7 +123,7 @@ func TestASidebarSwappedInComesBackInTheRememberedMode(t *testing.T) {
 // still switches the page it is on, and says nothing in the console.
 func TestTheSidebarSwitchesWhenStorageThrows(t *testing.T) {
 	server := sidebarPage(t, "slim")
-	page := browser.Open(t, sidebarDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	page.Evaluate(`Object.defineProperty(window, 'localStorage', { get: function () { throw new DOMException('denied', 'SecurityError'); } }), true`, nil)
 	page.ClickRole("button", "Menu")
@@ -140,7 +137,7 @@ func TestTheSidebarSwitchesWhenStorageThrows(t *testing.T) {
 // overlay the vendored script drives.
 func TestOnANarrowScreenTheButtonOpensTheOverlay(t *testing.T) {
 	server := sidebarPage(t, "full")
-	page := browser.Open(t, sidebarDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 480, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 480, Height: 800}))
 	page.Visit("/")
 	page.Evaluate(`localStorage.clear()`, nil)
 	page.Visit("/")

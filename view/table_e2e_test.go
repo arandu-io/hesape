@@ -11,12 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var tableDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // tablePage serves a region shaped as the component library draws a data table
 // -- the attributes the behaviour reads, and nothing the stylesheet is needed
@@ -95,7 +92,7 @@ func (p *tablePage) seen() int {
 
 func tableOpen(t *testing.T, p *tablePage) *browser.Page {
 	t.Helper()
-	page := browser.Open(t, tableDrivers, browser.BaseURL(p.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(p.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	return page
 }
@@ -116,12 +113,12 @@ func TestTheSelectionOutlivesTheSwapAndPostsEveryKey(t *testing.T) {
 	bar := browser.CSS("#t-bulk", "the bar is a form")
 	page.ExpectHidden(bar)
 
-	page.Find(browser.Role("checkbox", "Select row 2")).Check()
+	page.Check(browser.Role("checkbox", "Select row 2"))
 	page.ExpectVisible(bar)
 	page.ExpectText("1 of 15 row(s) selected.")
 	page.ClickRole("link", "Next")
 	page.ExpectURL("/?page=2")
-	page.Find(browser.Role("checkbox", "Select row 7")).Check()
+	page.Check(browser.Role("checkbox", "Select row 7"))
 	page.ExpectText("2 of 15 row(s) selected.")
 	if got := tableEval(t, page, `Array.from(document.querySelectorAll('#t-bulk input[data-bulk-key]')).map(function (i) { return i.value; }).join(',')`); got != "2" {
 		t.Fatalf("the keys of other pages ride in the bar as %q, want 2", got)

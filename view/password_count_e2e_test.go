@@ -9,12 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
-
-var passwordDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // newPasswordPage serves a box drawn the way the component draws it for a
 // policy of 12 to 128 characters: the minimum line, and the maximum line that
@@ -56,7 +53,7 @@ const passwordState = `(function(){var m=document.querySelector('[data-requireme
 // with one of them unmet.
 func TestThePasswordSummaryCountsTheMaximumOnlyWhileItIsShown(t *testing.T) {
 	srv := newPasswordPage(t)
-	page := browser.Open(t, passwordDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
+	page := browser.Open(t, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 900, Height: 600}))
 	page.Visit("/")
 
 	for _, step := range []struct {

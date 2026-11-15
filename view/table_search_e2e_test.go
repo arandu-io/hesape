@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/view"
 )
 
@@ -72,7 +72,7 @@ func (s *searchServer) sent() []string {
 
 func searchOpen(t *testing.T, s *searchServer) *browser.Page {
 	t.Helper()
-	page := browser.Open(t, tableDrivers, browser.BaseURL(s.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(s.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	return page
 }
@@ -217,7 +217,7 @@ func completeOpen(t *testing.T) *browser.Page {
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	page := browser.Open(t, tableDrivers, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page := browser.Open(t, browser.BaseURL(srv.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
 	page.Visit("/")
 	return page
 }

@@ -10,15 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arandu-io/hesape/arandutest/browser"
-	"github.com/arandu-io/hesape/arandutest/browser/cdp"
 	hhttp "github.com/arandu-io/hesape/http"
 	"github.com/arandu-io/hesape/http/middleware"
+	"github.com/arandu-io/hesape/internal/testkit/browser"
 	"github.com/arandu-io/hesape/session"
 	"github.com/arandu-io/hesape/view"
 )
-
-var renewalDrivers = browser.Registry{"cdp": cdp.Launch}
 
 // renewalTTL is how long a token lives in these pages. The browser runs on the
 // real clock, so the lifetime is short and the test waits it out.
@@ -77,7 +74,7 @@ func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server 
 
 func openRenewal(t *testing.T, server *httptest.Server) *browser.Page {
 	t.Helper()
-	page := browser.Open(t, renewalDrivers, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1024, Height: 700}))
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1024, Height: 700}))
 	page.Visit("/")
 	return page
 }
