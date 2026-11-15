@@ -3,6 +3,7 @@ package http
 import (
 	"net"
 	stdhttp "net/http"
+	"net/url"
 	"strings"
 
 	"github.com/arandu-io/hesape/auth"
@@ -119,18 +120,39 @@ func (c *Context) IsYPY() bool {
 // Targets reports whether YPY made this request to swap the element whose id
 // is id, read from the YPY-Target header. An empty id targets nothing.
 //
+// The header carries the element as tag#id -- div#note-7 -- with the id
+// percent-encoded. A plain id is compared with the part after the #, and a
+// tag#id is compared with the whole value, so both what the page names and
+// what YPY sends are accepted: Targets("note-7") and Targets("div#note-7") are
+// true for the same request, and Targets("section#note-7") is not. A header
+// with no # names an element that has no id, and targets nothing.
+//
 // It is how one action answers a page to a navigation and a fragment to the
 // swap of one element. It adds YPY-Target to the Vary header of the answer, for
 // the reason IsYPY adds YPY-Request.
 func (c *Context) Targets(id string) bool {
 	c.vary("YPY-Target")
-	return id != "" && c.Request.Header.Get("YPY-Target") == id
+	if id == "" {
+		return false
+	}
+	header := c.Request.Header.Get("YPY-Target")
+	if decoded, err := url.PathUnescape(header); err == nil {
+		header = decoded
+	}
+	tag, named, ok := strings.Cut(header, "#")
+	if !ok {
+		return false
+	}
+	if strings.Contains(id, "#") {
+		return tag+"#"+named == id
+	}
+	return named == id
 }
 
 // WantsJSON reports whether this request asked for JSON rather than a page.
 //
-// YPY is deliberately excluded even though it sends X-Requested-With: it swaps
-// HTML, so answering it with JSON puts a JSON document inside a div.
+// YPY is deliberately excluded, whatever else the request says: it swaps HTML,
+// so answering it with JSON puts a JSON document inside a div.
 //
 // hesape/exception states the same rule as the default of its Config.RenderJSONWhen,
 // because it must answer a failure on a request that never reached a Context.

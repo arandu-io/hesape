@@ -84,8 +84,8 @@ func TestACookieIsWrittenOnTheAnswerAndTheLineStillChains(t *testing.T) {
 }
 
 func TestYPYAsksForHTMLAndIsNeverAnsweredWithJSON(t *testing.T) {
-	// YPY sends X-Requested-With and swaps HTML. Answering it with JSON puts a
-	// JSON document inside a div.
+	// YPY swaps HTML, whatever a script or a proxy adds to its request.
+	// Answering it with JSON puts a JSON document inside a div.
 	req := httptest.NewRequest(stdhttp.MethodGet, "/inbox/rows", nil)
 	req.Header.Set("YPY-Request", "true")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
@@ -179,10 +179,35 @@ func TestVaryIsOneHeaderWithEveryName(t *testing.T) {
 func TestTargetsReadsTheElementYPYSwaps(t *testing.T) {
 	req := httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil)
 	req.Header.Set("YPY-Request", "true")
-	req.Header.Set("YPY-Target", "note-7")
+	req.Header.Set("YPY-Target", "div#note-7")
 	ctx := hhttp.NewContext(httptest.NewRecorder(), req, nil, nil)
 	if !ctx.Targets("note-7") || ctx.Targets("note-8") || ctx.Targets("") {
 		t.Fatal("Targets did not answer for the element named by YPY-Target alone")
+	}
+
+	// The header is tag#id, so the id is what follows the #; a tag#id asked for
+	// directly is compared whole, and one of another element does not match.
+	for _, tc := range []struct {
+		header, id string
+		hits       bool
+	}{
+		{"div#note-7", "note-7", true},
+		{"div#note-7", "div#note-7", true},
+		{"div#note-7", "section#note-7", false},
+		{"div#note-7", "div#note-8", false},
+		{"div#note-7", "note-8", false},
+		{"note-7", "note-7", false},
+		{"div", "div", false},
+		{"div#", "", false},
+		{"section#a%20b", "a b", true},
+		{"section#a%20b", "section#a b", true},
+		{"main#note-7#x", "main#note-7#x", true},
+	} {
+		r := httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil)
+		r.Header.Set("YPY-Target", tc.header)
+		if got := hhttp.NewContext(httptest.NewRecorder(), r, nil, nil).Targets(tc.id); got != tc.hits {
+			t.Errorf("YPY-Target %q: Targets(%q) = %v, want %v", tc.header, tc.id, got, tc.hits)
+		}
 	}
 	plain := hhttp.NewContext(httptest.NewRecorder(), httptest.NewRequest(stdhttp.MethodGet, "/notes/7", nil), nil, nil)
 	if plain.Targets("") || plain.Targets("note-7") {
