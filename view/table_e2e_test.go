@@ -75,9 +75,9 @@ func newTablePage(t *testing.T) *tablePage {
 			fmt.Fprint(w, p.region(page, r.URL.Query().Get("q")))
 			return
 		}
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"compat":"v2","includeIndicatorStyles":false}'><title>T</title><link rel="stylesheet" href="/t.css">
-<script src="%s"></script><script src="%s"></script></head><body ypy-boost="true">%s</body></html>`,
-			view.Asset("ypy-compat.min.js"), view.Asset("ui.js"), p.region(page, r.URL.Query().Get("q")))
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>T</title><link rel="stylesheet" href="/t.css">
+<script src="%s"></script><script src="%s"></script></head><body ypy-boost:inherited="true">%s</body></html>`,
+			view.Asset("ypy.min.js"), view.Asset("ui.js"), p.region(page, r.URL.Query().Get("q")))
 	})
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")

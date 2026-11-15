@@ -31,7 +31,7 @@ func TestUseBrandServesTheAssetsUnderTheApplicationsOwnName(t *testing.T) {
 	if got := view.AssetPrefix(); got != "/_perata/assets/" {
 		t.Fatalf("AssetPrefix = %q", got)
 	}
-	for _, name := range []string{"app.css", "ui.js", "theme.js", "ypy-compat.min.js"} {
+	for _, name := range []string{"app.css", "ui.js", "theme.js", "ypy.min.js"} {
 		if url := view.Asset(name); !strings.HasPrefix(url, "/_perata/assets/") || strings.Contains(url, "arandu") {
 			t.Errorf("Asset(%q) = %q, want it under /_perata/assets/", name, url)
 		}

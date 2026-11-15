@@ -28,8 +28,10 @@ const renewalTTL = 6 * time.Second
 // scheduler: by then the token the page was drawn with has lapsed.
 const renewalWait = renewalTTL + 1500*time.Millisecond
 
-// renewalPage serves a page with a form the browser sends itself and a form
-// YPY sends, both drawn with the page's token, behind the real check. before
+// renewalPage serves a page with a form the browser sends itself, a form YPY
+// sends and a button YPY sends with no form behind it, drawn with the page's
+// token behind the real check: the forms carry it in the hidden field, and the
+// button only has the ypy-csrf meta tag and the extension that reads it. before
 // is the script served ahead of ui.js, to hold back what a test needs held
 // back; withScript is false for a page that loads no behaviour at all.
 func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server {
@@ -46,15 +48,17 @@ func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server 
 		token = html.EscapeString(token)
 		scripts := ""
 		if withScript {
-			scripts = fmt.Sprintf(`<script src="/before.js"></script><script src="%s"></script><script src="%s"></script>`, view.Asset("ypy-compat.min.js"), view.Asset("ui.js"))
+			scripts = fmt.Sprintf(`<script src="/before.js"></script><script src="%s"></script><script src="%s"></script><script src="%s"></script>`,
+				view.Asset("ypy.min.js"), view.Asset("ypy-csrf.min.js"), view.Asset("ui.js"))
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "script-src 'self'")
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Open page</title>%s</head><body>
-<div ypy-headers='{"X-CSRF-Token": "%s"}'>
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Open page</title><meta name="ypy-csrf" content="%s">%s</head><body>
+<div>
 <form method="post" action="/native"><input type="hidden" name="_token" value="%s"><button type="submit">Send native</button></form>
 <form ypy-post="/ypy" ypy-target="#out" ypy-swap="innerHTML"><input type="hidden" name="_token" value="%s"><button type="submit">Send YPY</button></form>
-<div id="out"></div></div></body></html>`, scripts, token, token, token)
+<button type="button" ypy-delete="/ypy-button" ypy-target="#out" ypy-swap="innerHTML">Send button</button>
+<div id="out"></div></div></body></html>`, token, scripts, token, token)
 	})
 	mux.HandleFunc("POST /native", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -62,6 +66,9 @@ func renewalPage(t *testing.T, withScript bool, before string) *httptest.Server 
 	})
 	mux.HandleFunc("POST /ypy", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<p>YPY accepted</p>`)
+	})
+	mux.HandleFunc("DELETE /ypy-button", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<p>button accepted</p>`)
 	})
 	server := httptest.NewServer(middleware.CSRFProtect(csrf, func(*http.Request) string { return "" })(mux))
 	t.Cleanup(server.Close)
@@ -87,14 +94,16 @@ func TestWithoutTheRenewalAPageLeftOpenIsRefused(t *testing.T) {
 }
 
 // TestAPageLeftOpenRenewsItsTokenBeforeItLapses: the page is drawn, the token it
-// was drawn with lapses, and both forms still go through -- the timer asked for
-// a new token while the old one still worked and wrote it into the fields and
-// into the header YPY sends.
+// was drawn with lapses, and every way of sending still goes through -- the
+// timer asked for a new token while the old one still worked and wrote it into
+// the fields and into the meta tag the request header is read from.
 func TestAPageLeftOpenRenewsItsTokenBeforeItLapses(t *testing.T) {
 	page := openRenewal(t, renewalPage(t, true, ""))
 	time.Sleep(renewalWait)
 	page.ClickRole("button", "Send YPY")
 	page.ExpectText("YPY accepted")
+	page.ClickRole("button", "Send button")
+	page.ExpectText("button accepted")
 	page.Visit("/")
 	time.Sleep(renewalWait)
 	page.ClickRole("button", "Send native")
@@ -109,12 +118,13 @@ const held = `(function(){var set=window.setTimeout;window.setTimeout=function(f
 
 // TestAFormSentWithADueTokenWaitsForANewOne: with the timers held back, the
 // token lapses and nothing has renewed it. The form the browser sends, and the
-// request YPY sends, each wait for the new token and are then sent as they
+// requests YPY sends, each wait for the new token and are then sent as they
 // were.
 func TestAFormSentWithADueTokenWaitsForANewOne(t *testing.T) {
 	for _, tc := range []struct{ button, want string }{
 		{"Send native", "native accepted"},
 		{"Send YPY", "YPY accepted"},
+		{"Send button", "button accepted"},
 	} {
 		t.Run(tc.button, func(t *testing.T) {
 			page := openRenewal(t, renewalPage(t, true, held))

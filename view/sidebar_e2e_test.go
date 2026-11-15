@@ -30,7 +30,7 @@ func sidebarPage(t *testing.T, mode string) *httptest.Server {
 <button type="button" data-sidebar-toggle="nav">Menu</button>
 <aside class="sidebar" id="nav" data-sidebar-mode="%s"><nav aria-label="Sidebar"><a href="/">Home</a></nav></aside>
 <main><button type="button" ypy-get="/late" ypy-target="#slot">Load</button><div id="slot"></div></main>
-</body></html>`, view.Asset("ypy-compat.min.js"), view.Asset("basecoat.bundle.js"), view.Asset("ui.js"), mode)
+</body></html>`, view.Asset("ypy.min.js"), view.Asset("basecoat.bundle.js"), view.Asset("ui.js"), mode)
 	})
 	mux.HandleFunc("GET /late", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

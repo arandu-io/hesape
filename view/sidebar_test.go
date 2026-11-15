@@ -60,7 +60,7 @@ func TestTheSidebarToggleSwitchesTheModeAndRemembersIt(t *testing.T) {
 		t.Error("the delegated click listener does not reach the sidebar toggle")
 	}
 	if !strings.Contains(whole, "each(node, '[data-sidebar-mode]', restoreSidebar);") {
-		t.Error("the sweep that runs on load and on every ypy:load does not restore the sidebar mode")
+		t.Error("the sweep that runs on load and on every ypy:after:process does not restore the sidebar mode")
 	}
 }
 

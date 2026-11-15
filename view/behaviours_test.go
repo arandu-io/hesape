@@ -16,7 +16,7 @@ import (
 // attribute, the component wrote it -- so the answer belongs beside the script.
 //
 // kyse's password box shipped that way. It emitted the name from the day it was
-// written and nothing in ui.js, basecoat.bundle.js, theme.js or ypy-compat.min.js
+// written and nothing in ui.js, basecoat.bundle.js, theme.js or ypy.min.js
 // contained the word; every project that drew a sign-up form implemented the
 // behaviour by hand. Found by the Corujão.ai team, twice.
 
@@ -71,7 +71,7 @@ func TestEveryBehaviourTheComponentsEmitIsRegistered(t *testing.T) {
 func TestTheServedScriptIsTheOnlyPlaceBehavioursAreRegistered(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"basecoat.bundle.js", "theme.js", "ypy-compat.min.js"} {
+	for _, name := range []string{"basecoat.bundle.js", "theme.js", "ypy.min.js"} {
 		body, err := os.ReadFile("assets/" + name)
 		if err != nil {
 			continue

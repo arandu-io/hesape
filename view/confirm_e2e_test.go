@@ -57,14 +57,14 @@ func newConfirmPage(t *testing.T, lang string) *confirmPage {
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!doctype html><html lang="%s"><head><meta charset="utf-8"><meta name="ypy-config" content='{"compat":"v2","includeIndicatorStyles":false}'><title>C</title><link rel="stylesheet" href="/c.css">
-<script src="/native.js"></script><script src="%s"></script><script src="%s"></script></head><body ypy-boost="true">
+		fmt.Fprintf(w, `<!doctype html><html lang="%s"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>C</title><link rel="stylesheet" href="/c.css">
+<script src="/native.js"></script><script src="%s"></script><script src="%s"></script></head><body ypy-boost:inherited="true">
 <form ypy-delete="/groups/7" ypy-confirm="Delete this group and every membership on it?" ypy-target="#out">
 <button type="submit" data-variant="destructive">Delete group</button></form>
 <button type="button" ypy-post="/rename" ypy-target="#out" ypy-confirm="Rename it now?" data-confirm-title="Rename the group" data-confirm-label="Rename" data-confirm-cancel="Keep it">Open</button>
 <button type="button" ypy-post="/plain" ypy-target="#out" ypy-confirm="Send it?">Send</button>
 <button type="button" ypy-post="/plain" ypy-target="#out">No question</button>
-<div id="out"></div></body></html>`, lang, view.Asset("ypy-compat.min.js"), view.Asset("ui.js"))
+<div id="out"></div></body></html>`, lang, view.Asset("ypy.min.js"), view.Asset("ui.js"))
 	})
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")

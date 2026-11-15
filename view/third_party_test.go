@@ -65,8 +65,8 @@ func TestTheCreditedVersionsAreTheEmbeddedOnes(t *testing.T) {
 	// version, because there is nothing to compare an upstream release to:
 	// they are in this repository and they move with it.
 	for file, pattern := range map[string]*regexp.Regexp{
-		"ypy-compat.min.js": declared,
-		"app.css":           banner,
+		"ypy.min.js": declared,
+		"app.css":    banner,
 	} {
 		body, err := os.ReadFile(filepath.Join("assets", file))
 		if err != nil {

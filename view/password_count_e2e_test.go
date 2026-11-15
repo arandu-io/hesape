@@ -25,7 +25,7 @@ func newPasswordPage(t *testing.T) *httptest.Server {
 	mux.HandleFunc(view.AssetPath, view.Handler)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"compat":"v2","includeIndicatorStyles":false}'><title>P</title>
+		fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="ypy-config" content='{"includeIndicatorCSS":false}'><title>P</title>
 <script src="%s"></script><script src="%s"></script></head><body>
 <div data-part="root" class="field password" data-kyse-behavior="password" data-kyse-props='{"min":12,"max":128}'>
 <label for="password">Password</label>
@@ -38,7 +38,7 @@ func newPasswordPage(t *testing.T) *httptest.Server {
 <li data-part="requirement" data-requirement="max" data-met="false" hidden><span class="sr-only" data-password-status>Not met:</span>At most 128 characters</li>
 </ul>
 <button type="button" data-part="done">Done</button>
-</section></div></body></html>`, view.Asset("ypy-compat.min.js"), view.Asset("ui.js"))
+</section></div></body></html>`, view.Asset("ypy.min.js"), view.Asset("ui.js"))
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'")

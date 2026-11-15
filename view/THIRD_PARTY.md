@@ -18,21 +18,23 @@ version inside the file.
 
 ---
 
-## YPY — `view/assets/ypy-compat.min.js`
+## YPY — `view/assets/ypy.min.js` and `view/assets/ypy-csrf.min.js`
 
 | | |
 |---|---|
-| Version | 0.1.0-dev (the file reports `0.1.0-dev-compat` at run time) |
+| Version | 0.1.0-dev |
 | Author | HYZIS - SERVICOS DIGITAIS LTDA - EPP |
 | Home | none published yet; the public address is recorded here when the first release is tagged |
 | License | MIT |
 
-The file is the compatibility build of YPY (`dist/ypy-compat.min.js`): the core
-plus the layer that reproduces the behaviour of the 2.x line. The pages this
-framework serves pin that profile (`"compat":"v2"` in the `ypy-config` meta
-tag), so a swap of the script changed the names and nothing else. YPY is the
-hypermedia library Arandu uses; it is not an Arandu package, which is why it is
-credited here.
+`ypy.min.js` is the core of YPY (`dist/ypy.min.js`) as it is built, with its
+native behaviour and nothing that reproduces another library: morph is the
+default swap, the attributes that reach descendants say so with `:inherited`,
+and the events are the `ypy:<noun>:<verb>` ones. `ypy-csrf.min.js` is the
+extension that puts the token of the `ypy-csrf` meta tag on every request that
+changes something (`dist/ext/ypy-csrf.min.js`). YPY is the hypermedia library
+Arandu uses; it is not an Arandu package, which is why it is credited here.
+Both files carry the same license and the same notice.
 
 ```
 The MIT License (MIT)
