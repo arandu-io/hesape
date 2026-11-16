@@ -396,9 +396,14 @@
 	 * started from. A panel placed with style.left is `style="left: …"` in the
 	 * markup, which the policy refuses wherever that markup is parsed again,
 	 * and a menu left open would be open on a page that has moved on. The menus
-	 * are shut and the placement taken off before the entry is written. */
+	 * are shut and the placement taken off before the entry is written.
+	 * YPY writes the entry after the swap has settled, so a table region that
+	 * was just swapped has had its open menus put back on purpose, and those
+	 * stay: the page has not moved on, only the rows under the menu did. */
 	document.addEventListener('ypy:before:history:update', function () {
 		each(document, 'details[data-menu]', function (menu) {
+			var region = tableRootOf(menu);
+			if (region && region.id && tableCarried[region.id]) return;
 			menu.open = false;
 			var panel = menuPanel(menu);
 			if (panel) panel.removeAttribute('style');
@@ -675,27 +680,32 @@
 	/* The address bar says what the server says is on screen. The form
 	 * serialises its fields as they are -- an empty search, the size even when
 	 * it is the default -- and the server's canonical address leaves those out.
-	 * Replacing the entry YPY just pushed keeps one entry per step. Only an
-	 * entry YPY pushed is replaced: a control that forgot to ask for a push
-	 * must not have its missing history written over the page's own. */
-	document.addEventListener('ypy:after:history:push', function () {
-		Object.keys(tableCarried).forEach(function (id) { tableCarried[id].pushed = true; });
-	});
-
-	document.addEventListener('ypy:after:settle', function () {
+	 * YPY writes the history entry after the new markup has settled, so the
+	 * canonical address is put over that entry once it exists: put earlier, it
+	 * would be overwritten by the address of the request. Replacing the entry
+	 * YPY just wrote keeps one entry per step, and only an entry YPY wrote is
+	 * replaced: a control that asked for no history must not have its missing
+	 * entry written over the page's own. The state that was carried across the
+	 * swap is dropped when the swap is over, whether or not an entry was written. */
+	function canonicalAddress() {
 		Object.keys(tableCarried).forEach(function (id) {
 			var root = document.getElementById(id);
-			var pushed = tableCarried[id].pushed;
-			delete tableCarried[id];
-			delete tableSwapping[id];
-			if (!pushed || !root || !window.history || !history.replaceState) return;
+			if (!root || !window.history || !history.replaceState) return;
 			var canonical = root.getAttribute('data-url');
 			if (!canonical) return;
 			var now = location.pathname + location.search;
 			if (canonical !== now && canonical.charAt(0) === '/') {
-				try { history.replaceState(history.state, '', canonical + location.hash); } catch (e) { /* the entry stays as pushed */ }
+				try { history.replaceState(history.state, '', canonical + location.hash); } catch (e) { /* the entry stays as written */ }
 			}
 		});
+	}
+
+	document.addEventListener('ypy:after:history:push', canonicalAddress);
+	document.addEventListener('ypy:after:history:replace', canonicalAddress);
+
+	document.addEventListener('ypy:finally:swap', function () {
+		Object.keys(tableCarried).forEach(function (id) { delete tableCarried[id]; });
+		Object.keys(tableSwapping).forEach(function (id) { delete tableSwapping[id]; });
 	});
 
 	arandu.ui.define('table', {
