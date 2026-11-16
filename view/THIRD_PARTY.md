@@ -22,17 +22,17 @@ version inside the file.
 
 | | |
 |---|---|
-| Version | 0.1.0-dev |
+| Version | 0.1.1 |
 | Author | HYZIS - SERVICOS DIGITAIS LTDA - EPP |
-| Home | none published yet; the public address is recorded here when the first release is tagged |
+| Home | https://github.com/ypy-develop/ypy (tag v0.1.1; the files are `dist/embed/ypy.min.js` and `dist/embed/ext/ypy-csrf.min.js`, the builds without the source map comment) |
 | License | MIT |
 
-`ypy.min.js` is the core of YPY (`dist/ypy.min.js`) as it is built, with its
+`ypy.min.js` is the core of YPY (`dist/embed/ypy.min.js`) as it is built, with its
 native behaviour and nothing that reproduces another library: morph is the
 default swap, the attributes that reach descendants say so with `:inherited`,
 and the events are the `ypy:<noun>:<verb>` ones. `ypy-csrf.min.js` is the
 extension that puts the token of the `ypy-csrf` meta tag on every request that
-changes something (`dist/ext/ypy-csrf.min.js`). YPY is the hypermedia library
+changes something (`dist/embed/ext/ypy-csrf.min.js`). YPY is the hypermedia library
 Arandu uses; it is not an Arandu package, which is why it is credited here.
 Both files carry the same license and the same notice.
 

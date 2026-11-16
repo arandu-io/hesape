@@ -27,6 +27,22 @@ the commit that made the change, which `git tag --contains <commit>` prints.
 
 ---
 
+## v0.109.0 — YPY v0.1.1, and the canonical address after the history entry
+
+`view/assets/` now carries YPY `v0.1.1` (`dist/embed/ypy.min.js` and
+`dist/embed/ext/ypy-csrf.min.js`), the first tagged release, in place of the
+development copy.
+
+YPY writes the history entry after the swap has settled, so
+`ypy:after:settle` fires before `ypy:after:history:push`. `ui.js` used to put
+the server's canonical address on the entry at the settle, and YPY then wrote
+the address of the request over it. The canonical address of a table is now
+applied at `ypy:after:history:push` and `ypy:after:history:replace`. A script
+of the application that rewrites the address bar at `ypy:after:settle` of a
+swap that writes history has the same ordering to follow.
+
+---
+
 ## v0.108.0 — arandutest is removed
 
 One package tree stops compiling, and the change is the import path.
