@@ -21,10 +21,18 @@
 //
 // A request built here carries a deadline, reads a bounded body, goes out over
 // http or https and nothing else, and refuses to connect to an address inside
-// the network -- loopback, a private range, or link-local, which is where a
-// cloud metadata service answers. The check is made on the address about to be
-// connected to, so a redirect is checked again rather than inheriting the
-// permission of the hop that sent it.
+// the network -- loopback, a private range, link-local, which is where a cloud
+// metadata service answers, the shared address space of carrier-grade NAT
+// (100.64.0.0/10), the other ranges no public host answers on, and an IPv6
+// address that carries one of those IPv4 addresses (NAT64, 6to4). IsInternalAddress
+// is that list. The check is made on the address about to be connected to, so a
+// redirect is checked again rather than inheriting the permission of the hop
+// that sent it.
+//
+// Behind a proxy (HTTP_PROXY, HTTPS_PROXY) the dialer connects to the proxy and
+// the proxy resolves the name, so the address is not seen here. What is still
+// refused is a URL whose host is an address inside the network, or localhost;
+// where the proxy may connect is the proxy's egress policy to enforce.
 //
 // None of that is a mode to switch on. An application that talks to a service
 // of its own names it with Factory.AllowInternalHosts, and one that reads

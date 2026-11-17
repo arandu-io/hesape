@@ -345,7 +345,7 @@ func TestARelayedAttemptRefusesAPrivateDestinationOnTheGuardedClient(t *testing.
 	t.Parallel()
 
 	server := newCapture(t) // listens on loopback
-	e, err := newEngine(nil, aranduPrefix, time.Now)
+	e, err := newEngine(nil, false, aranduPrefix, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}

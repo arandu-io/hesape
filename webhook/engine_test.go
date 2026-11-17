@@ -31,7 +31,7 @@ func TestThePublicDialerRefusesEveryAddressInsideTheNetwork(t *testing.T) {
 	for _, address := range []string{
 		"127.0.0.1:443", "10.0.0.1:443", "172.16.0.1:443", "192.168.1.1:443", "169.254.169.254:80",
 		"100.64.0.1:443", "100.127.255.254:443", "0.0.0.0:443", "[::1]:443", "[fe80::1]:443", "[fc00::1]:443",
-		"[::ffff:100.64.0.1]:443",
+		"[::ffff:100.64.0.1]:443", "198.18.0.1:443", "[64:ff9b::a00:1]:443", "[2002:a00:1::1]:443", "240.0.0.1:443",
 	} {
 		if _, err := dial(context.Background(), "tcp", address); !errors.Is(err, httpclient.ErrInternalAddress) {
 			t.Errorf("dialing %s = %v, want ErrInternalAddress", address, err)
