@@ -14,76 +14,13 @@ import (
 	httpclient "github.com/arandu-io/hesape/http/client"
 )
 
-// sharedAddressSpace is 100.64.0.0/10, the carrier-grade NAT range of RFC
-// 6598. It is global unicast to the standard library, so the guard of
-// http/client lets
-// it through, and it is where a cluster's or a tailnet's own machines answer.
-var sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")
-
-// unroutableSpace is what the standard library calls global unicast and no
-// public host answers on: "this network" (0.0.0.0/8, which a Linux host
-// connects to itself), the IETF protocol block, the benchmarking range, the
-// reserved class E, and the deprecated IPv6 site-local range.
-var unroutableSpace = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("198.18.0.0/15"),
-	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("fec0::/10"),
-}
-
-// embeddingSpace is the IPv6 ranges that carry an IPv4 address in their low
-// or middle bits, so a network that translates them reaches the IPv4 address
-// inside: NAT64 (64:ff9b::/96 and 64:ff9b:1::/48), 6to4 (2002::/16) and the
-// deprecated IPv4-compatible form (::/96).
-var embeddingSpace = []netip.Prefix{
-	netip.MustParsePrefix("64:ff9b::/96"),
-	netip.MustParsePrefix("64:ff9b:1::/48"),
-	netip.MustParsePrefix("2002::/16"),
-	netip.MustParsePrefix("::/96"),
-}
-
-// embeddedIPv4 is the IPv4 address an IPv6 address of embeddingSpace carries,
-// at the offset RFC 6052 gives its prefix length.
-func embeddedIPv4(addr netip.Addr) (netip.Addr, bool) {
-	if !addr.Is6() {
-		return netip.Addr{}, false
-	}
-	b := addr.As16()
-	for _, prefix := range embeddingSpace {
-		if !prefix.Contains(addr) {
-			continue
-		}
-		switch prefix.Bits() {
-		case 16: // 6to4: 2002:AABB:CCDD::
-			return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), true
-		case 48: // RFC 6052 for a /48 prefix: bytes 6 and 7, skip the u octet, then 9 and 10
-			return netip.AddrFrom4([4]byte{b[6], b[7], b[9], b[10]}), true
-		default: // the /96 forms carry it in the last four bytes
-			return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), true
-		}
-	}
-	return netip.Addr{}, false
-}
-
-// refusedAddress reports whether a delivery may not connect to the address:
-// loopback, private, link-local, multicast, unspecified, in the shared address
-// space or another range no public host answers on, or an IPv6 address that
-// carries one of those IPv4 addresses.
+// refusedAddress reports whether a delivery may not connect to the address. It
+// is the list of http/client, which the guard of every request of the framework
+// refuses on as well: loopback, private, link-local, multicast, unspecified, the
+// shared address space, the other ranges no public host answers on, and an IPv6
+// address that carries one of those IPv4 addresses.
 func refusedAddress(addr netip.Addr) bool {
-	addr = addr.Unmap()
-	if !addr.IsGlobalUnicast() || addr.IsPrivate() || sharedAddressSpace.Contains(addr) {
-		return true
-	}
-	for _, prefix := range unroutableSpace {
-		if prefix.Contains(addr) {
-			return true
-		}
-	}
-	if inner, ok := embeddedIPv4(addr); ok {
-		return refusedAddress(inner)
-	}
-	return false
+	return httpclient.IsInternalAddress(addr)
 }
 
 // DestinationLookupTimeout bounds the lookup of a name in CheckDestination.
@@ -145,25 +82,55 @@ func CheckDestination(ctx context.Context, value string, names HostResolver) err
 // newDeliveryClient is the client the deliveries go out on.
 //
 // A client the application gave keeps its transport, wrapped in the guard
-// of http/client, which settles the scheme and caps the answer on every hop. Without
-// one, the transport is a copy of the guarded one, with no proxy -- a
-// delivery goes to the address it names -- and a dialer in front of the guard's
-// that resolves the host itself, refuses the whole answer when any address is
-// refused, and hands the guard's dialer the address it checked, which checks it
-// again as it connects. Nothing is resolved twice, so a name that answers
-// differently the second time reaches nothing it was not checked for.
-func newDeliveryClient(custom *http.Client) (*http.Client, error) {
-	if custom != nil {
+// of http/client, which settles the scheme and caps the answer on every hop. It
+// is the application's client, so where it may connect stays the application's
+// answer -- which is what a test that delivers to a local server needs -- unless
+// guard is true, which puts the dialer below in front of a copy of its transport
+// as well, with no proxy: behind a proxy the name is resolved by the proxy and
+// the guard would see only the proxy, so a delivery goes to the address it names.
+// Without a client, the transport is a copy of the guarded one, with no proxy --
+// a delivery goes to the address it names -- and a dialer in front of the
+// guard's that resolves the host itself, refuses the whole answer when any
+// address is refused, and hands the guard's dialer the address it checked, which
+// checks it again as it connects. Nothing is resolved twice, so a name that
+// answers differently the second time reaches nothing it was not checked for.
+func newDeliveryClient(custom *http.Client, guard bool) (*http.Client, error) {
+	if custom != nil && !guard {
 		return httpclient.NewFactory(custom).CreatePendingRequest().CreateClient(nil), nil
 	}
-	base, ok := httpclient.NewFactory(nil).CreatePendingRequest().BuildClient().Transport.(*http.Transport)
-	if !ok {
-		return nil, errors.New("webhook: the http client has no transport to guard")
+	var base *http.Transport
+	if custom == nil {
+		var ok bool
+		base, ok = httpclient.NewFactory(nil).CreatePendingRequest().BuildClient().Transport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("webhook: the http client has no transport to guard")
+		}
+	} else {
+		switch rt := custom.Transport.(type) {
+		case nil:
+			base = http.DefaultTransport.(*http.Transport)
+		case *http.Transport:
+			base = rt
+		default:
+			return nil, fmt.Errorf("webhook: GuardHTTPClient needs the client's transport to be an *http.Transport, which it can put the dialer in front of, and it is %T", rt)
+		}
+		if base.DialTLSContext != nil || base.DialTLS != nil {
+			return nil, errors.New("webhook: GuardHTTPClient needs a transport that dials through DialContext, and this one dials TLS itself")
+		}
 	}
 	transport := base.Clone()
 	transport.Proxy = nil
-	transport.DialContext = publicDialer(transport.DialContext, net.DefaultResolver)
-	return httpclient.NewFactory(nil).CreatePendingRequest().CreateClient(transport), nil
+	next := transport.DialContext
+	if next == nil {
+		next = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	}
+	transport.DialContext = publicDialer(next, net.DefaultResolver)
+	if custom == nil {
+		return httpclient.NewFactory(nil).CreatePendingRequest().CreateClient(transport), nil
+	}
+	client := *custom
+	client.Transport = transport
+	return httpclient.NewFactory(&client).CreatePendingRequest().CreateClient(nil), nil
 }
 
 // HostResolver is the one method of net.Resolver the dialer and CheckDestination

@@ -155,14 +155,28 @@ type Server struct {
 	// call reaches a loopback, private, link-local or shared address, on any
 	// hop. A client given here keeps its own transport and with it its own
 	// answer to where a call may connect, which is what a test that delivers
-	// to a local server needs.
+	// to a local server needs; set GuardHTTPClient to take that answer from it.
 	HTTPClient *http.Client
+
+	// GuardHTTPClient puts the guarded dialer in front of HTTPClient's
+	// transport too: the client keeps its timeouts, TLS settings and pool, and
+	// no call reaches a loopback, private, link-local, shared or other internal
+	// address on any hop, with Resolver checking the stored address as when
+	// HTTPClient is nil. It needs the client's transport to be an
+	// *http.Transport that dials through DialContext, which is wrapped on a
+	// copy; any other transport is refused when the module is built. The copy
+	// has no Proxy, because a proxy resolves the name itself and the guard
+	// would see only the proxy: a delivery goes to the address it names, as it
+	// does when HTTPClient is nil. False keeps the client's own answer to where
+	// a call may connect. It has no effect when HTTPClient is nil, which is
+	// always guarded.
+	GuardHTTPClient bool
 
 	// Resolver looks up the name of an endpoint's address when the endpoint is
 	// created or updated, to refuse a name that resolves to loopback, private,
 	// link-local, shared or other internal addresses (CheckDestination). Nil is
-	// net.DefaultResolver. The check runs only when HTTPClient is nil: a client
-	// given here owns where a call may connect, so it owns what may be stored.
+	// net.DefaultResolver. The check runs only when HTTPClient is nil or
+	// GuardHTTPClient is true: a client given here otherwise owns where a call may connect, so it owns what may be stored.
 	// Every attempt resolves the name again and refuses it again, whatever this
 	// check saw.
 	Resolver HostResolver

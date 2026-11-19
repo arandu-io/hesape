@@ -382,6 +382,110 @@ func TestResponseAndDownloadDifferByOneHeader(t *testing.T) {
 	}
 }
 
+// The private default is what a file a Policy decided about gets when the
+// caller says nothing, and what the caller's own words replace when it does.
+func TestResponseAndDownloadHonourACallerCacheControl(t *testing.T) {
+	d := namedLocalDisk(t, "local")
+	g := grant(tenant)
+	put(t, d, g, "photo.jpg", "jpeg-bytes")
+
+	const private = "private, max-age=0, must-revalidate"
+	cases := []struct {
+		name    string
+		headers http.Header
+		want    string
+	}{
+		{"none given", nil, private},
+		{"other headers only", http.Header{"X-Trace": {"abc"}}, private},
+		{"empty value", http.Header{"Cache-Control": {""}}, private},
+		{"public and immutable", http.Header{"Cache-Control": {"public, max-age=31536000, immutable"}}, "public, max-age=31536000, immutable"},
+		{"no-store", http.Header{"Cache-Control": {"no-store"}}, "no-store"},
+		{"key not canonical", http.Header{"cache-control": {"public, max-age=60"}}, "public, max-age=60"},
+		{"several values", http.Header{"Cache-Control": {"public", "max-age=60"}}, "public, max-age=60"},
+	}
+	calls := []struct {
+		name string
+		call func(w http.ResponseWriter, r *http.Request, h http.Header) error
+	}{
+		{"Response", func(w http.ResponseWriter, r *http.Request, h http.Header) error {
+			return d.Response(w, r, g, "photo.jpg", "", h)
+		}},
+		{"Download", func(w http.ResponseWriter, r *http.Request, h http.Header) error {
+			return d.Download(w, r, g, "photo.jpg", "", h)
+		}},
+	}
+	for _, c := range calls {
+		for _, tc := range cases {
+			t.Run(c.name+"/"+tc.name, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodGet, "/photo", nil)
+				if err := c.call(w, r, tc.headers); err != nil {
+					t.Fatalf("%s: %v", c.name, err)
+				}
+				if got := w.Header().Values("Cache-Control"); len(got) != 1 || got[0] != tc.want {
+					t.Fatalf("Cache-Control = %q, want exactly %q", got, tc.want)
+				}
+				if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+					t.Fatal("nosniff went missing")
+				}
+			})
+		}
+	}
+}
+
+// A caller cannot turn a safety header off through the map, and passing
+// Cache-Control beside them does not open that door.
+func TestResponseKeepsTheSafetyHeadersWhenCacheControlIsPassed(t *testing.T) {
+	d := namedLocalDisk(t, "local")
+	g := grant(tenant)
+	put(t, d, g, "report.pdf", "%PDF-1.4")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/report", nil)
+	headers := http.Header{
+		"Cache-Control":           {"public, max-age=60"},
+		"Content-Security-Policy": {"default-src *"},
+		"X-Content-Type-Options":  {"sniff"},
+	}
+	if err := d.Response(w, r, g, "report.pdf", "", headers); err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "public, max-age=60" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; sandbox" {
+		t.Fatalf("Content-Security-Policy = %q", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+}
+
+// An installed callback receives the value as ServeOptions.CacheControl, the
+// way Serve does, and never sees it as a header already written.
+func TestServeUsingReceivesTheCallerCacheControl(t *testing.T) {
+	d := namedLocalDisk(t, "local")
+	g := grant(tenant)
+	put(t, d, g, "photo.jpg", "jpeg-bytes")
+
+	var got filesystem.ServeOptions
+	var written string
+	d.ServeUsing(func(w http.ResponseWriter, _ *http.Request, _ auth.Grant, _ string, opt filesystem.ServeOptions) error {
+		got = opt
+		written = w.Header().Get("Cache-Control")
+		return nil
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/photo", nil)
+	if err := d.Response(w, r, g, "photo.jpg", "", http.Header{"Cache-Control": {"no-store"}}); err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	if got.CacheControl != "no-store" || written != "" {
+		t.Fatalf("callback got CacheControl %q with header %q, want the option and no header", got.CacheControl, written)
+	}
+}
+
 func TestServeUsingTakesOverTheResponse(t *testing.T) {
 	d := namedLocalDisk(t, "local")
 	g := grant(tenant)

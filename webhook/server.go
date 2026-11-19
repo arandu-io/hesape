@@ -110,7 +110,7 @@ func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*send
 		named: map[string]string{}, custom: cfg.Server.HeaderPrefix,
 		policy: cfg.Server.Policy.clone(), now: cfg.Server.Now, retention: cfg.Server.Retention,
 		allowEmpty: cfg.Server.AllowEmptySubscription,
-		guarded:    cfg.Server.HTTPClient == nil, names: cfg.Server.Resolver,
+		guarded:    cfg.Server.HTTPClient == nil || cfg.Server.GuardHTTPClient, names: cfg.Server.Resolver,
 		bodies: cfg.Server.Bodies, inline: cfg.Server.RelayInlineBytes, forwarded: map[string]bool{},
 	}
 	for _, name := range cfg.Server.RelayHeaders {
@@ -120,7 +120,7 @@ func newSender(db *database.DB, cfg Config, seal *sealer, audit *auditor) (*send
 	if s.custom != "" {
 		prefix = s.custom
 	}
-	engine, err := newEngine(cfg.Server.HTTPClient, prefix, s.clock)
+	engine, err := newEngine(cfg.Server.HTTPClient, cfg.Server.GuardHTTPClient, prefix, s.clock)
 	if err != nil {
 		return nil, err
 	}

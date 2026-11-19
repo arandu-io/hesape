@@ -89,6 +89,12 @@ func TestARedirectDoesNotEscapeTheCheck(t *testing.T) {
 		{"the machine itself", "http://127.0.0.2:9/", "127.0.0.2"},
 		{"the metadata service", "http://169.254.169.254/latest/meta-data/", "169.254.169.254"},
 		{"a unique-local address", "http://[fd00::1]:9/", "fd00::1"},
+		// The ranges the standard library calls global unicast and a cluster or
+		// a translator answers on.
+		{"the shared address space", "http://100.64.0.1:9/", "100.64.0.1"},
+		{"the benchmarking range", "http://198.18.0.1:9/", "198.18.0.1"},
+		{"a NAT64 address of an internal host", "http://[64:ff9b::a00:1]:9/", "64:ff9b::a00:1"},
+		{"a 6to4 address of an internal host", "http://[2002:0a00:0001::1]:9/", "2002:a00:1::1"},
 	} {
 		t.Run(target.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -242,6 +248,10 @@ func TestTheDialRefusesEveryInternalLiteral(t *testing.T) {
 		{"0.0.0.0", true},
 		{"::", true},
 		{"224.0.0.1", true},
+		{"100.64.0.1", true},
+		{"198.18.0.1", true},
+		{"64:ff9b::a00:1", true},
+		{"2002:0a00:0001::1", true},
 		{"93.184.216.34", false},
 		{"8.8.8.8", false},
 		{"2606:2800:220:1:248:1893:25c8:1946", false},

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"syscall"
 	"time"
 
@@ -164,8 +165,14 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if !dest.allowInternal {
 		// Behind a proxy the address dialed is the proxy's, and where the
 		// request goes after that is the proxy's to decide. Refusing the proxy
-		// for sitting inside the network would leave the request nowhere to go.
+		// for sitting inside the network would leave the request nowhere to go,
+		// so the dialer is let through. The destination is still the caller's
+		// to answer for, and what can be told without resolving it is checked
+		// here: an address written in the URL, and localhost.
 		if proxy, err := proxyFromEnvironment(req); err == nil && proxy != nil {
+			if err := refuseNamedInternalDestination(dest.host); err != nil {
+				return nil, err
+			}
 			dest.allowInternal = true
 		}
 	}
@@ -181,6 +188,24 @@ func (t *guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	resp.Body = &limitedBody{next: resp.Body, limit: t.guard.maxResponseBytes, host: req.URL.Host}
 	return resp, nil
+}
+
+// refuseNamedInternalDestination is the part of the destination check that
+// needs no resolver: a host written as an address inside the network, or the
+// name localhost, which no resolver answers with anything else. It is what is
+// left of the guard when a proxy dials on the request's behalf, because then
+// the name is resolved by the proxy and never seen here.
+func refuseNamedInternalDestination(host string) error {
+	name := strings.TrimSuffix(strings.ToLower(host), ".")
+	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
+		return fmt.Errorf("%w: %s; name it to Factory.AllowInternalHosts to allow it",
+			ErrInternalAddress, host)
+	}
+	if addr, err := netip.ParseAddr(name); err == nil && IsInternalAddress(addr) {
+		return fmt.Errorf("%w: %s; name it to Factory.AllowInternalHosts to allow it",
+			ErrInternalAddress, addr)
+	}
+	return nil
 }
 
 // refuseInternalAddress runs on the dialer, between resolving a name and
@@ -207,7 +232,7 @@ func refuseInternalAddress(ctx context.Context, _, address string, _ syscall.Raw
 		// arrived here unresolved is not one to connect to on a guess.
 		return fmt.Errorf("%w: %s is not an address", ErrInternalAddress, host)
 	}
-	if !isInternalAddress(addr) {
+	if !IsInternalAddress(addr) {
 		return nil
 	}
 
@@ -217,18 +242,6 @@ func refuseInternalAddress(ctx context.Context, _, address string, _ syscall.Raw
 	}
 	return fmt.Errorf("%w: %s resolves to %s; name it to Factory.AllowInternalHosts to allow it",
 		ErrInternalAddress, dest.host, addr)
-}
-
-// isInternalAddress reports whether an address belongs to this machine or to
-// the network around it rather than to the internet: loopback, the private
-// ranges of RFC 1918 and RFC 4193, link-local, multicast, and the unspecified
-// address.
-//
-// The mapped form of an IPv4 address answers the same as the address it wraps,
-// because the methods asked here read ::ffff:127.0.0.1 as 127.0.0.1. Unmapping
-// it first would be a line that looks like the defence and is not.
-func isInternalAddress(addr netip.Addr) bool {
-	return !addr.IsGlobalUnicast() || addr.IsPrivate()
 }
 
 // limitedBody is a response body with a ceiling. Past it the read fails rather

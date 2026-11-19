@@ -146,9 +146,9 @@ type engine struct {
 }
 
 // newEngine builds the engine over the client the application gave, or the
-// guarded one when custom is nil.
-func newEngine(custom *http.Client, prefix string, now func() time.Time) (*engine, error) {
-	client, err := newDeliveryClient(custom)
+// guarded one when custom is nil, or guard is true.
+func newEngine(custom *http.Client, guard bool, prefix string, now func() time.Time) (*engine, error) {
+	client, err := newDeliveryClient(custom, guard)
 	if err != nil {
 		return nil, err
 	}

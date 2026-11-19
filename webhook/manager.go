@@ -61,9 +61,18 @@ type ManagerOptions struct {
 	// HTTPClient supplies an application transport. The webhook client still
 	// guards schemes, response size and every redirect hop, but a custom
 	// transport owns DNS and dialing; nil uses the guarded transport, which
-	// refuses loopback, private, link-local and shared (100.64.0.0/10)
-	// addresses on every hop.
+	// refuses loopback, private, link-local, shared (100.64.0.0/10) and the
+	// other internal addresses of http/client.IsInternalAddress on every hop.
 	HTTPClient *http.Client
+	// GuardHTTPClient puts the guarded dialer in front of HTTPClient's
+	// transport too, so the client keeps its timeouts, TLS settings and pool
+	// and still cannot connect to an internal address on any hop. It needs the
+	// client's transport to be an *http.Transport that dials through
+	// DialContext, which is wrapped on a copy with its Proxy removed; any other
+	// is refused when the Manager is built. False leaves where HTTPClient may
+	// connect to the client, as it always was. It has no effect when HTTPClient
+	// is nil.
+	GuardHTTPClient bool
 }
 
 // Manager owns durable dispatch and delivery execution.
@@ -139,6 +148,8 @@ type managerOptions struct {
 	jobName   string
 	userAgent string
 	client    *http.Client
+	// guardClient is ManagerOptions.GuardHTTPClient.
+	guardClient bool
 }
 
 func resolveManagerOptions(options ManagerOptions) (managerOptions, error) {
@@ -148,7 +159,7 @@ func resolveManagerOptions(options ManagerOptions) (managerOptions, error) {
 	resolved := managerOptions{
 		timeout: options.Timeout, retention: options.Retention, action: options.Action,
 		queueName: options.QueueName, jobName: options.DeliveryJobName,
-		userAgent: options.UserAgent, client: options.HTTPClient,
+		userAgent: options.UserAgent, client: options.HTTPClient, guardClient: options.GuardHTTPClient,
 	}
 	if resolved.timeout == 0 {
 		resolved.timeout = managerTimeout
@@ -238,7 +249,7 @@ func newManagerResolved(store Store, target deliveryQueue, secrets SecretProvide
 		MaxRequestBytes: MaxPayloadBytes, MaxResponseBytes: MaxResponseBytes, Timeout: options.timeout,
 		UserAgent: options.userAgent,
 	}
-	engine, err := newEngine(options.client, aranduPrefix, func() time.Time { return m.now() })
+	engine, err := newEngine(options.client, options.guardClient, aranduPrefix, func() time.Time { return m.now() })
 	if err != nil {
 		return nil, err
 	}
