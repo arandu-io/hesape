@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.109.2](https://github.com/arandu-io/hesape/compare/v0.109.0...v0.109.2) - 2026-11-19
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.109.0...v0.109.2
+
 ## v0.109.2
 
 - **filesystem: `Disk.Response` and `Disk.Download` honour a Cache-Control passed in `headers`.** They added the map to the response and then Serve set `Cache-Control` over it with its own `private, max-age=0, must-revalidate`, so the caller's value never reached the browser: a public, immutable photo could not be cached by a CDN, and a document asked to be `no-store` was sent as revalidate-only instead. The value now becomes `ServeOptions.CacheControl`, the same field `filesystem.Serve` takes, and an installed `ServeUsing` callback receives it there. A key written in any case (`cache-control`) is recognised, several values are joined with a comma, and an empty value counts as none. When the map carries no Cache-Control the private default stays, so a file a Policy decided about is still never offered to a shared cache by omission.
