@@ -27,28 +27,49 @@ func (d *Disk) ServeUsing(callback ServeCallback) {
 
 // Response writes a stored file into the response for the browser to render.
 //
-// name is what to call the file, and empty means the last segment of the key;
-// headers are added to the
-// response before the file's own are set, so the four headers [Serve] insists
-// on -- the stored content type, nosniff, the escaped disposition and the
-// sandboxing Content-Security-Policy -- cannot be overridden by a caller
-// passing them in. That is deliberate: they are what
+// name is what to call the file, and empty means the last segment of the key.
+//
+// headers are added to the response before the file's own are set, so the four
+// headers [Serve] insists on -- the stored content type, nosniff, the escaped
+// disposition and the sandboxing Content-Security-Policy -- cannot be
+// overridden by a caller passing them in. That is deliberate: they are what
 // stops an upload becoming stored XSS, and a header map is exactly where
 // somebody would turn them off by accident.
+//
+// Cache-Control is the one header in the map that is honoured. It is policy
+// and not safety: whether a file may sit in a shared cache is the caller's
+// decision, as it is through [ServeOptions.CacheControl], and a public,
+// immutable photo or a document that must be "no-store" has no other way to say
+// so through this method. When the map carries none, the private default of
+// [Serve] stays.
 func (d *Disk) Response(w http.ResponseWriter, r *http.Request, g auth.Grant, key, name string, headers http.Header) error {
 	return d.respond(w, r, g, key, ServeOptions{Filename: name}, headers)
 }
 
 // Download writes a stored file into the response as an attachment, so the
 // browser saves it instead of rendering it.
+//
+// headers are treated as [Disk.Response] treats them, including the one
+// Cache-Control it honours.
 func (d *Disk) Download(w http.ResponseWriter, r *http.Request, g auth.Grant, key, name string, headers http.Header) error {
 	return d.respond(w, r, g, key, ServeOptions{Download: true, Filename: name}, headers)
 }
 
 // respond is the one path both take, so the callback and the extra headers
 // cannot apply to one of them and not the other.
+//
+// A Cache-Control in headers is not written here: it becomes
+// [ServeOptions.CacheControl], which is how [Serve] and an installed
+// [ServeCallback] both receive it. Written as a header it would be replaced by
+// the default [Serve] sets, and the caller's value would never reach the wire.
 func (d *Disk) respond(w http.ResponseWriter, r *http.Request, g auth.Grant, key string, opt ServeOptions, headers http.Header) error {
 	for name, values := range headers {
+		if http.CanonicalHeaderKey(name) == "Cache-Control" {
+			if value := strings.Join(nonEmpty(values), ", "); value != "" {
+				opt.CacheControl = value
+			}
+			continue
+		}
 		for _, value := range values {
 			w.Header().Add(name, value)
 		}
@@ -60,6 +81,17 @@ func (d *Disk) respond(w http.ResponseWriter, r *http.Request, g auth.Grant, key
 		return callback(w, r, g, key, opt)
 	}
 	return Serve(w, r, g, d, key, opt)
+}
+
+// nonEmpty returns the values that say something, trimmed.
+func nonEmpty(values []string) []string {
+	kept := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			kept = append(kept, value)
+		}
+	}
+	return kept
 }
 
 // DiskName records the name this adapter's disk is registered under.
