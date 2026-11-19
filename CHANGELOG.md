@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.110.0
+
+- **view: the `file-upload` behaviour lists what was chosen.** The component drew an empty list under its drop area and nothing filled it, so a person who picked or dropped photos saw the screen not change. After a pick, a drop or a restore from history, the behaviour now fills the list from `input.files`, one row per file: a thumbnail for an image, the name and a size written in the page's own language (`1.5 MB`, `1,5 MB` under `lang="pt-BR"`), and a count above the list in a `role="status"` line that is announced politely. The files stay in the input and nothing is kept apart from it; a second pick replaces the list, and a form reset empties it.
+- **view: limits, said before the submit.** The component's props may carry `maxFiles` (how many files one submit takes) and `maxBytes` (how large one of them may be). A pick over either is not refused: the status line says what is wrong, each row over the size is marked `data-over="true"`, and the input is given a validity message and `aria-invalid`, so the browser holds the submit and says it in its own bubble. A pick that fixes it clears all three. The server's own checks are unchanged and still decide.
+- **view: nothing the content-security policy objects to.** The thumbnail is drawn on a canvas (96 px, a square cut of the photo) and handed to the `img` as a `data:` URL, because a `blob:` address is refused under `img-src 'self' data:`. Thumbnails are made one after another, so twenty large photos do not decode at once, and a file the browser cannot decode (an SVG, a format it lacks) keeps its name and size with no picture. The rows are cloned from a `<template data-file-template>` the component writes, so no class, style or sentence lives in the script; the sentences arrive in the behaviour's props (`chosenOne`, `chosenMany`, `tooMany`, `tooBigOne`, `tooBigMany`) with English fallbacks. A field that posts each file as it is chosen (`ypy-post`) is left to the server's answer, and markup without the template and the status line is left as it was.
+- **What an application changes.** Nothing, to keep today's behaviour. To get the list it takes kyse v0.54.0 with this release, which writes the template, the status line and the props. An application that listed the files with a script of its own can remove it.
+
 ## [v0.109.2](https://github.com/arandu-io/hesape/compare/v0.109.0...v0.109.2) - 2026-11-19
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.109.0...v0.109.2

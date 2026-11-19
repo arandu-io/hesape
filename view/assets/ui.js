@@ -2444,15 +2444,43 @@
 
 	/* ---- file-upload ---------------------------------------------------------
 	 *
-	 * Dropping files into the real file input.
+	 * Dropping files into the real file input, and showing what was chosen.
 	 *
-	 * The input is what holds them, always: a drop writes into input.files
+	 * The input is what holds the files, always: a drop writes into input.files
 	 * through a DataTransfer, so the form submits exactly as if the files had
 	 * been picked. Nothing here keeps a list of its own, which is what would
-	 * otherwise disagree with the field the moment somebody picks again.
+	 * otherwise disagree with the field the moment somebody picks again. The
+	 * list under the box is drawn from input.files every time it changes and
+	 * is never read back.
 	 *
 	 * dragover has to be cancelled or the browser opens the file instead, and
 	 * that is the one line without which nothing works.
+	 *
+	 * What is drawn comes from the markup, not from here. The component writes
+	 * a <template data-file-template> holding one row, and a
+	 * [data-part="summary"] status line; this clones the row once per file and
+	 * fills in its name, its size and its thumbnail. That keeps every class on
+	 * the server, where the stylesheet is built from the component sources, and
+	 * every sentence on the server too, where it is translated: the sentences
+	 * arrive in ctx.props (chosenOne, chosenMany, tooMany, tooBigOne,
+	 * tooBigMany, with {n}, {max} and {size} where the number goes).
+	 *
+	 * Limits come the same way: props.maxFiles is how many files one submit
+	 * takes and props.maxBytes how large one of them may be. Passing a limit
+	 * does not stop anyone choosing: the files stay in the input, the summary
+	 * says what is wrong, the rows over the size are marked data-over, and the
+	 * input is given a validity message so the browser holds the submit and
+	 * says it in its own bubble. The server checks the same limits whatever
+	 * the page did.
+	 *
+	 * A thumbnail is drawn on a canvas and handed to the img as a data: URL.
+	 * A blob: URL would be simpler and the policy refuses it: pages are served
+	 * with img-src 'self' data:, and no inline style or script is needed for
+	 * any of this. Thumbnails are made one after another, so twenty large
+	 * photos do not decode at once.
+	 *
+	 * A field that posts each file as it is chosen (ypy-post) is left alone:
+	 * the server's answer fills its list.
 	 */
 	arandu.ui.define('file-upload', {
 		mounted: function (ctx) {
@@ -2496,14 +2524,157 @@
 			zone.addEventListener('dragover', ctx.over);
 			zone.addEventListener('dragleave', ctx.leave);
 			zone.addEventListener('drop', ctx.drop);
+
+			var list = root.querySelector('[data-part="list"]');
+			var summary = root.querySelector('[data-part="summary"]');
+			var template = root.querySelector('template[data-file-template]');
+			if (!list || !summary || !template || input.hasAttribute('ypy-post')) return;
+
+			var props = ctx.props || {};
+			var maxFiles = Number(props.maxFiles) > 0 ? Number(props.maxFiles) : 0;
+			var maxBytes = Number(props.maxBytes) > 0 ? Number(props.maxBytes) : 0;
+			var round = 0;
+			var flagged = false;
+
+			var say = function (sentence, fallback, vars) {
+				var text = typeof sentence === 'string' && sentence ? sentence : fallback;
+				Object.keys(vars || {}).forEach(function (key) {
+					text = text.split('{' + key + '}').join(String(vars[key]));
+				});
+				return text;
+			};
+
+			/* 1.5 MB or 1,5 MB: the page's own language writes the number. A
+			 * browser without unit formatting gets the plain form. */
+			var sizeText = function (bytes) {
+				var mega = bytes >= 1048576;
+				var value = mega ? bytes / 1048576 : Math.max(1, Math.round(bytes / 1024));
+				try {
+					return new Intl.NumberFormat(document.documentElement.lang || undefined, {
+						style: 'unit',
+						unit: mega ? 'megabyte' : 'kilobyte',
+						unitDisplay: 'short',
+						maximumFractionDigits: mega ? 1 : 0,
+					}).format(value);
+				} catch (e) {
+					return (mega ? value.toFixed(1) : String(value)) + (mega ? ' MB' : ' KB');
+				}
+			};
+
+			var isImage = function (file) { return /^image\//.test(file.type); };
+
+			/* A square cut of the photo, small enough to carry as text. A file
+			 * the browser cannot decode (an SVG, a format it lacks) keeps its
+			 * name and its size and no picture. */
+			var thumbnail = function (file) {
+				if (!window.createImageBitmap) return Promise.resolve('');
+				return window.createImageBitmap(file).then(function (bitmap) {
+					var side = 96;
+					var canvas = document.createElement('canvas');
+					canvas.width = side;
+					canvas.height = side;
+					var paint = canvas.getContext('2d');
+					var crop = Math.min(bitmap.width, bitmap.height);
+					paint.fillStyle = '#fff';
+					paint.fillRect(0, 0, side, side);
+					paint.drawImage(bitmap, (bitmap.width - crop) / 2, (bitmap.height - crop) / 2, crop, crop, 0, 0, side, side);
+					if (bitmap.close) bitmap.close();
+					return canvas.toDataURL('image/jpeg', 0.7);
+				}).catch(function () { return ''; });
+			};
+
+			var verdict = function (message) {
+				input.setCustomValidity(message);
+				if (message) {
+					input.setAttribute('aria-invalid', 'true');
+					flagged = true;
+				} else if (flagged) {
+					input.removeAttribute('aria-invalid');
+					flagged = false;
+				}
+			};
+
+			ctx.render = function () {
+				var mine = ++round;
+				var files = input.files ? Array.prototype.slice.call(input.files) : [];
+				list.textContent = '';
+				summary.textContent = '';
+				summary.removeAttribute('data-over');
+				verdict('');
+				if (!files.length) return;
+
+				var tooMany = maxFiles > 0 && files.length > maxFiles;
+				var heavy = maxBytes > 0 ? files.filter(function (file) { return file.size > maxBytes; }) : [];
+
+				var sentence = files.length === 1
+					? say(props.chosenOne, '1 file chosen', {})
+					: say(props.chosenMany, '{n} files chosen', { n: files.length });
+				var warnings = [];
+				if (tooMany) warnings.push(say(props.tooMany, 'Send up to {max} files at a time: choose again.', { max: maxFiles }));
+				if (heavy.length === 1) {
+					warnings.push(say(props.tooBigOne, 'One file is over {size}: replace it before sending.', { size: sizeText(maxBytes) }));
+				} else if (heavy.length > 1) {
+					warnings.push(say(props.tooBigMany, '{n} files are over {size}: replace them before sending.', { n: heavy.length, size: sizeText(maxBytes) }));
+				}
+				if (warnings.length) {
+					summary.setAttribute('data-over', 'true');
+					verdict(warnings.join(' '));
+				}
+				/* One sentence for the screen reader: the count, then what is wrong,
+				 * each without the full stop a translation may or may not carry. */
+				summary.textContent = [sentence].concat(warnings).map(function (one) {
+					return one.replace(/[.\s]+$/, '');
+				}).join('. ') + (warnings.length ? '.' : '');
+
+				var queue = [];
+				files.forEach(function (file) {
+					var row = document.importNode(template.content, true);
+					var item = row.firstElementChild;
+					if (!item) return;
+					var name = item.querySelector('[data-part="file-name"]');
+					var size = item.querySelector('[data-part="file-size"]');
+					var picture = item.querySelector('[data-part="thumbnail"]');
+					if (name) name.textContent = file.name;
+					if (size) size.textContent = sizeText(file.size);
+					if (maxBytes > 0 && file.size > maxBytes) item.setAttribute('data-over', 'true');
+					if (picture && isImage(file)) queue.push({ file: file, picture: picture });
+					list.appendChild(row);
+				});
+
+				queue.reduce(function (before, one) {
+					return before.then(function () {
+						if (mine !== round) return null;
+						return thumbnail(one.file).then(function (url) {
+							if (mine !== round || !url) return;
+							one.picture.src = url;
+							one.picture.hidden = false;
+						});
+					});
+				}, Promise.resolve());
+			};
+
+			/* A reset empties the input after the event, so the list is
+			 * redrawn after it as well. */
+			ctx.reset = function () { window.setTimeout(ctx.render, 0); };
+
+			input.addEventListener('change', ctx.render);
+			if (input.form) input.form.addEventListener('reset', ctx.reset);
+			/* A page restored from history can bring its files back. */
+			if (input.files && input.files.length) ctx.render();
+			ctx.input = input;
 		},
 		destroyed: function (ctx) {
 			var zone = ctx.element.querySelector('[data-dropzone]');
-			if (!zone) return;
-			zone.removeEventListener('dragenter', ctx.over);
-			zone.removeEventListener('dragover', ctx.over);
-			zone.removeEventListener('dragleave', ctx.leave);
-			zone.removeEventListener('drop', ctx.drop);
+			if (zone) {
+				zone.removeEventListener('dragenter', ctx.over);
+				zone.removeEventListener('dragover', ctx.over);
+				zone.removeEventListener('dragleave', ctx.leave);
+				zone.removeEventListener('drop', ctx.drop);
+			}
+			if (ctx.input && ctx.render) {
+				ctx.input.removeEventListener('change', ctx.render);
+				if (ctx.input.form) ctx.input.form.removeEventListener('reset', ctx.reset);
+			}
 		},
 	});
 
