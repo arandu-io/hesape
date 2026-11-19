@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.110.0](https://github.com/arandu-io/hesape/compare/v0.109.2...v0.110.0) - 2026-11-19
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.109.2...v0.110.0
+
 ## v0.110.0
 
 - **view: the `file-upload` behaviour lists what was chosen.** The component drew an empty list under its drop area and nothing filled it, so a person who picked or dropped photos saw the screen not change. After a pick, a drop or a restore from history, the behaviour now fills the list from `input.files`, one row per file: a thumbnail for an image, the name and a size written in the page's own language (`1.5 MB`, `1,5 MB` under `lang="pt-BR"`), and a count above the list in a `role="status"` line that is announced politely. The files stay in the input and nothing is kept apart from it; a second pick replaces the list, and a form reset empties it.
