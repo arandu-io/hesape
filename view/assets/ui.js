@@ -3727,12 +3727,24 @@
 				var formatted = maskApply(pattern, before, reverse);
 
 				if (formatted !== before) {
+					/* Writing the value leaves the caret at its end, which is
+					 * where it belongs for nearly every keystroke: typing at the
+					 * end, and every keystroke of a field filled from the right,
+					 * where each one pushes what came before it left. So the
+					 * caret is placed only when it was somewhere else, and only
+					 * in the field being typed in.
+					 *
+					 * Placing it anyway is not harmless. Safari on the iPhone
+					 * reads the next tap against the selection it had, and a
+					 * setSelectionRange inside the input event of every
+					 * keystroke made it drop a digit at the separators of a CPF
+					 * typed at speed. A box that is not focused is not touched
+					 * either: Safari answers a selection set on one by focusing
+					 * it, which on a page that renders a stored value would open
+					 * the keyboard on arrival. */
+					var atEnd = caret === null || caret >= before.length;
 					input.value = formatted;
-					if (reverse) {
-						/* Filling from the right means the caret belongs at the
-						 * end: every keystroke pushes what came before it left. */
-						input.setSelectionRange(formatted.length, formatted.length);
-					} else {
+					if (!reverse && !atEnd && document.activeElement === input) {
 						/* The caret moves by however many characters the mask
 						 * inserted before it, so typing in the middle of a value
 						 * does not throw the cursor to the end. */
