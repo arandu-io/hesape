@@ -227,3 +227,24 @@ func TestAssetHashIsTheContractTheCLIReimplements(t *testing.T) {
 		t.Error("the hash is not twelve characters: the URL format changed")
 	}
 }
+
+// An image may be opened from any origin (a letter's logo in a mail client, in a
+// sandboxed preview, a link card); a script or a stylesheet may not.
+func TestAnImageIsServedToAnyOriginAndAScriptIsNot(t *testing.T) {
+	view.RegisterAsset("cors-probe.png", "image/png", []byte("\x89PNG probe"))
+	r := routing.NewRouter()
+	view.NewModule().Routes(r)
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	for name, want := range map[string]string{"cors-probe.png": "cross-origin", "ui.js": ""} {
+		resp, err := http.Get(server.URL + view.Asset(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Cross-Origin-Resource-Policy"); got != want {
+			t.Errorf("%s answered Cross-Origin-Resource-Policy %q, want %q", name, got, want)
+		}
+	}
+}

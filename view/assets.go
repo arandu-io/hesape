@@ -404,6 +404,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", a.contentType)
+	if strings.HasPrefix(a.contentType, "image/") {
+		// An image is a file anybody may open from anywhere: another site's link
+		// card, a mail client, a sandboxed preview of a letter (an origin of
+		// its own). The application's default policy, same-origin, refuses all
+		// of them, and the CDN that serves the same file sends no such header.
+		// Scripts, stylesheets and fonts keep the default.
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(a.body)
