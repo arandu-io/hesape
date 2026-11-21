@@ -13,7 +13,7 @@ import (
 // It exists because constructing these types inside mail would be a cycle:
 // mail/transport imports mail, so mail cannot import mail/transport.
 // Registering inverts it, and has a second effect worth having -- a transport
-// somebody else writes arrives through exactly the same door as the seven here,
+// somebody else writes arrives through exactly the same door as the eight here,
 // so there is one way to add one.
 //
 //	manager := mail.NewMailManager(config, views, events)
@@ -63,6 +63,10 @@ func Register(m *mail.MailManager) *mail.MailManager {
 
 	m.Extend("postmark", func(cfg mail.MailerConfig) (mail.Transport, error) {
 		return Postmark{Token: cfg.Key, Endpoint: cfg.Endpoint, Timeout: cfg.Timeout}, nil
+	})
+
+	m.Extend("meeng", func(cfg mail.MailerConfig) (mail.Transport, error) {
+		return Meeng{Key: cfg.Key, Endpoint: cfg.Endpoint, Timeout: cfg.Timeout}, nil
 	})
 
 	m.Extend("failover", func(cfg mail.MailerConfig) (mail.Transport, error) {

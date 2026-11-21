@@ -95,7 +95,7 @@ type TransportCreator func(cfg MailerConfig) (Transport, error)
 // Constructing the transports by name here would need this package to import
 // github.com/arandu-io/hesape/mail/transport, which imports this one -- a cycle
 // the compiler refuses. So the drivers register themselves:
-// transport.Register(manager) adds the seven that package carries, and
+// transport.Register(manager) adds the eight that package carries, and
 // [MailManager.Extend] adds anybody else's under exactly the same mechanism.
 // There is one way to add a transport, and the built-in ones do not get a
 // private door.

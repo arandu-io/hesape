@@ -326,3 +326,201 @@ func (fixedView) RenderToString(name string, _ any) (string, error) {
 	}
 	return name, nil
 }
+
+// TestMeengSendsWhatTheEnvelopeSaid.
+//
+// The API's field names are its own -- replyTo in camel case, a list for every
+// recipient -- and a field it does not know is a 400 for the whole message, so
+// the body is the whole transport.
+func TestMeengSendsWhatTheEnvelopeSaid(t *testing.T) {
+	p := &provider{answer: `{"emailId":"em_123"}`}
+	server := p.serve(t)
+
+	sent, err := testMailer(transport.Meeng{Key: "mg_test", Endpoint: server.URL}, fixedView{}, "blog@example.com").
+		To("reader@example.com").CC("c@example.com").BCC("b@example.com").
+		ReplyTo("help@example.com").Send(context.Background(), withHeaders{})
+	if err != nil {
+		t.Fatalf("the message was not accepted: %v", err)
+	}
+
+	if p.auth() != "Bearer mg_test" {
+		t.Errorf("the key did not reach the provider: %q", p.auth())
+	}
+	if got := p.body["from"]; got != `"The Blog" <blog@example.com>` {
+		t.Errorf("from is %v", got)
+	}
+	if got := p.body["subject"]; got != "Headers" {
+		t.Errorf("subject is %v", got)
+	}
+	for field, want := range map[string]string{
+		"to": "reader@example.com", "cc": "c@example.com",
+		"bcc": "b@example.com", "replyTo": "help@example.com",
+	} {
+		list, _ := p.body[field].([]any)
+		if len(list) != 1 || list[0] != want {
+			t.Errorf("%s is %v, want [%s]", field, p.body[field], want)
+		}
+	}
+	if got := p.body["html"]; got != "<p>the html part</p>" {
+		t.Errorf("html is %v", got)
+	}
+	if got := p.body["text"]; got != "the text part" {
+		t.Errorf("text is %v", got)
+	}
+	headers, _ := p.body["headers"].(map[string]any)
+	if headers["X-Campaign"] != "welcome" || headers["References"] != "<one@example.com> <two@example.com>" {
+		t.Errorf("headers is %v", p.body["headers"])
+	}
+	if sent.ID != "em_123" {
+		t.Errorf("ID is %q: emailId is the only way back to the platform's record of the message", sent.ID)
+	}
+	if sent.Transport != "meeng" {
+		t.Errorf("Transport is %q", sent.Transport)
+	}
+}
+
+// TestMeengLeavesOutWhatTheAPIDoesNotName.
+//
+// The contract refuses any field it does not list, so a tag sent as a label
+// would turn into a rejected message. Tags, metadata and an empty part stay out
+// of the body.
+func TestMeengLeavesOutWhatTheAPIDoesNotName(t *testing.T) {
+	p := &provider{answer: `{"emailId":"em_1"}`}
+	server := p.serve(t)
+
+	if _, err := send(t, transport.Meeng{Key: "k", Endpoint: server.URL}, "reader@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"tags", "metadata", "html", "headers", "cc", "bcc", "replyTo"} {
+		if _, ok := p.body[field]; ok {
+			t.Errorf("%s was sent: %v", field, p.body[field])
+		}
+	}
+}
+
+// TestMeengRefusesAnAttachmentBeforeSending.
+//
+// The platform keeps no files and answers 400 to a list with items. The refusal
+// is made here, with a sentence that says what to do, and nothing is posted.
+func TestMeengRefusesAnAttachmentBeforeSending(t *testing.T) {
+	p := &provider{answer: `{"emailId":"em_1"}`}
+	server := p.serve(t)
+
+	_, err := testMailer(transport.Meeng{Key: "k", Endpoint: server.URL}, fixedView{}, "blog@example.com").
+		To("reader@example.com").Send(context.Background(), withAttachment{})
+	if err == nil {
+		t.Fatal("a message with an attachment was sent")
+	}
+	if !strings.Contains(err.Error(), "attachments") || !strings.Contains(err.Error(), "link") {
+		t.Errorf("the refusal does not say what to do: %v", err)
+	}
+	if p.headers != nil {
+		t.Error("the request was made although the message was refused")
+	}
+	var retryable mail.ErrRetryable
+	if errors.As(err, &retryable) {
+		t.Error("a refused attachment was marked retryable: the job will try it forever")
+	}
+}
+
+// TestMeengReadsTheThreeShapesOfAnError.
+//
+// The API answers {"error":{"code","message"}}, {"error":"text"} and, for a
+// body that does not validate, {"success":false,"error":{"name","issues"}}. The
+// reason reaches the caller in each, and only a 429 or a 5xx is retryable.
+func TestMeengReadsTheThreeShapesOfAnError(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		status  int
+		answer  string
+		want    []string
+		retries bool
+	}{
+		{"coded", 403, `{"error":{"code":"FORBIDDEN","message":"API key is not allowed to use this domain"}}`,
+			[]string{"FORBIDDEN", "not allowed to use this domain"}, false},
+		{"text", 400, `{"error":"The sender domain is not verified"}`,
+			[]string{"domain is not verified"}, false},
+		{"validation", 400, `{"success":false,"error":{"name":"ZodError","issues":[{"path":["to"],"message":"Required"}]}}`,
+			[]string{"ZodError", "to: Required"}, false},
+		{"rate limited", 429, `{"error":{"code":"RATE_LIMITED","message":"Too many requests"}}`,
+			[]string{"RATE_LIMITED"}, true},
+		{"provider down", 502, `bad gateway`, []string{"bad gateway"}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := &provider{status: c.status, answer: c.answer}
+			server := p.serve(t)
+
+			_, err := send(t, transport.Meeng{Key: "k", Endpoint: server.URL}, "reader@example.com")
+			if err == nil {
+				t.Fatal("a failure was reported as a send")
+			}
+			for _, want := range c.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%q is missing from %v", want, err)
+				}
+			}
+			var retryable mail.ErrRetryable
+			if got := errors.As(err, &retryable); got != c.retries {
+				t.Errorf("retryable is %v, want %v: %v", got, c.retries, err)
+			}
+		})
+	}
+}
+
+// TestMeengIsRegisteredUnderItsName: a configuration that says meeng reaches
+// the transport through the same door as the others.
+func TestMeengIsRegisteredUnderItsName(t *testing.T) {
+	p := &provider{answer: `{"emailId":"em_9"}`}
+	server := p.serve(t)
+
+	manager := transport.Register(mail.NewMailManager(mail.ManagerConfig{
+		Default: "meeng",
+		Mailers: map[string]mail.MailerConfig{
+			"meeng": {Transport: "meeng", Key: "mg_reg", Endpoint: server.URL},
+		},
+	}, fixedView{}, nil))
+
+	mailer, err := manager.Mailer("meeng")
+	if err != nil {
+		t.Fatalf("the meeng transport is not registered: %v", err)
+	}
+	sent, err := mailer.To("reader@example.com").Send(context.Background(), bothParts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent.ID != "em_9" || p.auth() != "Bearer mg_reg" {
+		t.Errorf("the registered transport did not carry the config: id %q, auth %q", sent.ID, p.auth())
+	}
+}
+
+// withHeaders is a mailable that sets a custom header and the References that
+// thread a reply.
+type withHeaders struct{}
+
+func (withHeaders) Envelope() mail.Envelope {
+	return mail.Envelope{
+		From:    mail.Address{Address: "blog@example.com", Name: "The Blog"},
+		Subject: "Headers",
+		Tags:    []string{"welcome"},
+	}
+}
+func (withHeaders) Content() mail.Content {
+	return mail.Content{View: "mail.note", Text: "the text part"}
+}
+func (withHeaders) Headers() mail.Headers {
+	return mail.Headers{
+		References: []string{"one@example.com", "two@example.com"},
+		Text:       map[string]string{"X-Campaign": "welcome"},
+	}
+}
+
+// withAttachment is a mailable that carries a file.
+type withAttachment struct{}
+
+func (withAttachment) Envelope() mail.Envelope {
+	return mail.Envelope{From: mail.Address{Address: "blog@example.com"}, Subject: "File"}
+}
+func (withAttachment) Content() mail.Content { return mail.Content{Text: "see the file"} }
+func (withAttachment) Attachments() []*mail.Attachment {
+	return []*mail.Attachment{mail.FromData(func() ([]byte, error) { return []byte("x"), nil }, "a.txt")}
+}

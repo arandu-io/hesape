@@ -240,6 +240,105 @@ func (t Postmark) Send(ctx context.Context, m mail.Message) (mail.SentMessage, e
 	return mail.SentMessage{ID: out.MessageID, Transport: t.Name()}, nil
 }
 
+// Meeng sends through meeng.dev, over its public API.
+//
+// It is the transport an application uses to send through the HYZIS mail
+// platform: one POST with a Bearer key, and no SMTP session to keep open. SMTP
+// stays available as the second way in, through [SMTP] pointed at the
+// platform's relay, and is the one to reach for only when an API call cannot be
+// made.
+//
+// The platform keeps no files, so a message with an attachment is refused here,
+// before anything is sent, instead of being sent and refused there with a 400.
+type Meeng struct {
+	// Key is the API key, `mg_...`. Use a key restricted to sending and to the
+	// sender's domain: it is the only credential this transport holds, and the
+	// one that sends mail cannot be used to read it back or to change anything.
+	Key string
+
+	// Endpoint overrides the URL the message is posted to, whole: the scheme,
+	// the host and the path. Empty is https://meeng.dev/api/v1/emails. A test or
+	// a development server sets it.
+	Endpoint string
+
+	// Timeout bounds the request.
+	Timeout time.Duration
+
+	// Client is the HTTP client. Empty builds one with Timeout.
+	Client *http.Client
+}
+
+// Name identifies the transport in a log line.
+func (Meeng) Name() string { return "meeng" }
+
+// Send posts the message.
+//
+// Tags and metadata are not sent: the API names neither field and refuses a
+// body that carries one it does not know, so sending them would turn a label
+// into a rejected message.
+func (t Meeng) Send(ctx context.Context, m mail.Message) (mail.SentMessage, error) {
+	if n := len(m.Attachments) + len(m.RawAttachments) + len(m.DiskAttachments); n > 0 {
+		return mail.SentMessage{}, fmt.Errorf("mail: the meeng transport does not carry attachments (%d on this message); "+
+			"the platform keeps no files, so put a link to the file in the body", n)
+	}
+
+	body := map[string]any{
+		"from":    m.From.String(),
+		"to":      addressList(m.To),
+		"subject": m.Subject,
+	}
+	if m.HTML != "" {
+		body["html"] = m.HTML
+	}
+	if m.Text != "" {
+		body["text"] = m.Text
+	}
+	if len(m.CC) > 0 {
+		body["cc"] = addressList(m.CC)
+	}
+	if len(m.BCC) > 0 {
+		body["bcc"] = addressList(m.BCC)
+	}
+	if len(m.ReplyTo) > 0 {
+		body["replyTo"] = addressList(m.ReplyTo)
+	}
+	if headers := meengHeaders(m.Headers); len(headers) > 0 {
+		body["headers"] = headers
+	}
+
+	answer, err := post(ctx, t.Client, t.Timeout,
+		endpointOr(t.Endpoint, "https://meeng.dev/api/v1/emails"),
+		map[string]string{"Authorization": "Bearer " + t.Key},
+		body, meengError)
+	if err != nil {
+		return mail.SentMessage{}, err
+	}
+
+	var out struct {
+		EmailID string `json:"emailId"`
+	}
+	_ = json.Unmarshal(answer.body, &out)
+	return mail.SentMessage{ID: out.EmailID, Transport: t.Name()}, nil
+}
+
+// meengHeaders is the custom headers of a message as the API's one map, name to
+// value. The three the Headers type names are written into it under their
+// header names, so a reply stays threaded; the platform drops the ones it
+// reserves for itself.
+func meengHeaders(h mail.Headers) map[string]string {
+	out := make(map[string]string, len(h.Text)+2)
+	for name, value := range h.Text {
+		out[name] = value
+	}
+	if h.MessageID != "" {
+		out["Message-Id"] = h.MessageID
+	}
+	if len(h.References) > 0 {
+		out["References"] = h.ReferencesString()
+	}
+	return out
+}
+
 // answer is what came back from a provider that accepted the message, in the
 // two pieces a transport reads afterwards: the header SendGrid keeps its
 // identifier in, and the body the other two keep theirs in.
@@ -316,6 +415,73 @@ func resendError(_ int, body []byte) string {
 		return out.Name + ": " + out.Message
 	}
 	return out.Message
+}
+
+// meengError reads the three shapes the API answers a failure in:
+// {"error":{"code":..,"message":..}}, {"error":"text"} and the validation
+// answer {"success":false,"error":{"name":..,"issues":[{"message":..,"path":..}]}}.
+// The code is carried into the message because the API documents each one by
+// name, and the name is what somebody searches for.
+func meengError(_ int, body []byte) string {
+	var out struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || len(out.Error) == 0 {
+		return truncate(string(body))
+	}
+
+	var text string
+	if json.Unmarshal(out.Error, &text) == nil && text != "" {
+		return text
+	}
+
+	var detail struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Name    string `json:"name"`
+		Issues  []struct {
+			Message string `json:"message"`
+			Path    []any  `json:"path"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(out.Error, &detail); err != nil {
+		return truncate(string(body))
+	}
+
+	if len(detail.Issues) > 0 {
+		parts := make([]string, 0, len(detail.Issues))
+		for _, issue := range detail.Issues {
+			if issue.Message == "" {
+				continue
+			}
+			if len(issue.Path) > 0 {
+				names := make([]string, 0, len(issue.Path))
+				for _, p := range issue.Path {
+					names = append(names, fmt.Sprint(p))
+				}
+				parts = append(parts, strings.Join(names, ".")+": "+issue.Message)
+				continue
+			}
+			parts = append(parts, issue.Message)
+		}
+		if len(parts) > 0 {
+			name := detail.Name
+			if name == "" {
+				name = "validation"
+			}
+			return name + ": " + strings.Join(parts, "; ")
+		}
+	}
+
+	switch {
+	case detail.Code != "" && detail.Message != "":
+		return detail.Code + ": " + detail.Message
+	case detail.Message != "":
+		return detail.Message
+	case detail.Name != "":
+		return detail.Name
+	}
+	return truncate(string(body))
 }
 
 // sendgridError reads {"errors":[{"message":..,"field":..}]}.
@@ -424,4 +590,5 @@ var (
 	_ mail.Transport = Resend{}
 	_ mail.Transport = SendGrid{}
 	_ mail.Transport = Postmark{}
+	_ mail.Transport = Meeng{}
 )
