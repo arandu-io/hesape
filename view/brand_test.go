@@ -60,13 +60,18 @@ func TestUseBrandServesTheAssetsUnderTheApplicationsOwnName(t *testing.T) {
 		t.Error("ui.js still names the collection in a key or an address")
 	}
 
-	// The address a page cached before the change points at still answers.
-	code, body, header := served(t, legacy)
-	if code != http.StatusOK || body == "" {
-		t.Fatalf("the old address answered %d", code)
+	// The address a page cached before the change points at still reaches the
+	// file: the old hash is not the new body's, so it is sent on to the current
+	// address, and nothing stores the answer.
+	code, _, header = served(t, legacy)
+	if code != http.StatusTemporaryRedirect {
+		t.Fatalf("the old address answered %d, want a redirect to the current one", code)
 	}
-	if strings.Contains(header.Get("Cache-Control"), "immutable") {
-		t.Errorf("the old hash is a different body, but was marked immutable: %q", header.Get("Cache-Control"))
+	if got := header.Get("Location"); got != view.Asset("theme.js") {
+		t.Errorf("the old address redirects to %q, want %q", got, view.Asset("theme.js"))
+	}
+	if got := header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store on the redirect", got)
 	}
 }
 
