@@ -339,8 +339,24 @@ func (q *RedisQueue) recoverLease(ctx context.Context, name, id string, now time
 	return err
 }
 
-// DeleteJob removes a finished job.
+// DeleteJob removes a job: a finished one, which a worker holds on a lease, or
+// one that gave up, which nobody holds and which an operator forgets.
+//
+// The second is the one that used to fail. A parked job is in the parked set and
+// in no lease, and settleLeased answers "the job is not leased for this
+// delivery" for it, so a console that listed the failed jobs with Failed and
+// asked to forget one got an error and the job stayed. DatabaseQueue deletes by
+// id and does not care which state the row is in; this does the same for the two
+// states a job can be deleted from, and still refuses a stale delivery: a job
+// that is neither parked nor leased for this attempt is left alone.
 func (q *RedisQueue) DeleteJob(ctx context.Context, j *jobs.Job) error {
+	forgotten, err := q.forgetParked(ctx, j.UUID)
+	if err != nil {
+		return fmt.Errorf("queue/redis: deleting %s: %w", j.UUID, err)
+	}
+	if forgotten {
+		return nil
+	}
 	if err := q.settleLeased(ctx, j, func(tx *redis.Tx) error {
 		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.ZRem(ctx, q.key(j.Queue, "leased"), j.UUID)
@@ -352,6 +368,31 @@ func (q *RedisQueue) DeleteJob(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("queue/redis: deleting %s: %w", j.UUID, err)
 	}
 	return nil
+}
+
+// forgetParked deletes a job that gave up, and says whether it was parked. The
+// parked set is watched, so a Retry that moves the job out between the check and
+// the write makes this run again and find it no longer parked.
+func (q *RedisQueue) forgetParked(ctx context.Context, uuid string) (bool, error) {
+	parked := q.key("parked")
+	var forgotten bool
+	err := q.transaction(ctx, []string{parked}, func(tx *redis.Tx) error {
+		forgotten = false
+		if _, err := tx.ZScore(ctx, parked, uuid).Result(); err != nil {
+			if errors.Is(err, redis.Nil) {
+				return nil
+			}
+			return err
+		}
+		_, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.ZRem(ctx, parked, uuid)
+			pipe.HDel(ctx, q.key("jobs"), uuid)
+			return nil
+		})
+		forgotten = err == nil
+		return err
+	})
+	return forgotten, err
 }
 
 // ReleaseJob puts the job back on its queue, eligible again after delay.

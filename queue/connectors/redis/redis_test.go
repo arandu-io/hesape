@@ -150,6 +150,57 @@ func TestDeleteRemovesTheJob(t *testing.T) {
 	}
 }
 
+// TestDeleteForgetsAParkedJob is the console's "forget": the job gave up, no
+// worker holds it, and deleting it has to remove it from the parked list and
+// from the store. It used to fail because only a leased job could be deleted.
+func TestDeleteForgetsAParkedJob(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	push(t, q, "invoice.send")
+	other := push(t, q, "report.monthly")
+
+	popped, _ := q.Pop(ctx, "", 1, time.Minute)
+	if err := popped[0].Fail(ctx, errors.New("the consumer rejected it")); err != nil {
+		t.Fatalf("Fail: %v", err)
+	}
+	failed, err := q.Failed(ctx, 10)
+	if err != nil || len(failed) != 1 {
+		t.Fatalf("Failed: %v, %d", err, len(failed))
+	}
+
+	if err := q.DeleteJob(ctx, &failed[0]); err != nil {
+		t.Fatalf("DeleteJob of a parked job: %v", err)
+	}
+	if left, err := q.Failed(ctx, 10); err != nil || len(left) != 0 {
+		t.Fatalf("the forgotten job is still listed: %v, %d", err, len(left))
+	}
+	// It is gone for good: it cannot be retried, and it does not come back.
+	if err := q.Retry(ctx, failed[0].UUID); !errors.Is(err, queuecore.ErrNotParked) {
+		t.Errorf("Retry of a forgotten job = %v, want ErrNotParked", err)
+	}
+	// And the job that was only waiting is untouched.
+	next, err := q.Pop(ctx, "", 10, time.Minute)
+	if err != nil || len(next) != 1 || next[0].UUID != other.UUID {
+		t.Fatalf("forgetting a parked job touched the waiting one: %+v (%v)", next, err)
+	}
+}
+
+// TestDeleteRefusesAJobThatIsNeitherParkedNorLeased protects a job that is only
+// waiting: a stale pointer to it deletes nothing.
+func TestDeleteRefusesAJobThatIsNeitherParkedNorLeased(t *testing.T) {
+	q := queue(t)
+	ctx := context.Background()
+	pushed := push(t, q, "invoice.send")
+
+	if err := q.DeleteJob(ctx, &pushed); err == nil {
+		t.Fatal("deleting a job that was never leased succeeded")
+	}
+	popped, err := q.Pop(ctx, "", 10, time.Minute)
+	if err != nil || len(popped) != 1 || popped[0].UUID != pushed.UUID {
+		t.Fatalf("the refused delete removed the waiting job: %+v (%v)", popped, err)
+	}
+}
+
 func TestReleaseSchedulesTheRetry(t *testing.T) {
 	q := queue(t)
 	ctx := context.Background()
