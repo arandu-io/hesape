@@ -180,7 +180,7 @@ What changes without a compiler error:
 - **An application that passes a brand changes every name once.** Sessions end
   and visitors sign in again, and the saved theme and sidebar are forgotten,
   because the cookies, the `localStorage` keys and the asset prefix change.
-  `/_arandu/assets/` keeps answering, uncached, so a page or an e-mail written
+  `/_arandu/assets/` keeps answering (a hash that is no longer current is redirected to the current one), so a page or an e-mail written
   before the change still gets its file.
 
 ## v0.104.0 — a webhook relays a request as it arrived

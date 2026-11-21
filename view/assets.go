@@ -181,10 +181,10 @@ func newAsset(name, contentType string, body []byte) *asset {
 // It is exported because one thing outside this repository has to produce the
 // same string. The font-registration step of the CLI writes an absolute src:
 // into the stylesheet it generates, and it has to name the font's own hash --
-// a URL carrying any other hash is served without caching, by design, so a
+// a URL carrying any other hash is redirected to the right one, by design, so a
 // relative url() inheriting the STYLESHEET's hash means the font is
-// re-downloaded on every page view. Eighteen kilobytes, every request,
-// silently.
+// redirected and fetched again on every page view, never cached. Eighteen
+// kilobytes, every request, silently.
 //
 // The CLI is a separate module and cannot import this one, so it computes the
 // same three lines. That is a contract across a repository boundary, which is
@@ -253,9 +253,9 @@ func RegisterStylesheet(css []byte) {
 //
 // The name is what a generated stylesheet references. It is referenced by the
 // ABSOLUTE path AssetPath+AssetHash(body)+"/"+name, and not relatively: Handler
-// compares the hash in the path against the hash of the bytes and serves a
-// mismatch uncached, so a relative url() inheriting the stylesheet's hash is a
-// file re-downloaded on every page view.
+// compares the hash in the path against the hash of the bytes and redirects a
+// mismatch, so a relative url() inheriting the stylesheet's hash is a file
+// asked for twice on every page view.
 func RegisterAsset(name, contentType string, body []byte) {
 	if name == "" || contentType == "" {
 		panic("view: RegisterAsset needs a name and a content type")
@@ -351,11 +351,25 @@ func registeredNames() []string {
 
 // Handler serves the embedded assets.
 //
-// Anything whose path carries the right hash is immutable and cached for a year;
-// a wrong hash is served without caching, so a stale reference degrades into a
-// slow page rather than a broken one. It answers under [AssetPath] and under the
-// prefix [UseBrand] chose, so the address a page cached before the change points
-// at still returns the file, uncached, as a wrong hash does.
+// Anything whose path carries the right hash is immutable and cached for a year.
+// Everything else is answered with Cache-Control: no-store and never with a
+// stored body: a name nothing registered is a 404, and a hash that is not the
+// current one is a temporary redirect to the address that is. The redirect keeps
+// the promise a stale reference used to be served with -- a page cached before a
+// deploy, an e-mail already sent, the prefix an application had before
+// [UseBrand] -- and still reaches the file, without ever putting the bytes under
+// an address they do not belong to.
+//
+// It used to answer a wrong hash with 200, the current bytes and no-cache. That
+// is a lie a shared cache believes. During a deploy two builds are live at once;
+// the new page asks for the new hash, the old build answers it with its own
+// stylesheet, and a CDN that stores static files by their extension (Cloudflare
+// does, whatever the origin says, and rewrites the browser lifetime to its own
+// setting) keeps the old bytes under the new name for hours. And a 404 without
+// a Cache-Control is stored the same way and told to browsers as fresh for that
+// long, which is a page that reloads unstyled until the lifetime runs out,
+// because a reload revalidates the page and not what it links to. no-store on
+// every answer that is not the immutable one is what keeps both out of a cache.
 func Handler(w http.ResponseWriter, r *http.Request) {
 	assetsMu.RLock()
 	prefix := assetPrefix
@@ -367,7 +381,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, name, ok := strings.Cut(rest, "/")
 	if !ok {
-		http.NotFound(w, r)
+		assetNotFound(w, r)
 		return
 	}
 
@@ -375,18 +389,31 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	a, exists := assets[name]
 	assetsMu.RUnlock()
 	if !exists {
-		http.NotFound(w, r)
+		assetNotFound(w, r)
+		return
+	}
+
+	if hash != a.hash {
+		// The query is dropped on purpose: it is not part of the address of a
+		// content-addressed file, and a loop is impossible because the target
+		// carries the right hash.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.Redirect(w, r, prefix+a.hash+"/"+name, http.StatusTemporaryRedirect)
 		return
 	}
 
 	w.Header().Set("Content-Type", a.contentType)
-	if hash == a.hash {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	} else {
-		w.Header().Set("Cache-Control", "no-cache")
-	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(a.body)
+}
+
+// assetNotFound answers 404 for an asset that does not exist, and says no cache
+// may keep the answer: the next build may serve that very address.
+func assetNotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.NotFound(w, r)
 }
 
 // Version reports the served version of each asset, for diagnostic tooling
