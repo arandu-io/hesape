@@ -3053,6 +3053,94 @@
 		if (sidebarSwitches(sidebar)) stampSidebarToggles(sidebar);
 	}
 
+	/* ---- the drawer --------------------------------------------------------
+	 *
+	 * Below the breakpoint the sidebar is an overlay, and an overlay is a dialog in
+	 * all but name: while it is shown the page behind it is inert, the focus goes
+	 * into it, Escape closes it, and closing it puts the focus back on the button
+	 * that opened it. The vendored script opens and closes the overlay and says so
+	 * in aria-hidden; this watches that attribute, so every way of opening or
+	 * closing it (the button, a link inside it, a press on the shade, Escape, a
+	 * resize past the breakpoint) ends the same way. A wide screen has no overlay
+	 * and is left alone.
+	 */
+
+	var lastSidebarToggle = null;
+
+	/* The first thing in the overlay a person can act on. */
+	function firstInSidebar(sidebar) {
+		return sidebar.querySelector('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), [tabindex]:not([tabindex="-1"])');
+	}
+
+	/* Every sibling, at every level, of the chain from the sidebar up to the
+	 * body: the page the overlay covers. */
+	function pageBehind(sidebar) {
+		var behind = [];
+		for (var node = sidebar; node && node !== document.body && node.parentElement; node = node.parentElement) {
+			var siblings = node.parentElement.children;
+			for (var i = 0; i < siblings.length; i++) {
+				var sibling = siblings[i];
+				if (sibling !== node && sibling.tagName !== 'SCRIPT' && sibling.tagName !== 'STYLE' && !sibling.inert) behind.push(sibling);
+			}
+		}
+		return behind;
+	}
+
+	function drawerShown(sidebar) {
+		return !sidebarWide(sidebar) && sidebar.getAttribute('aria-hidden') === 'false';
+	}
+
+	function syncDrawer(sidebar) {
+		var state = sidebar.__araDrawer;
+		var shown = drawerShown(sidebar);
+		if (shown === state.shown) return;
+		state.shown = shown;
+		if (shown) {
+			state.opener = lastSidebarToggle && lastSidebarToggle.isConnected ? lastSidebarToggle : document.activeElement;
+			state.held = pageBehind(sidebar);
+			for (var i = 0; i < state.held.length; i++) state.held[i].inert = true;
+			var first = firstInSidebar(sidebar);
+			if (first) first.focus();
+			return;
+		}
+		for (var j = 0; j < state.held.length; j++) state.held[j].inert = false;
+		state.held = [];
+		var opener = state.opener;
+		state.opener = null;
+		if (opener && opener.isConnected && (document.activeElement === document.body || sidebar.contains(document.activeElement) || !document.activeElement)) opener.focus();
+	}
+
+	/* One watcher per sidebar, however many times a sweep passes it. */
+	function watchDrawer(sidebar) {
+		if (sidebar.__araDrawer || typeof MutationObserver !== 'function') return;
+		sidebar.__araDrawer = { shown: false, held: [], opener: null };
+		new MutationObserver(function () { syncDrawer(sidebar); }).observe(sidebar, { attributes: true, attributeFilter: ['aria-hidden'] });
+		syncDrawer(sidebar);
+	}
+
+	document.addEventListener('click', function (event) {
+		var button = event.target && event.target.closest ? event.target.closest('[data-sidebar-toggle]') : null;
+		if (button) lastSidebarToggle = button;
+	});
+
+	document.addEventListener('keydown', function (event) {
+		if (event.key !== 'Escape' || event.defaultPrevented) return;
+		var sidebars = document.querySelectorAll('aside.sidebar, [data-sidebar-mode]');
+		for (var i = 0; i < sidebars.length; i++) {
+			if (sidebars[i].__araDrawer && sidebars[i].__araDrawer.shown && typeof sidebars[i].close === 'function') {
+				sidebars[i].close();
+				stampSidebarToggles(sidebars[i]);
+				event.preventDefault();
+				return;
+			}
+		}
+	});
+
+	window.addEventListener('resize', function () {
+		var sidebars = document.querySelectorAll('aside.sidebar, [data-sidebar-mode]');
+		for (var i = 0; i < sidebars.length; i++) if (sidebars[i].__araDrawer) syncDrawer(sidebars[i]);
+	});
+
 	/* ---- the sweep ---------------------------------------------------------
 	 *
 	 * Three things a server cannot write and delegation cannot reach, because
@@ -3085,6 +3173,7 @@
 			palette.setAttribute('data-command-initialized', 'true');
 		});
 		each(node, '[data-sidebar-mode]', restoreSidebar);
+		each(node, 'aside.sidebar, [data-sidebar-mode]', watchDrawer);
 	}
 
 	/* ---- the registry ------------------------------------------------------
