@@ -1,5 +1,9 @@
 # Release Notes
 
+## [v0.111.1](https://github.com/arandu-io/hesape/compare/v0.111.0...v0.111.1) - 2026-11-23
+
+**Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.111.0...v0.111.1
+
 ## v0.111.1
 
 - **view: the narrow-screen sidebar is a dialog in all but name.** The overlay the vendored script opens below the breakpoint left the focus on the button, left the page behind it reachable by keyboard and screen reader, and ignored Escape. `ui.js` now watches the sidebar's `aria-hidden`: while the overlay is shown the page behind it is `inert`, the focus goes to its first link, Escape closes it (and updates `aria-expanded`), and closing it puts the focus back on the button that opened it. Every way of closing it (the button, a link inside, the shade, Escape, a resize past the breakpoint) ends the same way.
