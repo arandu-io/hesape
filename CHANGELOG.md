@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.111.1
+
+- **view: the narrow-screen sidebar is a dialog in all but name.** The overlay the vendored script opens below the breakpoint left the focus on the button, left the page behind it reachable by keyboard and screen reader, and ignored Escape. `ui.js` now watches the sidebar's `aria-hidden`: while the overlay is shown the page behind it is `inert`, the focus goes to its first link, Escape closes it (and updates `aria-expanded`), and closing it puts the focus back on the button that opened it. Every way of closing it (the button, a link inside, the shade, Escape, a resize past the breakpoint) ends the same way.
+- **What does not change.** A wide screen has no overlay and is left alone; the mode switching, the stored mode and the vendored script are as they were.
+- **What an application changes.** Nothing. A page that put a control outside the sidebar and the column that must stay live while the overlay is shown can mark it by living inside the sidebar; everything else outside is inert while the overlay is open.
+
 ## [v0.111.0](https://github.com/arandu-io/hesape/compare/v0.110.3...v0.111.0) - 2026-11-21
 
 **Full Changelog**: https://github.com/arandu-io/hesape/compare/v0.110.3...v0.111.0

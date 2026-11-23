@@ -160,3 +160,65 @@ func TestOnANarrowScreenTheButtonOpensTheOverlay(t *testing.T) {
 		t.Fatalf("the narrow press remembered %q", got)
 	}
 }
+
+const (
+	drawerHidden = `String(document.getElementById('nav').getAttribute('aria-hidden'))`
+	drawerFocus  = `(function(){var a=document.activeElement;return a?a.tagName+':'+(a.textContent||'').trim():'none'})()`
+	pageInert    = `String(document.querySelector('main').inert)`
+)
+
+// TestTheOverlayTakesTheFocusAndShutsThePageBehind: on a narrow screen the open
+// overlay is a dialog in all but name. The focus goes to its first link, the
+// page behind it is inert, Escape closes it, the page is live again and the
+// focus is back on the button that opened it.
+func TestTheOverlayTakesTheFocusAndShutsThePageBehind(t *testing.T) {
+	server := sidebarPage(t, "full")
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 480, Height: 800}))
+	page.Visit("/")
+	page.Evaluate(`localStorage.clear()`, nil)
+	page.Visit("/")
+
+	if got := evalString(t, page, pageInert); got != "false" {
+		t.Fatalf("the page is inert (%s) with the overlay closed", got)
+	}
+	page.ClickRole("button", "Menu")
+	if got := evalString(t, page, drawerHidden); got != "false" {
+		t.Fatalf("the press did not open the overlay: aria-hidden = %q", got)
+	}
+	if got := evalString(t, page, drawerFocus); got != "A:Home" {
+		t.Fatalf("the focus is on %q, want the first link of the overlay", got)
+	}
+	if got := evalString(t, page, pageInert); got != "true" {
+		t.Fatalf("the page behind the open overlay is not inert (%s)", got)
+	}
+
+	page.Press("Escape")
+	if got := evalString(t, page, drawerHidden); got != "true" {
+		t.Fatalf("Escape left the overlay open: aria-hidden = %q", got)
+	}
+	if got := evalString(t, page, navExpanded); got != "false" {
+		t.Fatalf("aria-expanded after Escape = %q, want false", got)
+	}
+	if got := evalString(t, page, pageInert); got != "false" {
+		t.Fatalf("the page is still inert (%s) after Escape", got)
+	}
+	if got := evalString(t, page, drawerFocus); got != "BUTTON:Menu" {
+		t.Fatalf("the focus is on %q after Escape, want the button that opened the overlay", got)
+	}
+}
+
+// TestAWideScreenHasNoOverlayToTrap: above the breakpoint the sidebar is a
+// column, the page is never inert and Escape does nothing to it.
+func TestAWideScreenHasNoOverlayToTrap(t *testing.T) {
+	server := sidebarPage(t, "full")
+	page := browser.Open(t, browser.BaseURL(server.URL), browser.WithViewport(browser.Viewport{Width: 1280, Height: 800}))
+	page.Visit("/")
+	page.ClickRole("button", "Menu")
+	page.Press("Escape")
+	if got := evalString(t, page, pageInert); got != "false" {
+		t.Fatalf("the page is inert (%s) beside a column", got)
+	}
+	if got := evalString(t, page, navMode); got != "slim" {
+		t.Fatalf("Escape changed the mode to %q", got)
+	}
+}
