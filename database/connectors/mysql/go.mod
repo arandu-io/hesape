@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/arandu-io/hesape v0.111.1
-	github.com/go-sql-driver/mysql v1.10.1
+	github.com/go-sql-driver/mysql v1.10.2
 )
 
 require (
